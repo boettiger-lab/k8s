@@ -218,3 +218,21 @@ helm upgrade nvdp nvdp/nvidia-device-plugin \
    --set-file config.map.config=timeslicing.yaml
 ```
 
+
+With this in place, we should see 8 GPUs insted of one (restarts of k8s may again be required) in `kubectrl describe nodes`:
+
+```
+Capacity:
+  cpu:                24
+  ephemeral-storage:  7741908380Ki
+  hugepages-1Gi:      0
+  hugepages-2Mi:      0
+  memory:             65771792Ki
+  nvidia.com/gpu:     8
+  pods:               110
+```
+
+
+That's it! we should now have a JupyterHub server with access to GPU and supporting multi-pod use of the GPU. There's obviously a lot more customization to be done, from running customized Docker images with desired software pre-installed, to perserving and sharing data volumes, enabling RStudio server instances from the hub, and much more.  There's already great resources covering these things, and very helpful folk on the Jupyter discuss forums as well.
+
+
