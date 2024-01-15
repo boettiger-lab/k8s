@@ -7,17 +7,14 @@
 # Chart config reference:   https://zero-to-jupyterhub.readthedocs.io/en/stable/resources/reference.html
 # Chart default values:     https://github.com/jupyterhub/zero-to-jupyterhub-k8s/blob/HEAD/jupyterhub/values.yaml
 # Available chart versions: https://hub.jupyter.org/helm-chart/
+
 ingress:
   enabled: true
+
 proxy:
   service:
     type: NodePort
-#  https:
-#    enabled: true
-#    hosts:
-#      - jupyterhub.thelio.carlboettiger.info
-#    letsencrypt:
-#      contactEmail: cboettig@gmail.com 
+
 singleuser:
   profileList:
     - display_name: "Default server"
