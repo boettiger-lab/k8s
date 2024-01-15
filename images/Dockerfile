@@ -1,5 +1,5 @@
 FROM rocker/geospatial 
-RUN /scripts/install_binder.sh
+RUN /rocker_scripts/install_jupyter.sh
 
 COPY requirements.txt requirements.txt
 RUN python -m pip install -r requirements.txt && rm requirements.txt
