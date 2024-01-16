@@ -15,7 +15,8 @@ COPY requirements.txt /tmp/requirements.txt
 EXPOSE 8888
 CMD ["/bin/sh", "-c", "jupyter lab --ip 0.0.0.0 --no-browser"]
 
-RUN chown -R root:staff ${VIRTUAL_ENV}
+RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R ug+rw ${VIRTUAL_ENV}
+
 USER ${NB_USER}
 RUN python3 -m pip install -r /tmp/requirements.txt
 RUN python3 -m ipykernel install --user --name=spatial
