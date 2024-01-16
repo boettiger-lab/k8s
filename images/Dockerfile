@@ -1,6 +1,7 @@
 FROM rocker/geospatial 
 ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
+ENV PATH $VIRTUAL_ENV/bin:$PATH
 
 RUN /rocker_scripts/install_jupyter.sh
 
@@ -21,7 +22,6 @@ RUN python3 -m pip install jupyter-tensorboard-proxy
 RUN python3 -m ipykernel install --user --name=spatial
 
 WORKDIR /home/${NB_USER}
-ENV PATH $VIRTUAL_ENV/bin:$PATH
 
 # some teaching preferences
 RUN git config --global pull.rebase false && \
