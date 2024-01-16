@@ -1,0 +1,25 @@
+FROM rocker/ml-verse
+ENV NB_USER rstudio
+ENV VIRTUAL_ENV /opt/venv
+
+RUN /rocker_scripts/install_jupyter.sh
+
+COPY install.R /tmp/install.R
+RUN Rscript /tmp/install.R && rm /tmp/install.R
+
+# some teaching preferences
+RUN git config --global pull.rebase false
+
+COPY requirements.txt /tmp/requirements.txt
+
+EXPOSE 8888
+CMD ["/bin/sh", "-c", "jupyter lab --ip 0.0.0.0 --no-browser"]
+
+RUN chown -R root:staff ${VIRTUAL_ENV}
+USER ${NB_USER}
+RUN python3 -m pip install -r /tmp/requirements.txt
+RUN python3 -m ipykernel install --user --name=spatial
+
+
+WORKDIR /home/${NB_USER}
+
