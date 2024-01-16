@@ -63,12 +63,12 @@ singleuser:
                 mem_guarantee: 31861460992
                 mem_limit: 31861460992
       kubespawner_override:
-        image: ghcr.io/boettiger-lab/k8s-gpu:latest
+        image: ghcr.io/boettiger-lab/k8s:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "GPU"
       slug: gpu 
-      description: Jupyter + R environment with many geospatial libraries pre-installed
+      description: Jupyter + R with GPU 
       profile_options:
         resource_allocation:
           display_name: Resource Allocation

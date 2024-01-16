@@ -17,8 +17,8 @@ RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R ug+rw ${VIRTUAL_ENV}
 USER ${NB_USER}
 RUN usermod -s /bin/bash ${NB_USER}
 RUN python3 -m pip install -r /tmp/requirements.txt
+RUN python3 -m pip install jupyter-tensorboard-proxy
 RUN python3 -m ipykernel install --user --name=spatial
-
 
 WORKDIR /home/${NB_USER}
 ENV PATH $VIRTUAL_ENV/bin:$PATH
