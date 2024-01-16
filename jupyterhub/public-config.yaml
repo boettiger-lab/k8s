@@ -20,8 +20,7 @@ singleuser:
     - display_name: "GPU Server"
       description: "Spawns a notebook server with access to a GPU"
       kubespawner_override:
-       image: ghcr.io/boettiger-lab/k8s:latest
-       extra_resource_limits:
+        extra_resource_limits:
           nvidia.com/gpu: "1"
     - display_name: "Rocker Geospatial with RStudio"
       slug: rocker
@@ -30,37 +29,37 @@ singleuser:
         resource_allocation: &profile_options_resource_allocation
           display_name: Resource Allocation
           choices:
-            mem_1_9:
+            small:
               display_name: CPU only + 2 GB RAM
               kubespawner_override:
                 mem_guarantee: 1991341312
                 mem_limit: 1991341312
               default: true
-              mem_14_8:
+              med:
               display_name: CPU only + 14.8 GB RAM
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
-            mem_29_7:
+            large:
               display_name: CPU only + 29.7 GB RAM
               kubespawner_override:
                 mem_guarantee: 31861460992
                 mem_limit: 31861460992
-            gpu_1_9:
+            gpu-small:
               display_name: GPU + 2 GB RAM
               kubespawner_override:
                 mem_guarantee: 1991341312
                 mem_limit: 1991341312
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
-            gpu_14_8:
+            gpu-med:
               display_name: GPU + 14.8 GB RAM
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
-            gpu_29_7:
+            gpu-large:
               display_name: GPU + 29.7 GB RAM
               kubespawner_override:
                 mem_guarantee: 31861460992
@@ -68,8 +67,7 @@ singleuser:
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
       kubespawner_override:
-        image: rocker/binder:4.3
-#       image: ghcr.io/boettiger-lab/k8s:latest
+        image: ghcr.io/boettiger-lab/k8s-gpu:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "Bring your own image"
