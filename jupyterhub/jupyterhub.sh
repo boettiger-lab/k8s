@@ -7,7 +7,7 @@ helm upgrade --cleanup-on-fail \
   --namespace testjupyter \
   --create-namespace \
   --version=3.2.1 \
-  --timeout 10m0s \
+  --timeout 90m0s \
   --values public-config.yaml \
   --values private-config.yaml
 
