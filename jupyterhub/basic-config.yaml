@@ -20,8 +20,14 @@ singleuser:
     - display_name: "GPU Server"
       description: "Spawns a notebook server with access to a GPU"
       kubespawner_override:
+        image: ghcr.io/boettiger-lab/k8s-gpu:latest
+        extra_pod_config:
+          runtimeClassName: "nvidia"
+        extra_pod_config:
+          runtimeClassName: "nvidia"
         extra_resource_limits:
           nvidia.com/gpu: "1"
+
 hub:
   config:
     Authenticator:
