@@ -20,8 +20,13 @@ singleuser:
     - display_name: "GPU Server"
       description: "Spawns a notebook server with access to a GPU"
       kubespawner_override:
+        image: ghcr.io/boettiger-lab/k8s-gpu:latest
+        environment:
+          NVIDIA_DRIVER_CAPABILITIES: compute,utility
         extra_resource_limits:
           nvidia.com/gpu: "1"
+        extra_pod_config:
+          runtimeClassName: "nvidia"
     - display_name: "Rocker Geospatial with RStudio"
       slug: rocker
       description: R environment with many geospatial libraries pre-installed
@@ -50,9 +55,13 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 1991341312
                 mem_limit: 1991341312
+                environment:
+                  NVIDIA_DRIVER_CAPABILITIES: compute,utility
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
-            gpu-med:
+                extra_pod_config:
+                  runtimeClassName: "nvidia"
+              gpu-med:
               display_name: GPU + 14.8 GB RAM
               kubespawner_override:
                 mem_guarantee: 15930730496

@@ -8,6 +8,6 @@ helm upgrade --cleanup-on-fail \
   --create-namespace \
   --version=3.2.1 \
   --timeout 10m0s \
-  --values basic-config.yaml \
+  --values public-config.yaml \
   --values private-config.yaml
 
