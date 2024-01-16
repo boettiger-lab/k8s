@@ -4,6 +4,7 @@ ENV VIRTUAL_ENV /opt/venv
 
 RUN /rocker_scripts/install_jupyter.sh
 
+
 COPY install.R /tmp/install.R
 RUN Rscript /tmp/install.R && rm /tmp/install.R
 
@@ -22,4 +23,5 @@ RUN python3 -m ipykernel install --user --name=spatial
 
 
 WORKDIR /home/${NB_USER}
+ENV PATH $VIRTUAL_ENV/bin:$PATH
 

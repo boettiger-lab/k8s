@@ -22,4 +22,5 @@ RUN python3 -m ipykernel install --user --name=spatial
 
 
 WORKDIR /home/${NB_USER}
+ENV PATH $VIRTUAL_ENV/bin:$PATH
 
