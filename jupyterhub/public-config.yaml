@@ -14,21 +14,12 @@ proxy:
     type: NodePort
 singleuser:
   storage:
-    type: static
     static:
       subPath: "{username}"
     extraVolumeMounts:
       - name: home
-        mountPath: /home/jovyan/shared
-        subPath: _shared
-        readOnly: true
-      - name: home
         mountPath: /home/rstudio
         subPath: "{username}"
-      - name: home
-        mountPath: /home/rstudio/shared
-        subPath: _shared
-        readOnly: true
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -43,7 +34,7 @@ singleuser:
                 mem_guarantee: 1991341312
                 mem_limit: 1991341312
               default: true
-              med:
+            med:
               display_name: Medium (14.8 GB RAM)
               kubespawner_override:
                 mem_guarantee: 15930730496
