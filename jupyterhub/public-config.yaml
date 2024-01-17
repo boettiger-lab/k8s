@@ -14,12 +14,9 @@ proxy:
     type: NodePort
 singleuser:
   storage:
-    static:
-      subPath: "{username}"
     extraVolumeMounts:
-      - name: home
+      - name: "volume-{username}{servername}"
         mountPath: /home/rstudio
-        subPath: "{username}"
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -47,7 +44,7 @@ singleuser:
       kubespawner_override:
         image: ghcr.io/boettiger-lab/k8s:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/jovyan
+        working_dir: /home/rstudio
     - display_name: "GPU"
       slug: gpu 
       description: Jupyter + R with GPU 
