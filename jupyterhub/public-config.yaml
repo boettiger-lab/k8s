@@ -14,36 +14,11 @@ proxy:
     type: NodePort
 singleuser:
   profileList:
-    - display_name: "Pangeo"
-      slug: pangeo
-      description: Pangeo 
-      profile_options: &profile_options
-        resource_allocation: &profile_options_resource_allocation
-          display_name: Resource Allocation
-          choices:
-            small:
-              display_name: Small (1.9 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 1991341312
-                mem_limit: 1991341312
-              default: true
-              med:
-              display_name: Medium (14.8 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 15930730496
-                mem_limit: 15930730496
-            large:
-              display_name: Large (29.7 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 31861460992
-                mem_limit: 31861460992
-      kubespawner_override:
-        image: pangeo/pytorch-notebook 
     - display_name: "CPU"
       slug: rocker
       description: R environment with many geospatial libraries pre-installed
-      profile_options: 
-        resource_allocation: 
+      profile_options: &profile_options 
+        resource_allocation: &profile_options_resource_allocation 
           display_name: Resource Allocation
           choices:
             small:
@@ -65,39 +40,23 @@ singleuser:
       kubespawner_override:
         image: ghcr.io/boettiger-lab/k8s:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/rstudio
+        working_dir: /home/jovyan
     - display_name: "GPU"
       slug: gpu 
       description: Jupyter + R with GPU 
       profile_options:
-        resource_allocation:
-          display_name: Resource Allocation
-          choices:
-            gpu-small:
-              display_name: Small (2 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 1991341312
-                mem_limit: 1991341312
-                extra_resource_limits:
-                  nvidia.com/gpu: "1"
-            gpu-med:
-              display_name: Medium (14.8 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 15930730496
-                mem_limit: 15930730496
-                extra_resource_limits:
-                  nvidia.com/gpu: "1"
-            gpu-large:
-              display_name: Large (29.7 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 31861460992
-                mem_limit: 31861460992
-                extra_resource_limits:
-                  nvidia.com/gpu: "1"
+        resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
         image: ghcr.io/boettiger-lab/k8s-gpu:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
+    - display_name: "Pangeo"
+      slug: pangeo
+      description: Pangeo 
+      profile_options:
+        resource_allocation: *profile_options_resource_allocation 
+      kubespawner_override:
+        image: pangeo/pytorch-notebook 
     - display_name: "Bring your own image"
       description: Specify your own docker image (must have python and jupyterhub installed in it)
       slug: custom
@@ -116,6 +75,22 @@ hub:
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
+      storage:
+        type: static
+        static:
+          subPath: "{username}"
+        extraVolumeMounts:
+          - name: home
+            mountPath: /home/jovyan/shared
+            subPath: _shared
+            readOnly: true
+          - name: home
+            mountPath: /home/rstudio
+            subPath: "{username}"
+          - name: home
+            mountPath: /home/rstudio/shared
+            subPath: _shared
+            readOnly: true
       environment:
         SHELL: /usr/bin/bash
       extra_pod_config:
