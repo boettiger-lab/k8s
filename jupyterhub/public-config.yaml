@@ -13,6 +13,22 @@ proxy:
   service:
     type: NodePort
 singleuser:
+  storage:
+    type: static
+    static:
+      subPath: "{username}"
+    extraVolumeMounts:
+      - name: home
+        mountPath: /home/jovyan/shared
+        subPath: _shared
+        readOnly: true
+      - name: home
+        mountPath: /home/rstudio
+        subPath: "{username}"
+      - name: home
+        mountPath: /home/rstudio/shared
+        subPath: _shared
+        readOnly: true
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -75,22 +91,6 @@ hub:
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
-      storage:
-        type: static
-        static:
-          subPath: "{username}"
-        extraVolumeMounts:
-          - name: home
-            mountPath: /home/jovyan/shared
-            subPath: _shared
-            readOnly: true
-          - name: home
-            mountPath: /home/rstudio
-            subPath: "{username}"
-          - name: home
-            mountPath: /home/rstudio/shared
-            subPath: _shared
-            readOnly: true
       environment:
         SHELL: /usr/bin/bash
       extra_pod_config:
