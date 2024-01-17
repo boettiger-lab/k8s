@@ -14,7 +14,7 @@ USER ${NB_USER}
 WORKDIR /home/${NB_USER}
 
 RUN usermod -s /bin/bash ${NB_USER}
-RUN Rscript /tmp/install.R && rm /tmp/install.R
+RUN Rscript /tmp/install.R
 RUN python3 -m pip install -r /tmp/requirements.txt
 RUN python3 -m pip install jupyter-tensorboard-proxy
 
