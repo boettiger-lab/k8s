@@ -1,29 +1,27 @@
 FROM rocker/geospatial 
+
 ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
 ENV PATH $VIRTUAL_ENV/bin:$PATH
 
 RUN /rocker_scripts/install_jupyter.sh
+RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 COPY install.R /tmp/install.R
-RUN Rscript /tmp/install.R && rm /tmp/install.R
-
 COPY requirements.txt /tmp/requirements.txt
 
-EXPOSE 8888
-CMD ["/bin/sh", "-c", "jupyter lab --ip 0.0.0.0 --no-browser"]
-
-RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R ug+rw ${VIRTUAL_ENV}
-
 USER ${NB_USER}
-RUN usermod -s /bin/bash ${NB_USER}
-RUN python3 -m pip install -r /tmp/requirements.txt
-RUN python3 -m pip install jupyter-tensorboard-proxy
-RUN python3 -m ipykernel install --user --name=spatial
-
 WORKDIR /home/${NB_USER}
 
-# some teaching preferences
+RUN usermod -s /bin/bash ${NB_USER}
+RUN Rscript /tmp/install.R && rm /tmp/install.R
+RUN python3 -m pip install -r /tmp/requirements.txt
+RUN python3 -m pip install jupyter-tensorboard-proxy
+
+## no need to register the environment
+#RUN python3 -m ipykernel install --user --name=spatial
+
+# some git preferences
 RUN git config --global pull.rebase false && \
     git config --global credential.helper 'cache --timeout=30000'
 

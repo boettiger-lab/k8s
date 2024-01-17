@@ -116,6 +116,8 @@ hub:
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
+      environment:
+        SHELL: /usr/bin/bash
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
