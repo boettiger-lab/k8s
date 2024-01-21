@@ -8,15 +8,18 @@ RUN /rocker_scripts/install_jupyter.sh
 RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 COPY install.R /tmp/install.R
-COPY requirements.txt /tmp/requirements.txt
+COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
+COPY spatial-requirements.txt /tmp/spatial-requirements.txt
+COPY rl-requirements.txt /tmp/rl-requirements.txt
 
 USER ${NB_USER}
 WORKDIR /home/${NB_USER}
 
 RUN usermod -s /bin/bash ${NB_USER}
 RUN Rscript /tmp/install.R 
-RUN python3 -m pip install -r /tmp/requirements.txt
-RUN python3 -m pip install jupyter-tensorboard-proxy
+RUN python3 -m pip install -r /tmp/jupyter-requirements.txt
+RUN python3 -m pip install -r /tmp/spatial-requirements.txt
+RUN python3 -m pip install -r /tmp/rl-requirements.txt
 
 ## no need to register the environment
 #RUN python3 -m ipykernel install --user --name=spatial
