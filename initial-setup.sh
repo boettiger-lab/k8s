@@ -11,6 +11,9 @@
 # Otherwise, to use jupyter's cert manager, or manual caddy, do:
 curl -sfL https://get.k3s.io | sh -s - --disable=traefik 
 
+echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> ~/.bashrc
+source ~/.bashrc
+sudo chown $(id -u) /etc/rancher/k3s/k3s.yaml
 
 # Install Helm
 # ============================
@@ -19,15 +22,7 @@ curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 # Enable GPU + timeslicing
 # ============================
 
-helm upgrade -i nvdp nvdp/nvidia-device-plugin \
-  --namespace nvidia-device-plugin \
-  --create-namespace \
-  --version 0.14.3 \
-  --wait \
-  --values nvidia/nvidia-device-plugin-config.yaml
-
-# identically:
-# bash nvidia/nvidia-device-plugin.sh
+bash nvidia/nvidia-device-plugin.sh
 
 
 

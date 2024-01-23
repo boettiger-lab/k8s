@@ -14,6 +14,7 @@ proxy:
     type: NodePort
 singleuser:
   storage:
+    capacity: 60Gi
     extraVolumeMounts:
       - name: "volume-{username}{servername}"
         mountPath: /home/rstudio
@@ -26,21 +27,21 @@ singleuser:
           display_name: Resource Allocation
           choices:
             small:
-              display_name: Small (1.9 GB RAM)
+              display_name: Small (8 GB RAM)
               kubespawner_override:
-                mem_guarantee: 1991341312
-                mem_limit: 1991341312
+                mem_guarantee: 7991341312
+                mem_limit: 7991341312
               default: true
             med:
-              display_name: Medium (14.8 GB RAM)
+              display_name: Medium (16 GB RAM)
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
             large:
-              display_name: Large (29.7 GB RAM)
+              display_name: Large (60 GB RAM)
               kubespawner_override:
-                mem_guarantee: 31861460992
-                mem_limit: 31861460992
+                mem_guarantee: 59861460992
+                mem_limit: 59861460992
       kubespawner_override:
         image: ghcr.io/boettiger-lab/k8s:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
@@ -86,10 +87,10 @@ hub:
         - cboettig 
     GitHubOAuthenticator:
       allowed_organizations:
-        - espm-288 
+        - boettiger-lab
       scope:
         - read:org
-      oauth_callback_url: https://jupyterhub.thelio.carlboettiger.info/hub/oauth_callback
+      oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
 
