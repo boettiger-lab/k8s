@@ -4,7 +4,6 @@ ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
 ENV PATH $VIRTUAL_ENV/bin:$PATH
 
-RUN apt-get update && apt-get -y install gnupg
 RUN /rocker_scripts/install_jupyter.sh
 RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
