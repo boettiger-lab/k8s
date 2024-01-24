@@ -1,4 +1,4 @@
-FROM rocker/geospatial 
+FROM rocker/tidyverse
 
 ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
@@ -6,6 +6,7 @@ ENV PATH $VIRTUAL_ENV/bin:$PATH
 
 RUN /rocker_scripts/install_texlive.sh
 RUN /rocker_scripts/install_jupyter.sh
+RUN /rocker_scripts/experimental/install_dev_osgeo.sh
 RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 COPY install.R /tmp/install.R
