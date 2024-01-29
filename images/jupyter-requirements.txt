@@ -27,4 +27,5 @@ jupyter-resource-usage
 jupyter-vscode-proxy
 jupyter-book
 jupyterlab_myst
+gh-scoped-creds
 
