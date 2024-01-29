@@ -10,6 +10,6 @@ helm upgrade --cleanup-on-fail \
   --create-namespace \
   --version=3.2.1 \
   --timeout 90m0s \
-  --values public-config.yaml \
+  --values thelio-config.yaml \
   --values private-config.yaml
 
