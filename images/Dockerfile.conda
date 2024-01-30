@@ -1,0 +1,18 @@
+FROM docker.io/rocker/binder 
+
+# Configurable persistent / shared location
+ENV CONDA_ENV=/opt/miniforge3
+ENV PATH=${PATH}:$CONDA_ENV/bin
+
+# need root if not installing in HOME
+USER root
+RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh" && \
+    bash Miniforge3-$(uname)-$(uname -m).sh -b -p ${CONDA_ENV} 
+
+RUN chown root:staff -R ${CONDA_ENV}
+
+# become user and initialize
+USER ${NB_USER} 
+RUN conda init
+
+

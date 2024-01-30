@@ -13,11 +13,19 @@ proxy:
   service:
     type: NodePort
 singleuser:
+  image:
+    pullPolicy: Always
   storage:
     capacity: 60Gi
     extraVolumeMounts:
       - name: "volume-{username}{servername}"
         mountPath: /home/rstudio
+      - name: shm-volume
+        mountPath: /dev/shm
+    extraVolumes:
+      - name: shm-volume
+        emptyDir:
+          medium: Memory
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -52,7 +60,7 @@ singleuser:
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: ghcr.io/boettiger-lab/k8s-gpu:latest
+        image: zcr.thelio.carlboettiger.info/boettiger-lab/k8s-gpu:latest 
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "Pangeo"
