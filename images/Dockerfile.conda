@@ -9,7 +9,7 @@ USER root
 RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh" && \
     bash Miniforge3-$(uname)-$(uname -m).sh -b -p ${CONDA_ENV} 
 
-RUN chown root:staff -R ${CONDA_ENV}
+RUN chown ${NB_USER}:staff -R ${CONDA_ENV}
 
 # become user and initialize
 USER ${NB_USER} 

@@ -1,4 +1,4 @@
-FROM rocker/tidyverse
+FROM docker.io/rocker/tidyverse
 
 ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
@@ -7,18 +7,19 @@ ENV PATH $VIRTUAL_ENV/bin:$PATH
 RUN /rocker_scripts/install_texlive.sh
 RUN /rocker_scripts/install_jupyter.sh
 RUN /rocker_scripts/experimental/install_dev_osgeo.sh
-RUN chown -R root:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
+RUN chown -R rstudio:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 COPY install.R /tmp/install.R
 COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
 COPY spatial-requirements.txt /tmp/spatial-requirements.txt
 COPY rl-requirements.txt /tmp/rl-requirements.txt
 
+RUN Rscript /tmp/install.R 
+
 USER ${NB_USER}
 WORKDIR /home/${NB_USER}
 
 RUN usermod -s /bin/bash ${NB_USER}
-RUN Rscript /tmp/install.R 
 RUN python3 -m pip install -r /tmp/jupyter-requirements.txt
 RUN python3 -m pip install -r /tmp/spatial-requirements.txt
 RUN python3 -m pip install -r /tmp/rl-requirements.txt
