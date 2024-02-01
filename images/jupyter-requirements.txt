@@ -28,4 +28,5 @@ jupyter-vscode-proxy
 jupyter-book
 jupyterlab_myst
 gh-scoped-creds
+jupyter-server-proxy
 
