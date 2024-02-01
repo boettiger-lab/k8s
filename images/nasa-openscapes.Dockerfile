@@ -35,8 +35,10 @@ RUN python -m pip install -r requirements.txt && rm requirements.txt
 COPY install.R install.R
 RUN Rscript install.R && rm install.R
 
+# equivalent path to -n openscapes
+ENV MY_ENV=${CONDA_ENV}/envs/openscapes
 RUN wget https://github.com/NASA-Openscapes/corn/raw/main/ci/environment.yml && \
-    conda env create -p openscapes -f environment.yml
+    conda env create -p ${MY_ENV} -f environment.yml
 
 # some teaching preferences
 RUN git config --global pull.rebase false
@@ -44,6 +46,12 @@ RUN git config --global pull.rebase false
 COPY conda_init.sh /etc/profile.d/conda_init.sh
 RUN bash -c conda_init.sh
 
-RUN $CONDA_ENV/envs/openscapes/bin/python -m pip install ipykernel&& \
-    $CONDA_ENV/envs/openscapes/bin/python -m ipykernel install --sys-prefix --name=openscapes
+# NOTES: 
+# conda (base) just means $CONDA_ENV/bin/
+# conda (openscapes) means $MY_ENV, identically, $CONDA_ENV/envs/openscapes/bin/
+# Rather than activate it or alter path, we just get it set up as an optional kernel
+# We could easily make either the default by putting either bin path at the start of PATH 
+
+RUN $MY_ENV/bin/python -m pip install ipykernel && \
+    $MY_ENV/bin/python -m ipykernel install --sys-prefix --name=openscapes
 
