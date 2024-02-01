@@ -51,7 +51,7 @@ singleuser:
                 mem_guarantee: 59861460992
                 mem_limit: 59861460992
       kubespawner_override:
-        image: ghcr.io/boettiger-lab/k8s:latest
+        image: zcr.thelio.carlboettiger.info/boettiger-lab/k8s:latest
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "GPU"
