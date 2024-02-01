@@ -36,13 +36,14 @@ COPY install.R install.R
 RUN Rscript install.R && rm install.R
 
 RUN wget https://github.com/NASA-Openscapes/corn/raw/main/ci/environment.yml && \
-    conda env create -f environment.yml
+    conda env create -p openscapes -f environment.yml
 
 # some teaching preferences
 RUN git config --global pull.rebase false
 
 COPY conda_init.sh /etc/profile.d/conda_init.sh
+RUN bash -c conda_init.sh
 
-
-RUN $CONDA_ENV/envs/openscapes/bin/python -m pip install ipykernel && $CONDA_ENV/envs/openscapes/bin/python -m ipykernel install --user --name=openscapes
+RUN $CONDA_ENV/envs/openscapes/bin/python -m pip install ipykernel&& \
+    $CONDA_ENV/envs/openscapes/bin/python -m ipykernel install --sys-prefix --name=openscapes
 
