@@ -1,3 +1,3 @@
-conda init
-conda activate openscapes
+#!/bin/bash
+conda init &> /dev/null
 
