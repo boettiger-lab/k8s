@@ -4,7 +4,7 @@ polars
 plotnine
 PyYaml
 huggingface_hub
-ibis-framework[duckdb]
+ibis-framework[all]
 ray[rllib,tune]
 stable-baselines3
 sb3-contrib

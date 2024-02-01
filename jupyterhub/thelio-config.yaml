@@ -13,6 +13,8 @@ proxy:
   service:
     type: NodePort
 singleuser:
+  image: 
+    pullPolicy: Always
   storage:
     capacity: 60Gi
     extraVolumeMounts:
@@ -43,7 +45,7 @@ singleuser:
                 mem_guarantee: 29861460992
                 mem_limit: 29861460992
       kubespawner_override:
-        image: ghcr.io/boettiger-lab/k8s:latest
+        image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "GPU"
@@ -52,16 +54,16 @@ singleuser:
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: ghcr.io/boettiger-lab/k8s-gpu:latest
+        image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s-gpu:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
-    - display_name: "ZCR Image"
+    - display_name: "NASA Image"
       slug: pangeo
       description: Pangeo 
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s-gpu:latest"
+        image: "zcr.thelio.carlboettiger.info/boettiger-lab/nasa-tops:latest"
     - display_name: "Bring your own image"
       description: Specify your own docker image (must have python and jupyterhub installed in it)
       slug: custom

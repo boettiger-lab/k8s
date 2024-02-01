@@ -1,4 +1,4 @@
-FROM rocker/tidyverse
+FROM docker.io/rocker/tidyverse
 
 ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
