@@ -1,11 +1,10 @@
 ## devcontainer-focused Rocker
-FROM docker.io/rocker/binder:4.3
-
-USER root
+FROM ghcr.io/rocker-org/devcontainer/tidyverse:4.3
 
 ## latest version of geospatial libs
 RUN /rocker_scripts/experimental/install_dev_osgeo.sh
 RUN apt-get update -qq && apt-get -y install vim
+RUN /rocker_scripts/install_jupyter.sh
 
 # conda
 ENV CONDA_ENV=/opt/miniforge3
@@ -40,9 +39,6 @@ ENV MY_ENV=${CONDA_ENV}/envs/openscapes
 RUN wget https://github.com/NASA-Openscapes/corn/raw/main/ci/environment.yml && \
     conda env create -p ${MY_ENV} -f environment.yml
 
-# some teaching preferences
-RUN git config --global pull.rebase false
-
 # NOTES: 
 # conda (base) just means $CONDA_ENV/bin/
 # conda (openscapes) means $MY_ENV, identically, $CONDA_ENV/envs/openscapes/bin/
@@ -50,12 +46,11 @@ RUN git config --global pull.rebase false
 # We could easily make either the default by putting either bin path at the start of PATH 
 
 RUN ${MY_ENV}/bin/python -m pip install ipykernel && \
-    ${MY_ENV}/bin/python -m ipykernel install --sys-prefix --name=openscapes
+    ${MY_ENV}/bin/python -m ipykernel install --prefix /opt/venv --name=openscapes
 
-ENV PATH=${MY_ENV}/bin:${PATH}
 
-COPY conda_init.sh /etc/profile.d/conda_init.sh
-RUN bash -c /etc/profile.d/conda_init.sh
-
+# some teaching preferences
+RUN git config --system pull.rebase false && \
+    git config --system credential.helper 'cache --timeout=36000'
 
 
