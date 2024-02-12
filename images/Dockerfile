@@ -9,25 +9,33 @@ RUN /rocker_scripts/install_jupyter.sh
 RUN /rocker_scripts/experimental/install_dev_osgeo.sh
 RUN chown -R rstudio:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
-COPY install.R /tmp/install.R
-COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
-COPY spatial-requirements.txt /tmp/spatial-requirements.txt
-COPY rl-requirements.txt /tmp/rl-requirements.txt
+# install codeserver
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 
+COPY apt.txt apt.txt
+RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
+
+COPY install.R /tmp/install.R
 RUN Rscript /tmp/install.R 
+
+
+# some git preferences
+RUN git config --system pull.rebase false && \
+    git config --system credential.helper 'cache --timeout=30000'
+
 
 USER ${NB_USER}
 WORKDIR /home/${NB_USER}
 
 RUN usermod -s /bin/bash ${NB_USER}
-RUN python3 -m pip install -r /tmp/jupyter-requirements.txt
-RUN python3 -m pip install -r /tmp/spatial-requirements.txt
-RUN python3 -m pip install -r /tmp/rl-requirements.txt
+COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/jupyter-requirements.txt
+COPY spatial-requirements.txt /tmp/spatial-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
+COPY rl-requirements.txt /tmp/rl-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
 
 ## no need to register the environment
 #RUN python3 -m ipykernel install --user --name=spatial
 
-# some git preferences
-RUN git config --global pull.rebase false && \
-    git config --global credential.helper 'cache --timeout=30000'
 

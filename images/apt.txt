@@ -1,0 +1,5 @@
+vim
+cmake
+nano
+exuberant-ctags
+
