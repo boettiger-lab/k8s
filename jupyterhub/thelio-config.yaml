@@ -20,6 +20,12 @@ singleuser:
     extraVolumeMounts:
       - name: "volume-{username}{servername}"
         mountPath: /home/rstudio
+      - name: shm-volume
+        mountPath: /dev/shm
+    extraVolumes:
+      - name: shm-volume
+        emptyDir:
+          medium: Memory
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -82,6 +88,7 @@ hub:
     KubeSpawner:
       environment:
         SHELL: /usr/bin/bash
+        GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
@@ -89,7 +96,7 @@ hub:
         - cboettig 
     GitHubOAuthenticator:
       allowed_organizations:
-        - boettiger-lab
+        - boettiger-lab:Owners
       scope:
         - read:org
       oauth_callback_url: https://jupyterhub.thelio.carlboettiger.info/hub/oauth_callback

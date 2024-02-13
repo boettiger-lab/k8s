@@ -88,6 +88,7 @@ hub:
     KubeSpawner:
       environment:
         SHELL: /usr/bin/bash
+        GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
