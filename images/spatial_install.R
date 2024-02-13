@@ -2,7 +2,6 @@
 # install R dependencies
 
 ## Ensure spatial packages are installed from source
-Sys.setenv(GITHUB_PAT="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")
 remotes::install_github('r-tmap/tmap', upgrade="never", repos="https://cloud.r-project.org", dep=TRUE)
 
 # We could use renv.lock approach here instead, but will force re-creation of environment from scratch
