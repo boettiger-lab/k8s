@@ -10,4 +10,5 @@ stable-baselines3
 sb3-contrib
 huggingface_sb3
 darts[all]
+scikit-optimize
 
