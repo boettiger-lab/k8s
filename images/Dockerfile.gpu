@@ -18,9 +18,11 @@ RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
 COPY install.R /tmp/install.R
 RUN Rscript /tmp/install.R && rm /tmp/install.R 
 
-# some git preferences
+# some preferences
 RUN git config --system pull.rebase false && \
-    git config --system credential.helper 'cache --timeout=30000'
+    git config --system credential.helper 'cache --timeout=30000' && \
+    echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
+    echo '"\e[6~": history-search-forward' >> /etc/inputrc
 
 USER ${NB_USER}
 WORKDIR /home/${NB_USER}

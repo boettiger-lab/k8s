@@ -12,4 +12,7 @@ huggingface_sb3
 darts[all]
 scikit-optimize
 gputil
+pytest
+nox
+ruff
 

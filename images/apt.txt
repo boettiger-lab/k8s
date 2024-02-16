@@ -3,4 +3,5 @@ cmake
 nano
 exuberant-ctags
 gh
+qpdf
 
