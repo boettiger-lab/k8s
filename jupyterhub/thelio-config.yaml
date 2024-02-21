@@ -20,12 +20,12 @@ singleuser:
     extraVolumeMounts:
       - name: "volume-{username}{servername}"
         mountPath: /home/rstudio
-      - name: shm-volume
-        mountPath: /dev/shm
-    extraVolumes:
-      - name: shm-volume
-        emptyDir:
-          medium: Memory
+#      - name: shm-volume
+#        mountPath: /dev/shm
+#    extraVolumes:
+#      - name: shm-volume
+#        emptyDir:
+#          medium: Memory
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -90,7 +90,7 @@ hub:
         SHELL: /usr/bin/bash
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
         GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
-    extra_pod_config:
+      extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
       admin_users:
