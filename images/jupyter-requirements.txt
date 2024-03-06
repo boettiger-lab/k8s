@@ -31,4 +31,5 @@ gh-scoped-creds
 jupyter-server-proxy
 jupyterlab-theme-solarized-dark
 jupyterlab-quarto
+jupytext
 

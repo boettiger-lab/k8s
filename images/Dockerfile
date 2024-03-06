@@ -4,25 +4,25 @@ ENV NB_USER rstudio
 ENV VIRTUAL_ENV /opt/venv
 ENV PATH $VIRTUAL_ENV/bin:$PATH
 
-RUN /rocker_scripts/install_texlive.sh
 RUN /rocker_scripts/install_jupyter.sh
-RUN /rocker_scripts/experimental/install_dev_osgeo.sh
-RUN chown -R rstudio:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
+RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 # install codeserver
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+
+RUN /rocker_scripts/install_geospatial.sh
 
 COPY apt.txt apt.txt
 RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
 
 COPY install.R /tmp/install.R
-RUN Rscript /tmp/install.R 
+RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
 
-
-# some git preferences
+# some preferences
 RUN git config --system pull.rebase false && \
-    git config --system credential.helper 'cache --timeout=30000'
-
+    git config --system credential.helper 'cache --timeout=30000' && \
+    echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
+    echo '"\e[6~": history-search-forward' >> /etc/inputrc
 
 USER ${NB_USER}
 WORKDIR /home/${NB_USER}
@@ -34,8 +34,5 @@ COPY spatial-requirements.txt /tmp/spatial-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
 COPY rl-requirements.txt /tmp/rl-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
-
-## no need to register the environment
-#RUN python3 -m ipykernel install --user --name=spatial
 
 

@@ -6,8 +6,10 @@
 # Does not provide a good way to ensure that sf/terra/gdalcubes are installed from source while other packages can be binary
 # Likewise, pak insists on installing old gdal from apt instead of respecting system library source builds
 install.packages("pak")
-pak::pkg_install(c("rstac", "spData", "earthdatalogin", "quarto", "aws.s3", "pak", "duckdbfs", "minioclient", "gifski"))
+pak::pkg_install(c("rstac", "spData", "earthdatalogin", "quarto", "aws.s3", "duckdbfs", "minioclient", "gifski", "decor", "leaflet.extras2", "rayshader", "bench", "spelling"))
 pak::pkg_install("r-tmap/tmap")
+pak::pkg_install("rstudio/leaflet")
+
 
 #remotes::install_github('r-tmap/tmap', upgrade="never", repos="https://cloud.r-project.org", dep=TRUE)
 

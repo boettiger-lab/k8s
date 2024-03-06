@@ -16,7 +16,7 @@ COPY apt.txt apt.txt
 RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
 
 COPY install.R /tmp/install.R
-RUN Rscript /tmp/install.R && rm /tmp/install.R 
+RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
 
 # some preferences
 RUN git config --system pull.rebase false && \

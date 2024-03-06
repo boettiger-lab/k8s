@@ -96,7 +96,7 @@ hub:
         - cboettig 
     GitHubOAuthenticator:
       allowed_organizations:
-        - boettiger-lab
+        - boettiger-lab:current-members
       scope:
         - read:org
       oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback

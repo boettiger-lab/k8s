@@ -98,6 +98,7 @@ hub:
     GitHubOAuthenticator:
       allowed_organizations:
         - boettiger-lab:Owners
+        - boettiger-lab:current-members
       scope:
         - read:org
       oauth_callback_url: https://jupyterhub.thelio.carlboettiger.info/hub/oauth_callback
