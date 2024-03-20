@@ -7,4 +7,5 @@ qpdf
 git-lfs
 awscli
 libjq-dev
-
+universal-ctags
+global
