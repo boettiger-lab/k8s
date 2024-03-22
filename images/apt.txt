@@ -1,10 +1,10 @@
 vim
 cmake
 nano
-exuberant-ctags
 gh
 qpdf
 git-lfs
 awscli
 libjq-dev
-
+universal-ctags
+global
