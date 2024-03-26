@@ -1,4 +1,4 @@
-FROM ghcr.io/boettiger-lab/k8s 
-
-RUN pip install -U --find-links https://girder.github.io/large_image_wheels GDAL
-
+FROM quay.io/pangeo/base-notebook 
+USER root 
+RUN apt-get update && apt-get -y install iputils-ping curl sudo
+USER $USER

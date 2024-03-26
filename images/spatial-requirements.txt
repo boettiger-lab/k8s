@@ -1,3 +1,4 @@
+altair
 dask
 distributed
 earthaccess
@@ -9,13 +10,18 @@ netCDF4
 odc-geo
 odc-stac
 planetary-computer
+pmtiles
 polars
+pydeck
 pystac
 pystac-client
 rasterio
 rasterstats
+rio-cogeo
 rioxarray
 stackstac
+streamlit
 xarray
 zarr
+leafmap
 
