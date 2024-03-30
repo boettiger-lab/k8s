@@ -39,12 +39,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 7991341312
                 mem_limit: 7991341312
-              default: true
             med:
               display_name: Medium (16 GB RAM)
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
+              default: true
             large:
               display_name: Large (30 GB RAM)
               kubespawner_override:
@@ -55,8 +55,11 @@ singleuser:
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "GPU"
-      slug: gpu 
+      slug: gpu
       description: Jupyter + R with GPU 
+      default: true
+      allowed_teams:
+        - espm-288:jupyterhub
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
@@ -94,10 +97,14 @@ hub:
         runtimeClassName: "nvidia"
     Authenticator:
       admin_users:
-        - cboettig 
+        - cboettig
+      allowed_users:
+        - mlap
     GitHubOAuthenticator:
+      enable_auth_state: true
+      populate_teams_in_auth_state: true
       allowed_organizations:
-        - boettiger-lab:Owners
+        - espm-288:jupyterhub
         - boettiger-lab:current-members
       scope:
         - read:org

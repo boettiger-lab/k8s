@@ -91,6 +91,7 @@ hub:
       environment:
         SHELL: /usr/bin/bash
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
+        GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
