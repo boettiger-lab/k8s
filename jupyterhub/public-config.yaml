@@ -12,6 +12,8 @@ ingress:
 proxy:
   service:
     type: NodePort
+cull:
+  enabled: false 
 singleuser:
   image:
     pullPolicy: Always
@@ -103,4 +105,5 @@ hub:
       oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
+
 
