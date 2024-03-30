@@ -12,6 +12,8 @@ ingress:
 proxy:
   service:
     type: NodePort
+cull:
+  enabled: false
 singleuser:
   image: 
     pullPolicy: Always
