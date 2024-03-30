@@ -2,8 +2,10 @@ altair
 dask
 distributed
 earthaccess
+fiona
 fsspec
 geopandas
+geocube
 h5netcdf
 h5py
 netCDF4
