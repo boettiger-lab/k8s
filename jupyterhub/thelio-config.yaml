@@ -42,16 +42,16 @@ singleuser:
                 mem_guarantee: 7991341312
                 mem_limit: 7991341312
             med:
-              display_name: Medium (16 GB RAM)
+              display_name: Medium (30 GB RAM)
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
               default: true
             large:
-              display_name: Large (30 GB RAM)
+              display_name: Large (45 GB RAM)
               kubespawner_override:
-                mem_guarantee: 29861460992
-                mem_limit: 29861460992
+                mem_guarantee: 49861460992
+                mem_limit: 49861460992
       kubespawner_override:
         image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio

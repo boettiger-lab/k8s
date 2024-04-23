@@ -35,6 +35,6 @@ RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
 COPY rl-requirements.txt /tmp/rl-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
 
-## no need to register the environment
-#RUN python3 -m ipykernel install --user --name=spatial
+## Register the environment with ipykernel, mostly for vscode to find it
+RUN python3 -m ipykernel install --user --name=venv
 

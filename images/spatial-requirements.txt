@@ -8,6 +8,11 @@ geopandas
 geocube
 h5netcdf
 h5py
+leafmap[raster]
+localtileserver
+mapclassify
+maplibre[all]
+minio
 netCDF4
 odc-geo
 odc-stac
@@ -23,7 +28,7 @@ rio-cogeo
 rioxarray
 stackstac
 streamlit
+streamlit-folium
 xarray
 zarr
-leafmap
 

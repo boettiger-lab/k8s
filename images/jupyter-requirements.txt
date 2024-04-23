@@ -2,6 +2,7 @@ ipykernel
 ipython
 ipywidgets
 jupyter
+jupyter-book
 jupyter-console
 jupyter-events
 jupyter-lsp
@@ -9,10 +10,20 @@ jupyter_client
 jupyter_core
 jupyter_server
 jupyter_server_terminals
+jupyter-server-proxy
+jupyter-tensorboard-proxy 
+jupyter-resource-usage
+jupyter-vscode-proxy
 jupyterlab
+jupyterlab-lsp
+jupyterlab-git
+jupyterlab_myst
 jupyterlab-pygments
-jupyterlab-widgets
+jupyterlab-quarto
 jupyterlab_server
+jupyterlab-theme-solarized-dark
+jupyterlab-widgets
+jupytext
 nbclient
 nbconvert
 nbformat
@@ -20,16 +31,5 @@ notebook
 notebook_shim
 pandocfilters
 Glances
-# extensions
-jupyterlab-git
-jupyter-tensorboard-proxy 
-jupyter-resource-usage
-jupyter-vscode-proxy
-jupyter-book
-jupyterlab_myst
 gh-scoped-creds
-jupyter-server-proxy
-jupyterlab-theme-solarized-dark
-jupyterlab-quarto
-jupytext
 
