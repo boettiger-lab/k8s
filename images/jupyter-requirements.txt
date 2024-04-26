@@ -1,6 +1,7 @@
 ipykernel
 ipython
 ipywidgets
+jedi-language-server
 jupyter
 jupyter-book
 jupyter-console

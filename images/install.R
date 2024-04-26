@@ -6,7 +6,7 @@
 # Does not provide a good way to ensure that sf/terra/gdalcubes are installed from source while other packages can be binary
 # Likewise, pak insists on installing old gdal from apt instead of respecting system library source builds
 install.packages("pak")
-pak::pkg_install(c("rstac", "spData", "earthdatalogin", "quarto", "aws.s3", "duckdbfs", "minioclient", "gifski", "decor", "leaflet.extras2", "rayshader", "bench", "spelling"))
+pak::pkg_install(c("rstac", "spData", "earthdatalogin", "quarto", "aws.s3", "duckdbfs", "minioclient", "gifski", "decor", "leaflet.extras2", "rayshader", "bench", "spelling", "ebvcube"))
 pak::pkg_install("r-tmap/tmap")
 pak::pkg_install("rstudio/leaflet")
 
@@ -15,7 +15,7 @@ pak::pkg_install("rstudio/leaflet")
 
 
 pak::pkg_install("igraph")
-pak::pkg_install("ropensci-review-tools/pkgcheck")
+#pak::pkg_install("ropensci-review-tools/pkgcheck")
 
 # pak::pkg_install("httpgd")
 pak::pkg_install(c("IRkernel", "languageserver"))
