@@ -31,4 +31,7 @@ jobs:
       - name: Publish
         if: github.repository == 'boettiger-lab/k8s'
         run: docker push ghcr.io/boettiger-lab/k8s-gpu:latest
+        # Lets us monitor disks getting full as images get bigger over time
+      - name: Show how much disk space is left
+        run: df -h
 
