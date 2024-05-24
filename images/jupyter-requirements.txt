@@ -1,12 +1,13 @@
+Glances
+gh-scoped-creds
 ipykernel
 ipython
 ipywidgets
-jedi-language-server
 jupyter
 jupyter-book
 jupyter-console
 jupyter-events
-jupyter-lsp
+#jupyter-ai
 jupyter_client
 jupyter_core
 jupyter_server
@@ -16,7 +17,6 @@ jupyter-tensorboard-proxy
 jupyter-resource-usage
 jupyter-vscode-proxy
 jupyterlab
-jupyterlab-lsp
 jupyterlab-git
 jupyterlab_myst
 jupyterlab-pygments
@@ -31,6 +31,4 @@ nbformat
 notebook
 notebook_shim
 pandocfilters
-Glances
-gh-scoped-creds
 

@@ -6,12 +6,11 @@ fiona
 fsspec
 geopandas
 geocube
-h5netcdf
-h5py
 leafmap[raster]
 localtileserver
+#lonboard
 mapclassify
-maplibre[all]
+maplibre
 minio
 netCDF4
 odc-geo
@@ -19,16 +18,20 @@ odc-stac
 planetary-computer
 pmtiles
 polars
+pyarrow
 pydeck
+pyogrio
 pystac
 pystac-client
 rasterio
 rasterstats
+requests
 rio-cogeo
 rioxarray
 stackstac
 streamlit
 streamlit-folium
+tqdm
 xarray
 zarr
 
