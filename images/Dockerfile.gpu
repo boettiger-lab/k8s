@@ -29,15 +29,14 @@ WORKDIR /home/${NB_USER}
 RUN usermod -s /bin/bash ${NB_USER}
 COPY spatial-requirements.txt /tmp/spatial-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
-
-## Register the environment with ipykernel, mostly for vscode to find it
-RUN python3 -m ipykernel install --user --name=venv
-
-
 COPY rl-requirements.txt /tmp/rl-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
 COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/jupyter-requirements.txt
+
+## Register the environment with ipykernel, mostly for vscode to find it
+RUN python3 -m ipykernel install --user --name=venv
+
 
 USER root 
 COPY install.R /tmp/install.R

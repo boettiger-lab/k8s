@@ -5,15 +5,17 @@ ENV VIRTUAL_ENV /opt/venv
 ENV PATH $VIRTUAL_ENV/bin:$PATH
 
 RUN /rocker_scripts/install_jupyter.sh
+RUN python3 -m pip install numpy
 RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
-
-# install codeserver
-RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 
 RUN /rocker_scripts/install_geospatial.sh
 
 COPY apt.txt apt.txt
 RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
+
+# install codeserver
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+#RUN wget https://github.com/coder/code-server/releases/download/v4.89.1/code-server_4.89.1_amd64.deb && dpkg -i code-server*.deb && rm code-server*.deb
 
 COPY install.R /tmp/install.R
 RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
@@ -34,5 +36,8 @@ COPY spatial-requirements.txt /tmp/spatial-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
 COPY rl-requirements.txt /tmp/rl-requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
+
+## Register the environment with ipykernel, mostly for vscode to find it
+RUN python3 -m ipykernel install --user --name=venv
 
 
