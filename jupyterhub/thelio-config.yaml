@@ -88,6 +88,8 @@ singleuser:
               image: "{value}"
           choices: {}
 hub:
+  allowNamedServers: true
+  namedServerLimitPerUser: 2
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
@@ -113,4 +115,4 @@ hub:
       oauth_callback_url: https://jupyterhub.thelio.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
-
+  
