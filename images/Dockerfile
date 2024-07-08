@@ -8,7 +8,8 @@ RUN /rocker_scripts/install_jupyter.sh
 RUN python3 -m pip install numpy
 RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
-RUN /rocker_scripts/install_geospatial.sh
+#RUN /rocker_scripts/install_geospatial.sh
+RUN /rocker_scripts/experimental/install_dev_osgeo.sh
 
 COPY apt.txt apt.txt
 RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt

@@ -8,3 +8,5 @@ awscli
 libjq-dev
 universal-ctags
 global
+nodejs
+

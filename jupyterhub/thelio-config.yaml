@@ -28,6 +28,13 @@ singleuser:
 #      - name: shm-volume
 #        emptyDir:
 #          medium: Memory
+#  extraFiles:
+#    remove-exporters:
+#      mountPath: /etc/jupyter/jupyter_notebook_config.py
+#    culling-config:
+#      data:
+#        ContentsManager:
+#          allow_hidden: true
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -46,12 +53,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 15930730496
                 mem_limit: 15930730496
-              default: true
             large:
               display_name: Large (45 GB RAM)
               kubespawner_override:
                 mem_guarantee: 49861460992
                 mem_limit: 49861460992
+              default: true
       kubespawner_override:
         image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
@@ -70,7 +77,7 @@ singleuser:
         working_dir: /home/rstudio
     - display_name: "NASA Image"
       slug: pangeo
-      description: Pangeo 
+      description: NASA TOPS
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
@@ -102,8 +109,6 @@ hub:
     Authenticator:
       admin_users:
         - cboettig
-      allowed_users:
-        - mlap
     GitHubOAuthenticator:
       enable_auth_state: true
       populate_teams_in_auth_state: true

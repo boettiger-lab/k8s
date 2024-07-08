@@ -9,13 +9,14 @@ RUN python3 -m pip install numpy
 RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 RUN /rocker_scripts/experimental/install_dev_osgeo.sh
+RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
 
 COPY apt.txt apt.txt
 RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
 
 # install codeserver
-#RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
-RUN wget https://github.com/coder/code-server/releases/download/v4.89.1/code-server_4.89.1_amd64.deb && dpkg -i code-server*.deb && rm code-server*.deb
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+#RUN wget https://github.com/coder/code-server/releases/download/v4.89.1/code-server_4.89.1_amd64.deb && dpkg -i code-server*.deb && rm code-server*.deb
 
 # some preferences
 RUN git config --system pull.rebase false && \
@@ -38,9 +39,9 @@ RUN python3 -m pip install --no-cache-dir -r /tmp/jupyter-requirements.txt
 RUN python3 -m ipykernel install --user --name=venv
 
 
-USER root 
-COPY install.R /tmp/install.R
-RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
-USER ${NB_USER}
+# USER root 
+# COPY install.R /tmp/install.R
+# RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
+# USER ${NB_USER}
 
 

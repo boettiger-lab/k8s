@@ -7,7 +7,7 @@ jupyter
 jupyter-book
 jupyter-console
 jupyter-events
-#jupyter-ai
+jupyter-ai
 jupyter_client
 jupyter_core
 jupyter_server
@@ -25,10 +25,9 @@ jupyterlab_server
 jupyterlab-theme-solarized-dark
 jupyterlab-widgets
 jupytext
+mystmd
 nbclient
 nbconvert
 nbformat
 notebook
-notebook_shim
-pandocfilters
 
