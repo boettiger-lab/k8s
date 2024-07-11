@@ -28,13 +28,15 @@ singleuser:
 #      - name: shm-volume
 #        emptyDir:
 #          medium: Memory
-#  extraFiles:
-#    remove-exporters:
-#      mountPath: /etc/jupyter/jupyter_notebook_config.py
-#    culling-config:
-#      data:
-#        ContentsManager:
-#          allow_hidden: true
+  extraFiles:
+    jupyter_server_config.json:
+        mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
+        data:
+          # Allow JupyterLab to show the 'View -> Show Hidden Files' option
+          # in the menu. Defaults are not changed.
+          # https://github.com/jupyterlab/jupyterlab/issues/11304#issuecomment-945466766
+          ContentsManager:
+            allow_hidden: true
   profileList:
     - display_name: "CPU"
       slug: rocker
@@ -60,7 +62,7 @@ singleuser:
                 mem_limit: 49861460992
               default: true
       kubespawner_override:
-        image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s:latest"
+        image: "ghcr.io/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "GPU"
@@ -72,7 +74,7 @@ singleuser:
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: "zcr.thelio.carlboettiger.info/boettiger-lab/k8s-gpu:latest"
+        image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
         working_dir: /home/rstudio
     - display_name: "NASA Image"
@@ -81,7 +83,7 @@ singleuser:
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: "zcr.thelio.carlboettiger.info/boettiger-lab/nasa-tops:latest"
+        image: "ghcr.io/boettiger-lab/nasa-tops:latest"
     - display_name: "Bring your own image"
       description: Specify your own docker image (must have python and jupyterhub installed in it)
       slug: custom
