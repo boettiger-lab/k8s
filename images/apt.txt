@@ -9,4 +9,5 @@ libjq-dev
 universal-ctags
 global
 nodejs
+npm
 
