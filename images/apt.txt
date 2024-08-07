@@ -10,4 +10,5 @@ universal-ctags
 global
 nodejs
 npm
+webp
 
