@@ -1,0 +1,14 @@
+channels:
+  - conda-forge
+dependencies:
+  - nodejs>=20,<21
+  - mystmd
+  - jupyterlab-myst
+  - libwebp
+  - ibis-duckdb
+  - ibis-pandas
+  - altair
+  - streamlit
+  - jupyter-vscode-proxy
+  - code-server >=3.2
+  - pip
