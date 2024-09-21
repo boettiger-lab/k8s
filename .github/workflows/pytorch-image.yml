@@ -1,4 +1,4 @@
-name: Docker GPU Image
+name: PyTorch-notebook Image
 on:
   workflow_dispatch: null
   push:
