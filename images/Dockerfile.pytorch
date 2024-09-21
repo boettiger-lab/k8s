@@ -1,0 +1,4 @@
+FROM quay.io/jupyter/pytorch-notebook:cuda12-2024-04-22
+COPY jupyter-ai.yml environment.yml
+RUN conda env update --file environment.yml
+
