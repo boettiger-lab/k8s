@@ -2,3 +2,11 @@ FROM quay.io/jupyter/pytorch-notebook:cuda12-2024-04-22
 COPY jupyter-ai.yml environment.yml
 RUN conda env update --file environment.yml
 
+USER root
+RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+RUN git config --system pull.rebase false && \
+    git config --system credential.helper 'cache --timeout=30000' && \
+    echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
+    echo '"\e[6~": history-search-forward' >> /etc/inputrc
+

@@ -4,4 +4,7 @@ channels:
 dependencies:
   - jupyterlab-myst
   - jupyter-ai
+  - jupyter-tensorboard-proxy 
+  - jupyter-resource-usage
+  - jupyter-vscode-proxy
 
