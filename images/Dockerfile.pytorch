@@ -5,7 +5,8 @@ RUN conda update -n base -c conda-forge conda && \
     conda env update --file environment.yml
 
 USER root
-RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 RUN git config --system pull.rebase false && \
     git config --system credential.helper 'cache --timeout=30000' && \
