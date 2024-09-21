@@ -1,6 +1,8 @@
-FROM quay.io/jupyter/pytorch-notebook:cuda12-2024-04-22
+FROM quay.io/jupyter/pytorch-notebook:cuda12-ubuntu-24.04
 COPY jupyter-ai.yml environment.yml
-RUN conda env update --file environment.yml
+
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file environment.yml
 
 USER root
 RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama
