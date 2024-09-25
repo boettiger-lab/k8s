@@ -6,6 +6,7 @@ dependencies:
   - jupyter-ai
   - jupyter-resource-usage
   - jupyter-vscode-proxy
+  - pypdf
   - pip
   - pip:
     - jupyter-tensorboard-proxy
