@@ -1,52 +1,35 @@
-FROM docker.io/rocker/ml
+FROM quay.io/jupyter/pytorch-notebook:cuda12-ubuntu-24.04
 
-ENV NB_USER rstudio
-ENV VIRTUAL_ENV /opt/venv
-ENV PATH ${VIRTUAL_ENV}/bin:$PATH
+COPY jupyter-ai.yml environment.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file environment.yml
 
-RUN /rocker_scripts/install_jupyter.sh
-RUN python3 -m pip install numpy
-RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
+USER root
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
 
-RUN /rocker_scripts/experimental/install_dev_osgeo.sh
-RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
-
-COPY apt.txt apt.txt
-RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
-
-# install codeserver
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
-#RUN wget https://github.com/coder/code-server/releases/download/v4.89.1/code-server_4.89.1_amd64.deb && dpkg -i code-server*.deb && rm code-server*.deb
-
-# ollama
-# RUN curl -fsSL https://ollama.com/install.sh | sh
-RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama
-
-
-# some preferences
 RUN git config --system pull.rebase false && \
-    git config --system credential.helper 'cache --timeout=30000' && \
     echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
     echo '"\e[6~": history-search-forward' >> /etc/inputrc
 
+#git config --system credential.helper 'cache --timeout=30000' && \
+
+RUN apt-get update -qq && apt-get -y install vim git-lfs
+
+# install codeserver
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+
+# ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+
 USER ${NB_USER}
-WORKDIR /home/${NB_USER}
+COPY spatial-env.yml spatial-env.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file spatial-env.yml
 
-RUN usermod -s /bin/bash ${NB_USER}
-COPY spatial-requirements.txt /tmp/spatial-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
-COPY rl-requirements.txt /tmp/rl-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
-COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/jupyter-requirements.txt
+COPY rl-env.yml rl-env.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file rl-env.yml
 
-## Register the environment with ipykernel, mostly for vscode to find it
-RUN python3 -m ipykernel install --user --name=venv
-
-
-#USER root 
-#COPY install.R /tmp/install.R
-#RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
-#USER ${NB_USER}
 
 

@@ -1,4 +1,4 @@
-name: Jupyter Image
+name: PyTorch-notebook Image
 on:
   workflow_dispatch: null
   push:
@@ -27,8 +27,8 @@ jobs:
           password: ${{secrets.GITHUB_TOKEN}}
       - name: Build the Docker image
         if: github.repository == 'boettiger-lab/k8s'
-        run: docker build images/ -f images/Dockerfile.jupyter --tag ghcr.io/boettiger-lab/k8s-jupyter:latest
+        run: docker build images/ -f images/Dockerfile.pytorch --tag ghcr.io/boettiger-lab/pytorch:latest
       - name: Publish
         if: github.repository == 'boettiger-lab/k8s'
-        run: docker push ghcr.io/boettiger-lab/k8s-jupyter:latest
+        run: docker push ghcr.io/boettiger-lab/pytorch:latest
 
