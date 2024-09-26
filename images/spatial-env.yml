@@ -1,0 +1,38 @@
+name: base 
+channels:
+  - conda-forge
+dependencies:
+  - awscliv2
+  - distributed
+  - earthaccess
+  - fiona
+  - fsspec
+  - geopandas
+  - geocube
+  - leafmap[maplibregl]
+  - localtileserver
+  - mapclassify
+  - maplibre
+  - minio
+  - netCDF4
+  - odc-geo
+  - odc-stac
+  - planetary-computer
+  - pmtiles
+  - polars
+  - pyarrow
+  - pydeck
+  - pyogrio
+  - pystac
+  - pystac-client
+  - rasterio
+  - rasterstats
+  - requests
+  - rio-cogeo
+  - rioxarray
+  - stackstac
+  - streamlit
+  - tqdm
+  - xarray
+  - zarr
+

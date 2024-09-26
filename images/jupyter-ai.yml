@@ -2,12 +2,14 @@ name: base
 channels:
   - conda-forge
 dependencies:
+  - ibis-duckdb
   - jupyterlab-myst
   - jupyter-ai
   - jupyter-resource-usage
   - jupyter-vscode-proxy
   - pypdf
   - pip
+  - seaborn
   - pip:
     - jupyter-tensorboard-proxy
 

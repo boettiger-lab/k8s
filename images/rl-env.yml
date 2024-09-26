@@ -1,0 +1,20 @@
+name: base 
+channels:
+  - conda-forge
+dependencies:
+  - darts
+  - gymnasium
+  - gputil
+  - huggingface_hub
+  - nox
+  - nvitop
+  - plotnine
+  - PyYaml
+  - pytest
+  - stable-baselines3
+  - sb3-contrib
+  - scikit-optimize
+  - pip:
+    - ray[rllib,tune]
+    - huggingface_sb3
+
