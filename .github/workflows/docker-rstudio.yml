@@ -27,7 +27,7 @@ jobs:
           password: ${{secrets.GITHUB_TOKEN}}
       - name: Build the Docker image
         if: github.repository == 'boettiger-lab/k8s'
-        run: docker build -f Dockerfile.R images/ --tag ghcr.io/boettiger-lab/k8s-r:latest
+        run: docker build -f images/Dockerfile.R images/ --tag ghcr.io/boettiger-lab/k8s-r:latest
       - name: Publish
         if: github.repository == 'boettiger-lab/k8s'
         run: docker push ghcr.io/boettiger-lab/k8s-r:latest
