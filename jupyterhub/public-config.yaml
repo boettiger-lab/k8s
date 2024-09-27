@@ -37,6 +37,8 @@ singleuser:
           # https://github.com/jupyterlab/jupyterlab/issues/11304#issuecomment-945466766
           ContentsManager:
             allow_hidden: true
+          FileContentsManager:
+            always_delete_dir: true
   profileList:
     - display_name: "CPU"
       slug: rocker
