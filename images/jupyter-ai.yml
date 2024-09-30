@@ -5,7 +5,7 @@ dependencies:
   - gh-scoped-creds
   - ibis-duckdb
   - jupyterlab-myst
-    #  - jupyter-ai
+  - jupyter-ai==2.23.0
   - jupyter-resource-usage
   - jupyter-vscode-proxy
   - pypdf
@@ -13,5 +13,4 @@ dependencies:
   - seaborn
   - pip:
     - jupyter-tensorboard-proxy
-    - jupyter-ai
 
