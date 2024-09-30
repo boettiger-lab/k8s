@@ -2,7 +2,7 @@ name: RStudio
 on:
   workflow_dispatch: null
   push:
-    paths: ['images/*']
+    paths: ['images/Dockerfile.R']
 jobs:
   build:
     runs-on: ubuntu-latest

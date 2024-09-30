@@ -2,7 +2,7 @@ name: Docker GPU Image
 on:
   workflow_dispatch: null
   push:
-    paths: ['images/*']
+    paths: ['images/Dockerfile.gpu']
 jobs:
   build:
     runs-on: ubuntu-latest

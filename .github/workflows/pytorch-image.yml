@@ -2,7 +2,7 @@ name: PyTorch-notebook Image
 on:
   workflow_dispatch: null
   push:
-    paths: ['images/*']
+    paths: ['images/Dockerfile.pytorch', 'images/jupyer-ai.yml']
 jobs:
   build:
     runs-on: ubuntu-latest

@@ -2,7 +2,7 @@ name: Docker Image CI
 on:
   workflow_dispatch: null
   push:
-    paths: ['images/*']
+    paths: ['images/Dockerfile']
 jobs:
   build:
     runs-on: ubuntu-latest
