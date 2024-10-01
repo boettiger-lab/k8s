@@ -14,8 +14,9 @@ dependencies:
   - pytest
   - scikit-optimize
   - pip:
-    - ray[rllib,tune]
-    - huggingface_sb3
-    - stable-baselines3
-    - sb3-contrib
+    - ray
+    #    - ray[rllib,tune]
+    #    - huggingface_sb3
+    #    - stable-baselines3
+    #    - sb3-contrib
 
