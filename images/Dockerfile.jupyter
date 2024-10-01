@@ -1,8 +1,35 @@
-FROM  quay.io/jupyter/datascience-notebook:2024-05-27
+FROM quay.io/jupyter/pytorch-notebook:cuda12-ubuntu-24.04
 
-COPY jupyter-env.yml /tmp/environment.yml
-RUN conda env update -n base -f /tmp/environment.yml
+COPY jupyter-ai.yml environment.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file environment.yml
 
-## this stack uses tini as default entrypoint.  run with --entrypoint="" for default (e.g. root) shell.
+USER root
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+RUN git config --system pull.rebase false && \
+    echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
+    echo '"\e[6~": history-search-forward' >> /etc/inputrc
+
+#git config --system credential.helper 'cache --timeout=30000' && \
+
+RUN apt-get update -qq && apt-get -y install vim git-lfs
+
+# install codeserver
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
+
+# ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+
+USER ${NB_USER}
+COPY spatial-env.yml spatial-env.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file spatial-env.yml
+
+COPY rl-env.yml rl-env.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file rl-env.yml
+
 
 
