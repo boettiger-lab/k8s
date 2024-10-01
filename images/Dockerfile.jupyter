@@ -27,9 +27,9 @@ COPY spatial-env.yml spatial-env.yml
 RUN conda update -n base -c conda-forge conda && \
     conda env update --file spatial-env.yml
 
-COPY rl-env.yml rl-env.yml
-RUN conda update -n base -c conda-forge conda && \
-    conda env update --file rl-env.yml
+#COPY rl-env.yml rl-env.yml
+#RUN conda update -n base -c conda-forge conda && \
+#    conda env update --file rl-env.yml
 
 
 
