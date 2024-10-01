@@ -12,10 +12,10 @@ dependencies:
   - plotnine
   - PyYaml
   - pytest
-  - stable-baselines3
-  - sb3-contrib
   - scikit-optimize
   - pip:
-#    - ray[rllib,tune]
-#    - huggingface_sb3
+    - ray[rllib,tune]
+    - huggingface_sb3
+    - stable-baselines3
+    - sb3-contrib
 
