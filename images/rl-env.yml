@@ -8,6 +8,7 @@ dependencies:
   - huggingface_hub
   - nox
   - nvitop
+  - glances
   - plotnine
   - PyYaml
   - pytest
@@ -15,6 +16,6 @@ dependencies:
   - sb3-contrib
   - scikit-optimize
   - pip:
-    - ray[rllib,tune]
-    - huggingface_sb3
+#    - ray[rllib,tune]
+#    - huggingface_sb3
 
