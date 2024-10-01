@@ -5,7 +5,7 @@ dependencies:
   #  - darts
   #  - gymnasium
   #   - gputil
-  #  - huggingface_hub
+  - huggingface_hub
   - nox
   - nvitop
   - glances
@@ -14,9 +14,8 @@ dependencies:
   - pytest
   - scikit-optimize
   - pip:
-    - ray
-        - ray[rllib,tune]
-        - huggingface_sb3
-        - stable-baselines3
-        - sb3-contrib
+    - ray[rllib,tune]
+    - huggingface_sb3
+    - stable-baselines3
+    - sb3-contrib
 
