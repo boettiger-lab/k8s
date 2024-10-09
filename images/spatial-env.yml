@@ -9,7 +9,8 @@ dependencies:
   - fsspec
   - geopandas
   - geocube
-  - leafmap[maplibregl]
+  - leafmap
+  - libgdal-arrow-parquet
   - localtileserver
   - mapclassify
   - maplibre
@@ -32,6 +33,7 @@ dependencies:
   - rioxarray
   - stackstac
   - streamlit
+  - tippecanoe
   - tqdm
   - xarray
   - zarr
