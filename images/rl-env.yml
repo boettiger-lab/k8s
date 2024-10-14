@@ -2,7 +2,6 @@ name: base
 channels:
   - conda-forge
 dependencies:
-  #  - darts
   #  - gymnasium
   #   - gputil
   - huggingface_hub
@@ -13,6 +12,7 @@ dependencies:
   - PyYaml
   - pytest
   - scikit-optimize
+  - pip
   - pip:
     - ray[rllib,tune]
     - huggingface_sb3
