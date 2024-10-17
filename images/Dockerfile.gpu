@@ -22,7 +22,7 @@ RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv
 
 RUN git config --system pull.rebase false && \
     git config --system credential.credentialStore cache && \
-    git config --system credential.cacheOptions "--timeout 30000" \
+    git config --system credential.cacheOptions "--timeout 30000" && \
     echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
     echo '"\e[6~": history-search-forward' >> /etc/inputrc
 

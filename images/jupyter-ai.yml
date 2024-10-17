@@ -6,6 +6,7 @@ dependencies:
   - ibis-duckdb
   - jupyterlab-myst
   - jupyter-ai==2.23.0
+  - jupyter-sphinx
   - jupyter-resource-usage
   - jupyter-vscode-proxy
   - pypdf
