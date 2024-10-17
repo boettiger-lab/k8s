@@ -16,10 +16,13 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 # ollama
 RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
 
+RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+     unzip awscliv2.zip && \
+     ./aws/install
 
 RUN git config --system pull.rebase false && \
     git config --system credential.credentialStore cache && \
-    git config --global credential.cacheOptions "--timeout 30000" \
+    git config --system credential.cacheOptions "--timeout 30000" \
     echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
     echo '"\e[6~": history-search-forward' >> /etc/inputrc
 

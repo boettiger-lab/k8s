@@ -3,6 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - awscliv2
+  - cartopy
   - distributed
   - earthaccess
   - fiona
@@ -37,4 +38,6 @@ dependencies:
   - tqdm
   - xarray
   - zarr
-
+  - pip
+  - pip: 
+    - git+https://github.com/eodaGmbH/py-maplibregl@feature/color-utils 
