@@ -2,7 +2,6 @@ name: base
 channels:
   - conda-forge
 dependencies:
-  - awscliv2
   - cartopy
   - distributed
   - earthaccess

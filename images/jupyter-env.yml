@@ -12,3 +12,4 @@ dependencies:
   - jupyter-vscode-proxy
   - code-server >=3.2
   - pip
+
