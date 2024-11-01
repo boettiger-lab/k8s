@@ -20,6 +20,9 @@ RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv
      unzip awscliv2.zip && \
      ./aws/install
 
+# minio client
+curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+
 # git config
 RUN git config --system pull.rebase false && \
     git config --system credential.credentialStore cache && \
