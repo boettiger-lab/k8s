@@ -29,8 +29,10 @@ RUN git config --system pull.rebase false && \
     git config --system credential.cacheOptions "--timeout 30000" && \
     echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
     echo '"\e[6~": history-search-forward' >> /etc/inputrc
+
 RUN wget https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.6.0/gcm-linux_amd64.2.6.0.deb && dpkg -i gcm-*.deb && rm gcm-*.deb
-RUN git-credential-manager configure --system
+
+#RUN git-credential-manager configure --system
 
 USER ${NB_USER}
 COPY spatial-env.yml spatial-env.yml
