@@ -1,21 +1,12 @@
-FROM quay.io/jupyter/minimal-notebook
+FROM ghcr.io/boettiger-lab/k8s-gpu
 
 USER root
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
 
-# Install R
-COPY install_r.sh install_r.sh
-RUN bash install_r.sh
+# When run as root, install.r automagically handles any necessary apt-gets
+COPY install.r install.r
+RUN Rscript install.r
 
-# Now install any CRAN packages the usual way
-RUN R -e "install.packages(c('terra', 'stars'))"
-
-## Or the more concise Rocker way
-RUN install2.r rstan ROracle
-
-## RStudio
-RUN conda install jupyter-rsession-proxy
-COPY install_rstudio.sh install_rstudio.sh
-RUN bash install_rstudio.sh
 
 USER ${NB_USER}
-
