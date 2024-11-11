@@ -1,2 +1,2 @@
-install.packages(c('tidyverse', 'devtools'))
+install.packages(c('tidyverse', 'devtools', 'reticulate', 'nimble'))
 
