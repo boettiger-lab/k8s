@@ -1,2 +1,2 @@
-install.packages('tidyverse')
+install.packages(c('tidyverse', 'devtools'))
 
