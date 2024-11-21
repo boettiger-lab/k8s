@@ -1,2 +1,2 @@
-install.packages(c('tidyverse', 'devtools', 'reticulate', 'nimble'))
+install.packages(c('tidyverse', 'devtools', 'reticulate', 'nimble', 'duckdbfs'))
 
