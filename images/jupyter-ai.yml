@@ -8,6 +8,7 @@ dependencies:
   - jupyter-ai
   - jupyter-sphinx
   - jupyter-resource-usage
+  - jupyter-rsession-proxy
   - jupyter-vscode-proxy
   - jupyterlab-myst
   - mystmd
