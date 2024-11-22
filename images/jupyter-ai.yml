@@ -5,16 +5,22 @@ dependencies:
   - gh-scoped-creds
   - ibis-duckdb
   - jupyterlab-myst
-  - jupyter-ai==2.23.0
+  - jupyter-ai
   - jupyter-sphinx
   - jupyter-resource-usage
   - jupyter-vscode-proxy
+  - jupyterlab-myst
+  - mystmd
+  - minio
   - pypdf
   - pip
   - seaborn
   - pip:
     - jupyter-tensorboard-proxy
     - git+https://gitlab.nrp-nautilus.io/prp/jupyter-ai-nrp
+    - langchain-aws
+    - langchain-anthropic
+    - langchain-mistralai
     - langchain-ollama
     - langchain-openai
 
