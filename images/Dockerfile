@@ -1,44 +1,47 @@
-FROM docker.io/rocker/tidyverse
+FROM quay.io/jupyter/minimal-notebook:ubuntu-24.04
 
-ENV NB_USER rstudio
-ENV VIRTUAL_ENV /opt/venv
-ENV PATH $VIRTUAL_ENV/bin:$PATH
+COPY jupyter-ai.yml environment.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file environment.yml
 
-RUN /rocker_scripts/install_jupyter.sh
-RUN python3 -m pip install numpy
-RUN chown -R ${NB_USER}:staff ${VIRTUAL_ENV} && chmod -R g+rw ${VIRTUAL_ENV}
+USER root
 
-#RUN /rocker_scripts/install_geospatial.sh
-RUN /rocker_scripts/experimental/install_dev_osgeo.sh
-
-COPY apt.txt apt.txt
-RUN apt-get update -qq && xargs sudo apt-get -y install < apt.txt
+# some apt-get utilities
+RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv
 
 # install codeserver
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
-#RUN wget https://github.com/coder/code-server/releases/download/v4.89.1/code-server_4.89.1_amd64.deb && dpkg -i code-server*.deb && rm code-server*.deb
 
-COPY install.R /tmp/install.R
-RUN Rscript /tmp/install.R && rm /tmp/install.R && chown -R ${NB_USER}:staff ${R_HOME}/site-library 
+# ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
 
-# some preferences
+# awscli tool
+RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+     unzip awscliv2.zip && \
+     ./aws/install
+
+# minio client
+RUN curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+
+# git config
 RUN git config --system pull.rebase false && \
-    git config --system credential.helper 'cache --timeout=30000' && \
+    git config --system credential.credentialStore cache && \
+    git config --system credential.cacheOptions "--timeout 30000" && \
     echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
     echo '"\e[6~": history-search-forward' >> /etc/inputrc
 
+RUN wget https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.6.0/gcm-linux_amd64.2.6.0.deb && dpkg -i gcm-*.deb && rm gcm-*.deb
+
+#RUN git-credential-manager configure --system
+
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
+
+# When run as root, install.r automagically handles any necessary apt-gets
+COPY install.r install.r
+RUN Rscript install.r
+
+
+
 USER ${NB_USER}
-WORKDIR /home/${NB_USER}
-
-RUN usermod -s /bin/bash ${NB_USER}
-COPY jupyter-requirements.txt /tmp/jupyter-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/jupyter-requirements.txt
-COPY spatial-requirements.txt /tmp/spatial-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/spatial-requirements.txt
-COPY rl-requirements.txt /tmp/rl-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/rl-requirements.txt
-
-## Register the environment with ipykernel, mostly for vscode to find it
-RUN python3 -m ipykernel install --user --name=venv
-
 

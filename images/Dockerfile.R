@@ -1,4 +1,4 @@
-FROM ghcr.io/boettiger-lab/k8s-gpu
+FROM quay.io/jupyter/minimal-notebook:ubuntu-24.04
 
 USER root
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
