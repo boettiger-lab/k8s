@@ -34,6 +34,14 @@ RUN wget https://github.com/git-ecosystem/git-credential-manager/releases/downlo
 
 #RUN git-credential-manager configure --system
 
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
+RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
+
+# When run as root, install.r automagically handles any necessary apt-gets
+COPY install.r install.r
+RUN Rscript install.r
+
+
 USER ${NB_USER}
 COPY spatial-env.yml spatial-env.yml
 RUN conda update -n base -c conda-forge conda && \
