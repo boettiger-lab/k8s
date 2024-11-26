@@ -2,6 +2,7 @@ name: base
 channels:
   - conda-forge
 dependencies:
+  - duckdb-engine
   - gh-scoped-creds
   - ibis-duckdb
   - jupyterlab-myst
