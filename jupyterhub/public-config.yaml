@@ -67,7 +67,7 @@ singleuser:
               display_name: Special-use (up to 120 GB RAM)
               kubespawner_override:
                 mem_guarantee: 59861460992
-                mem_limit: 122861460992
+                mem_limit: 202861460992
       kubespawner_override:
         image: "ghcr.io/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
@@ -87,11 +87,12 @@ singleuser:
       profile_options:
         resource_allocation: *profile_options_resource_allocation 
       kubespawner_override:
-        image: pangeo/pytorch-notebook 
+        image: pangeo/pytorch-notebook
     - display_name: "Bring your own image"
       description: Specify your own docker image (must have python and jupyterhub installed in it)
       slug: custom
       profile_options:
+        resource_allocation: *profile_options_resource_allocation 
         image:
           display_name: Image
           unlisted_choice:
@@ -99,7 +100,8 @@ singleuser:
             display_name: "Custom image"
             kubespawner_override:
               image: "{value}"
-          choices: {}
+          choices: {} 
+
 hub:
   allowNamedServers: true
   config:
