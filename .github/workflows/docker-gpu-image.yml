@@ -27,7 +27,7 @@ jobs:
           password: ${{secrets.GITHUB_TOKEN}}
       - name: Build the Docker image
         if: github.repository == 'boettiger-lab/k8s'
-        run: docker build images/ -f images/Dockerfile.gpu --tag ghcr.io/boettiger-lab/k8s-gpu:latest
+        run: docker build images/ --no-cache -f images/Dockerfile.gpu --tag ghcr.io/boettiger-lab/k8s-gpu:latest
       - name: Publish
         if: github.repository == 'boettiger-lab/k8s'
         run: docker push ghcr.io/boettiger-lab/k8s-gpu:latest
