@@ -2,7 +2,7 @@ name: Docker Image CI
 on:
   workflow_dispatch: null
   push:
-    paths: ['images/Dockerfile']
+    paths: ['images/Dockerfile',  'images/install.r', 'images/rl-env.yml', 'images/spatial-env.yml', 'images/jupyter-ai.yml']
 jobs:
   build:
     runs-on: ubuntu-latest
