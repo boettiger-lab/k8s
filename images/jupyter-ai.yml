@@ -20,9 +20,6 @@ dependencies:
   - pip:
     - jupyter-tensorboard-proxy
     - git+https://gitlab.nrp-nautilus.io/prp/jupyter-ai-nrp
-    - langchain-aws
     - langchain-anthropic
-    - langchain-mistralai
-    - langchain-ollama
     - langchain-openai
 
