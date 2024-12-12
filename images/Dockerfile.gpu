@@ -1,7 +1,7 @@
 FROM quay.io/jupyter/pytorch-notebook:cuda12-ubuntu-24.04
 
 COPY jupyter-ai.yml environment.yml
-RUN conda update -n base -c conda-forge conda && \
+RUN conda update --all --solver=classic -n base -c conda-forge conda && \
     conda env update --file environment.yml
 
 USER root
