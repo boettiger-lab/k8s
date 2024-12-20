@@ -1,12 +1,8 @@
+#!/bin/bash 
 
-INSTALLATION_NAME="arc-runner-set"
-NAMESPACE="arc-runners"
-GITHUB_CONFIG_URL="https://github.com/eco4cast/"
-helm upgrade --cleanup-on-fail --install "${INSTALLATION_NAME}" \
-  --namespace "${NAMESPACE}" \
-  --values values.yaml \
-  --create-namespace \
-  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+# make sure we don't have stale ghcr.io credentials:
+#docker logout ghcr.io
 
 NAMESPACE="arc-systems"
 helm upgrade --cleanup-on-fail --install arc \
@@ -14,5 +10,20 @@ helm upgrade --cleanup-on-fail --install arc \
     --create-namespace \
     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 
+
+
+
+INSTALLATION_NAME="arc-runner-espm157-f24"
+NAMESPACE="arc-runners"
+helm upgrade --cleanup-on-fail --install "${INSTALLATION_NAME}" \
+  --namespace "${NAMESPACE}" \
+  --create-namespace \
+  --values values.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+
+
+#  --set githubConfigSecret.github_token=${GITHUB_PAT} \
+#  --set githubConfigUrl=${GITHUB_CONFIG_URL} \
 
 
