@@ -13,7 +13,10 @@ RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-o
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 
 # ollama
-RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+# RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
+
+# quarto
+RUN wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.6.39/quarto-1.6.39-linux-amd64.deb && dpkg -i quarto*.deb && rm quarto*.deb
 
 # awscli tool
 RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
