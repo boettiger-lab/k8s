@@ -1,11 +1,5 @@
 githubConfigUrl: "https://github.com/eco4cast"
-githubConfigSecret:
-  #github_app_id: ""
-  #github_app_installation_id: ""
-  #github_app_private_key: |
-  ### OR USE GitHub PAT Configuration
-  # github_token: ""
-maxRunners: 1
+maxRunners: 2
 runnerGroup: "default"
 
 ## Container mode is an object that provides out-of-box configuration
@@ -14,14 +8,13 @@ runnerGroup: "default"
 ##
 ## If any customization is required for dind or kubernetes mode, containerMode should remain
 ## empty, and configuration should be applied to the template.
-# containerMode:
-#   type: "dind"  ## type can be set to dind or kubernetes
+#containerMode:
+#  type: "dind"  ## type can be set to dind or kubernetes
 ## template is the PodSpec for each runner Pod
 ## For reference: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#PodSpec
 template:
   ## template.spec will be modified if you change the container mode
   ## with containerMode.type=dind, we will populate the template.spec with following pod spec
-   template:
      spec:
        initContainers:
        - name: init-dind-externals
@@ -34,10 +27,11 @@ template:
        - name: runner
          image: ghcr.io/actions/actions-runner:latest
          command: ["/home/runner/run.sh"]
-         requests:
-           memory: 20.0Gi
-         limits:
-           memory: 60.0G
+         resources: 
+           requests:
+             memory: "10Gi"
+           limits:
+             memory: "50Gi"
          env:
            - name: DOCKER_HOST
              value: unix:///var/run/docker.sock
@@ -48,6 +42,11 @@ template:
              mountPath: /var/run
        - name: dind
          image: docker:dind
+         resources: 
+           requests:
+             memory: "10Gi"
+           limits:
+             memory: "50Gi"
          args:
            - dockerd
            - --host=unix:///var/run/docker.sock

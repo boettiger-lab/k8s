@@ -67,7 +67,7 @@ singleuser:
               display_name: Special-use (up to 120 GB RAM)
               kubespawner_override:
                 mem_guarantee: 59861460992
-                mem_limit: 202861460992
+                mem_limit: 122861460992
       kubespawner_override:
         image: "ghcr.io/boettiger-lab/k8s:latest"
         default_url: /lab # change to /rstudio to go straight to RStudio
