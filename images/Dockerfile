@@ -7,7 +7,7 @@ RUN conda update -n base -c conda-forge conda && \
 USER root
 
 # some apt-get utilities
-RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv
+RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-openssl-dev libxml2-dev
 
 # install codeserver
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
