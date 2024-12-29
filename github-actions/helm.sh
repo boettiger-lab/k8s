@@ -1,5 +1,9 @@
 #!/bin/bash 
 
+helm repo add openebs https://openebs.github.io/openebs
+helm repo update
+helm install openebs openebs/openebs -n openebs --create-namespace
+
 
 # make sure we don't have stale ghcr.io credentials:
 #docker logout ghcr.io
