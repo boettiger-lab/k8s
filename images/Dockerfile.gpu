@@ -52,4 +52,6 @@ RUN conda update -n base -c conda-forge conda && \
     conda env update --file rl-env.yml
 
 
+ENV CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES
+
 

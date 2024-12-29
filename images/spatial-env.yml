@@ -2,9 +2,11 @@ name: base
 channels:
   - conda-forge
 dependencies:
+  - boto3
   - cartopy
   - distributed
   - earthaccess
+  - exactextract
   - fiona
   - fsspec
   - geoarrow-types
@@ -39,5 +41,3 @@ dependencies:
   - xarray
   - zarr
   - pip
-  - pip: 
-    - git+https://github.com/eodaGmbH/py-maplibregl@feature/color-utils 
