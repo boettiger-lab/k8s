@@ -7,7 +7,7 @@ readr::write_lines('
     R.Version()$os,
     R.Version()$arch
   )))', 
-  paste0(R.home(), "/etc/Renviron.site"), 
+  paste0(R.home(), "/etc/Rprofile.site"),
   append = TRUE)
 
 
