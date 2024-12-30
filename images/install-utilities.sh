@@ -24,6 +24,8 @@ wget https://github.com/git-ecosystem/git-credential-manager/releases/download/v
 
 # ensure user owns all of /opt
 mkdir /opt/share && chown -R ${NB_USER}:users /opt/share
+
+# code-server (VSCode)
 curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
 sudo -u ${NB_USER} echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
 
