@@ -14,7 +14,7 @@ COPY install-utilities.sh install-utilities.sh
 RUN bash install-utilities.sh && rm install-utilities.sh
 
 # code-server (VSCode)
-curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
 
 # R & RStudio
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
