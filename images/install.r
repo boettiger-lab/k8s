@@ -4,11 +4,10 @@ install.packages(c('tidyverse', 'devtools', 'reticulate', 'nimble', 'duckdbfs', 
 readr::write_lines("
 options(repos = c(
   linux = 'https://cran.r-universe.dev/bin/linux/noble/4.4/',
-  sources = 'https://cran.r-universe.dev',
-  cran = 'https://cloud.r-project.org'
+  sources = 'https://cran.r-universe.dev'
 ))
 ", 
 paste0(R.home(), "/etc/Rprofile.site"),
 append = TRUE)
-
+# NOTE: also, we omit an official cran repo to avoid more recent source version taking priority over install from binary.
 
