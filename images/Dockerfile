@@ -11,7 +11,7 @@ RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-o
 
 # install codeserver
 ENV XDG_DATA_HOME=/opt
-RUN chown -R ${NB_USER}:${NB_USER} /opt
+RUN chown -R ${NB_USER}:users /opt
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache && \
     echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
 
