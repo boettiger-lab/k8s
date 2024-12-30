@@ -41,7 +41,8 @@ ENV PATH=$PATH:/usr/lib/rstudio-server/bin/quarto/bin
 COPY install.r install.r
 RUN Rscript install.r
 
-
+## switch from BSPM to r-universe for user default 
+COPY Rprofile /etc/R/Rprofile.site
 
 USER ${NB_USER}
 
