@@ -42,7 +42,7 @@ COPY install.r install.r
 RUN Rscript install.r
 
 ## switch from BSPM to r-universe for user default 
-COPY Rprofile /etc/R/Rprofile.site
+COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
 USER ${NB_USER}
 
