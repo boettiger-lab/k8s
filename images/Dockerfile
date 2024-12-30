@@ -10,11 +10,11 @@ RUN conda update -n base -c conda-forge conda && \
 
 USER root
 
-COPY install-utilities.sh install-utilities.sh
-RUN bash install-utilities.sh && rm install-utilities.sh
-
 # code-server (VSCode)
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
+
+COPY install-utilities.sh install-utilities.sh
+RUN bash install-utilities.sh && rm install-utilities.sh
 
 # R & RStudio
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash

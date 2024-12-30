@@ -9,9 +9,11 @@ RUN conda update --all --solver=classic -n base -c conda-forge conda && \
 
 USER root
 
+# code-server (VSCode)
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
+
 COPY install-utilities.sh install-utilities.sh
 RUN bash install-utilities.sh && rm install-utilities.sh
-
 
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
@@ -26,9 +28,10 @@ RUN Rscript install.r
 ## switch from BSPM to r-universe for user default 
 COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
-
-
 USER ${NB_USER}
+
+RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
+
 COPY spatial-env.yml spatial-env.yml
 RUN conda update -n base -c conda-forge conda && \
     conda env update --file spatial-env.yml
@@ -37,7 +40,6 @@ COPY rl-env.yml rl-env.yml
 RUN conda update -n base -c conda-forge conda && \
     conda env update --file rl-env.yml
 
-
+# GDAL env var for vsi
 ENV CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES
-
 
