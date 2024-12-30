@@ -13,6 +13,9 @@ USER root
 COPY install-utilities.sh install-utilities.sh
 RUN bash install-utilities.sh && rm install-utilities.sh
 
+# code-server (VSCode)
+curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
+
 # R & RStudio
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
@@ -27,4 +30,6 @@ RUN Rscript install.r
 COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
 USER ${NB_USER}
+
+RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
 
