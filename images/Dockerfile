@@ -1,33 +1,18 @@
 FROM quay.io/jupyter/minimal-notebook:ubuntu-24.04
 
+# persistent storage (e.g. code-server extensions)
+ENV XDG_DATA_HOME=/opt/share
+
 COPY jupyter-ai.yml environment.yml
 RUN conda update -n base -c conda-forge conda && \
     conda env update --file environment.yml
 
 USER root
 
-# some apt-get utilities
-RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-openssl-dev libxml2-dev
+COPY install-utilities.sh install-utilities.sh
+RUN bash install-utilities.sh && rm install-utilities.sh
 
-# awscli tool
-RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-     unzip awscliv2.zip && \
-     ./aws/install
-
-# minio client
-RUN curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
-
-# git config
-RUN git config --system pull.rebase false && \
-    git config --system credential.credentialStore cache && \
-    git config --system credential.cacheOptions "--timeout 30000" && \
-    echo '"\e[5~": history-search-backward' >> /etc/inputrc && \
-    echo '"\e[6~": history-search-forward' >> /etc/inputrc
-
-RUN wget https://github.com/git-ecosystem/git-credential-manager/releases/download/v2.6.0/gcm-linux_amd64.2.6.0.deb && dpkg -i gcm-*.deb && rm gcm-*.deb
-
-#RUN git-credential-manager configure --system
-
+# R & RStudio
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
 
@@ -41,13 +26,7 @@ RUN Rscript install.r
 ## switch from BSPM to r-universe for user default 
 COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
-# ensure user owns all of /opt
-ENV XDG_DATA_HOME=/opt/share
-RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
-RUN mkdir /opt/share && chown -R ${NB_USER}:users /opt/share
-
 USER ${NB_USER}
 
-RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
 
 

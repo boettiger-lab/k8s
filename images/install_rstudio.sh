@@ -2,7 +2,7 @@
 set -e
 
 RSTUDIO_VERSION=${1:-${RSTUDIO_VERSION:-"stable"}}
-DEFAULT_USER=${DEFAULT_USER:-"rstudio"}
+NB_USER=${NB_USER:-"jovyan"}
 
 apt-get update && apt-get -y install \
     ca-certificates \
@@ -17,7 +17,7 @@ apt-get update && apt-get -y install \
     wget
 
 ARCH=$(dpkg --print-architecture)
-UBUNTU_CODENAME="noble"
+source /etc/os-release
 
 ## Download RStudio Server for Ubuntu 18+
 DOWNLOAD_FILE=rstudio-server.deb
@@ -72,4 +72,6 @@ echo "lock-type=advisory" >/etc/rstudio/file-locks
 cp /etc/rstudio/rserver.conf /etc/rstudio/disable_auth_rserver.conf
 echo "auth-none=1" >>/etc/rstudio/disable_auth_rserver.conf
 
+
+su ${NB_USER} -c "/opt/conda/bin/conda install -y jupyter-rsession-proxy"
 
