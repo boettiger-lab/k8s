@@ -44,7 +44,7 @@ COPY Rprofile /usr/lib/R/etc/Rprofile.site
 # ensure user owns all of /opt
 ENV XDG_DATA_HOME=/opt/share
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
-RUN chown -R ${NB_USER}:users /opt/share
+RUN mkdir /opt/share && chown -R ${NB_USER}:users /opt/share
 
 USER ${NB_USER}
 
