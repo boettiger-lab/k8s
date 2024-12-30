@@ -42,9 +42,9 @@ RUN Rscript install.r
 COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
 # ensure user owns all of /opt
-ENV XDG_DATA_HOME=/opt
+ENV XDG_DATA_HOME=/opt/share
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
-RUN chown -R ${NB_USER}:users /opt
+RUN chown -R ${NB_USER}:users /opt/share
 
 USER ${NB_USER}
 
