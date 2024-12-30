@@ -9,12 +9,6 @@ USER root
 # some apt-get utilities
 RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-openssl-dev libxml2-dev
 
-# install codeserver
-ENV XDG_DATA_HOME=/opt
-RUN chown -R ${NB_USER}:users /opt
-RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache && \
-    echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
-
 # awscli tool
 RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
      unzip awscliv2.zip && \
@@ -47,5 +41,13 @@ RUN Rscript install.r
 ## switch from BSPM to r-universe for user default 
 COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
+# ensure user owns all of /opt
+ENV XDG_DATA_HOME=/opt
+RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache 
+RUN chown -R ${NB_USER}:users /opt
+
 USER ${NB_USER}
+
+RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
+
 
