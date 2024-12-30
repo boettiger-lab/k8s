@@ -15,9 +15,6 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 # ollama
 # RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
 
-# quarto
-RUN wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.6.39/quarto-1.6.39-linux-amd64.deb && dpkg -i quarto*.deb && rm quarto*.deb
-
 # awscli tool
 RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
      unzip awscliv2.zip && \
@@ -39,6 +36,9 @@ RUN wget https://github.com/git-ecosystem/git-credential-manager/releases/downlo
 
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_r.sh | bash
 RUN curl -s https://raw.githubusercontent.com/boettiger-lab/repo2docker-r/refs/heads/main/install_rstudio.sh | bash
+
+## Add rstudio's binaries to path for quarto
+ENV PATH=$PATH:/usr/lib/rstudio-server/bin/quarto/bin
 
 # When run as root, install.r automagically handles any necessary apt-gets
 COPY install.r install.r
