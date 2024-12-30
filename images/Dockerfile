@@ -12,9 +12,6 @@ RUN apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-o
 # install codeserver
 RUN curl -fsSL https://code-server.dev/install.sh | sh && rm -rf .cache
 
-# ollama
-# RUN curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz && tar -C /usr -xzf ollama-linux-amd64.tgz
-
 # awscli tool
 RUN  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
      unzip awscliv2.zip && \
