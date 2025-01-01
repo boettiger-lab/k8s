@@ -31,5 +31,5 @@ COPY Rprofile /usr/lib/R/etc/Rprofile.site
 
 USER ${NB_USER}
 
-RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto" | xargs -n 1 code-server --install-extension
+RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto continue.continue ms-vscode.live-server" | xargs -n 1 code-server --install-extension
 
