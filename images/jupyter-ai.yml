@@ -4,6 +4,7 @@ channels:
 dependencies:
   - duckdb-engine
   - gh-scoped-creds
+  - git-filter-repo
   - ibis-duckdb
   - jupyterlab-myst
   - jupyter-ai
