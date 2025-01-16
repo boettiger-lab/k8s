@@ -40,64 +40,47 @@ singleuser:
           FileContentsManager:
             always_delete_dir: true
   profileList:
-    - display_name: "CPU"
-      slug: rocker
-      description: R environment with many geospatial libraries pre-installed
-      profile_options: &profile_options 
-        resource_allocation: &profile_options_resource_allocation 
-          display_name: Resource Allocation
-          choices:
-            small:
-              display_name: Small (8 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 7991341312
-                mem_limit: 7991341312
-            med:
-              display_name: Medium (30 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 15930730496
-                mem_limit: 15930730496
-            large:
-              display_name: Large (45 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 49861460992
-                mem_limit: 49861460992
-              default: true
-      kubespawner_override:
-        image: "ghcr.io/boettiger-lab/k8s:latest"
-        default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/rstudio
-    - display_name: "GPU"
-      slug: gpu
-      description: Jupyter + R with GPU 
+    - display_name: "Choose your environment and resources"
       default: true
-      allowed_teams:
-        - espm-288:jupyterhub
-      profile_options:
-        resource_allocation: *profile_options_resource_allocation 
-      kubespawner_override:
-        image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-        default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/rstudio
-    - display_name: "NASA Image"
-      slug: pangeo
-      description: NASA TOPS
-      profile_options:
-        resource_allocation: *profile_options_resource_allocation 
-      kubespawner_override:
-        image: "ghcr.io/boettiger-lab/nasa-tops:latest"
-    - display_name: "Bring your own image"
-      description: Specify your own docker image (must have python and jupyterhub installed in it)
-      slug: custom
       profile_options:
         image:
-          display_name: Image
+          display_name: Environment
+          dynamic_image_building:
+            enabled: True
           unlisted_choice:
             enabled: True
             display_name: "Custom image"
+            description: Specify your own docker image (must have python and jupyterhub installed in it)
+            validation_regex: "^.+:.+$"
+            validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-          choices: {}
+          choices:
+            01-cpu:
+              display_name: CPU 
+              description: General purpose python + R (with RStudio) environment 
+              kubespawner_override:
+                image:  "ghcr.io/boettiger-lab/k8s:latest"
+            02-gpu:
+              display_name: GPU
+              description: CUDA GPU environment, with RL 
+              kubespawner_override:
+                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+        resource_allocation:
+          display_name: Resource Allocation
+          choices:
+            mem_8:
+              display_name: 8 GB RAM
+              kubespawner_override:
+                mem_guarantee: 8G
+                mem_limit: 8G
+              default: true
+            mem_32:
+              display_name: 32 GB RAM
+              kubespawner_override:
+                mem_guarantee: 32G
+                mem_limit: 32G 
+
 hub:
   allowNamedServers: true
   namedServerLimitPerUser: 2
@@ -127,9 +110,9 @@ hub:
   services:
     binder:
       url: http://binderhub
-    image:
-      name: "quay.io/yuvipanda/z2jh-hub-with-fancy-profiles"
-      tag: "z2jh-v4.0.0-fancy-profiles-sha-f80b661"
+  image:
+    name: quay.io/yuvipanda/z2jh-hub-with-fancy-profiles
+    tag: z2jh-v4.0.0-fancy-profiles-sha-f80b661      
   extraConfig:
     enable-fancy-profiles: |
       from jupyterhub_fancy_profiles import setup_ui
