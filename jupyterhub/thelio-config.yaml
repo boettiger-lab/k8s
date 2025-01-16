@@ -44,42 +44,42 @@ singleuser:
       default: true
       profile_options:
         image:
-           display_name: Environment
-           dynamic_image_building:
-             enabled: True
-           unlisted_choice:
-             enabled: True
-             display_name: "Custom image"
-             description: Specify your own docker image (must have python and jupyterhub installed in it)
-             validation_regex: "^.+:.+$"
-             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
-             kubespawner_override:
-               image: "{value}"
-           choices:
-             01-CPU:
-               display_name: CPU 
-               description: General purpose python + R (with RStudio) environment 
-               kubespawner_override:
-                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-             02-GPU:
+          display_name: Environment
+          dynamic_image_building:
+            enabled: True
+          unlisted_choice:
+            enabled: True
+            display_name: "Custom image"
+            description: Specify your own docker image (must have python and jupyterhub installed in it)
+            validation_regex: "^.+:.+$"
+            validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
+            kubespawner_override:
+              image: "{value}"
+          choices:
+            01-CPU:
+              display_name: CPU 
+              description: General purpose python + R (with RStudio) environment 
+              kubespawner_override:
+                image:  "ghcr.io/boettiger-lab/k8s:latest"
+            02-GPU:
                display_name: GPU
-               description: CUDA GPU environment, with RL 
-               kubespawner_override:
-                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-         resource_allocation:
-           display_name: Resource Allocation
-           choices:
-             mem_8:
-               display_name: 8 GB RAM
-               kubespawner_override:
-                 mem_guarantee: 8G
-                 mem_limit: 8G
-               default: true
-             mem_32:
-               display_name: 32 GB RAM
-               kubespawner_override:
-                 mem_guarantee: 32G
-                 mem_limit: 32G 
+              description: CUDA GPU environment, with RL 
+              kubespawner_override:
+                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+        resource_allocation:
+          display_name: Resource Allocation
+          choices:
+            mem_8:
+              display_name: 8 GB RAM
+              kubespawner_override:
+                mem_guarantee: 8G
+                mem_limit: 8G
+              default: true
+            mem_32:
+              display_name: 32 GB RAM
+              kubespawner_override:
+                mem_guarantee: 32G
+                mem_limit: 32G 
 
 hub:
   allowNamedServers: true
