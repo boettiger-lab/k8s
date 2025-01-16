@@ -56,12 +56,12 @@ singleuser:
             kubespawner_override:
               image: "{value}"
           choices:
-            01-CPU:
+            01-cpu:
               display_name: CPU 
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-            02-GPU:
+            02-gpu:
               display_name: GPU
               description: CUDA GPU environment, with RL 
               kubespawner_override:
