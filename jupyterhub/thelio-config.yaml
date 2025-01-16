@@ -124,4 +124,15 @@ hub:
       oauth_callback_url: https://jupyterhub.thelio.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
-  
+  services:
+    binder:
+      url: http://binderhub
+    image:
+      name: "quay.io/yuvipanda/z2jh-hub-with-fancy-profiles"
+      tag: "z2jh-v4.0.0-fancy-profiles-sha-f80b661"
+  extraConfig:
+    enable-fancy-profiles: |
+      from jupyterhub_fancy_profiles import setup_ui
+      setup_ui(c)
+
+
