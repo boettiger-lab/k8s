@@ -1,0 +1,11 @@
+config:
+  BinderHub:
+    use_registry: true
+    image_prefix: ghcr.io/boettiger-lab/binder-
+    base_url: /services/binder
+  DockerRegistry:
+    url: https://ghcr.io
+buildPodsRegistryCredentials:
+  server: "https://ghcr.io"
+
+
