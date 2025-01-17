@@ -55,17 +55,20 @@ singleuser:
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
+              working_dir: /home/rstudio
           choices:
             01-cpu:
               display_name: CPU 
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
+                working_dir: /home/rstudio
             02-gpu:
               display_name: GPU
               description: CUDA GPU environment, with RL 
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                working_dir: /home/rstudio
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -100,7 +103,6 @@ hub:
       enable_auth_state: true
       populate_teams_in_auth_state: true
       allowed_organizations:
-        - espm-288:jupyterhub
         - boettiger-lab:current-members
       scope:
         - read:org
@@ -117,5 +119,4 @@ hub:
     enable-fancy-profiles: |
       from jupyterhub_fancy_profiles import setup_ui
       setup_ui(c)
-
 
