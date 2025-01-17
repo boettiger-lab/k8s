@@ -20,7 +20,7 @@ singleuser:
   storage:
     capacity: 60Gi
     extraVolumeMounts:
-      - name: "volume-{username}{servername}"
+      - name: "volume-{escaped_user_server}"
         mountPath: /home/rstudio
       - name: shm-volume
         mountPath: /dev/shm
@@ -40,67 +40,57 @@ singleuser:
           FileContentsManager:
             always_delete_dir: true
   profileList:
-    - display_name: "CPU"
-      slug: rocker
-      description: R environment with many geospatial libraries pre-installed
-      profile_options: &profile_options 
-        resource_allocation: &profile_options_resource_allocation 
-          display_name: Resource Allocation
-          choices:
-            small:
-              display_name: Small (8 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 7991341312
-                mem_limit: 7991341312
-              default: true
-            med:
-              display_name: Medium (16 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 15930730496
-                mem_limit: 15930730496
-            large:
-              display_name: Large (60 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 59861460992
-                mem_limit: 59861460992
-            special:
-              display_name: Special-use (up to 120 GB RAM)
-              kubespawner_override:
-                mem_guarantee: 59861460992
-                mem_limit: 122861460992
-      kubespawner_override:
-        image: "ghcr.io/boettiger-lab/k8s:latest"
-        default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/rstudio
-    - display_name: "GPU"
-      slug: gpu 
-      description: Jupyter + R with GPU 
+    - display_name: "Choose your environment and resources"
+      default: true
       profile_options:
-        resource_allocation: *profile_options_resource_allocation 
-      kubespawner_override:
-        image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-        default_url: /lab # change to /rstudio to go straight to RStudio
-        working_dir: /home/rstudio
-    - display_name: "Pangeo"
-      slug: pangeo
-      description: Pangeo 
-      profile_options:
-        resource_allocation: *profile_options_resource_allocation 
-      kubespawner_override:
-        image: pangeo/pytorch-notebook
-    - display_name: "Bring your own image"
-      description: Specify your own docker image (must have python and jupyterhub installed in it)
-      slug: custom
-      profile_options:
-        resource_allocation: *profile_options_resource_allocation 
         image:
-          display_name: Image
+          display_name: Environment
+          dynamic_image_building:
+            enabled: True
           unlisted_choice:
             enabled: True
             display_name: "Custom image"
+            description: Specify your own docker image (must have python and jupyterhub installed in it)
+            validation_regex: "^.+:.+$"
+            validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-          choices: {} 
+              working_dir: /home/rstudio
+          choices:
+            01-cpu:
+              display_name: CPU 
+              description: General purpose python + R (with RStudio) environment 
+              kubespawner_override:
+                image:  "ghcr.io/boettiger-lab/k8s:latest"
+                working_dir: /home/rstudio
+            02-gpu:
+              display_name: GPU
+              description: CUDA GPU environment, with RL 
+              kubespawner_override:
+                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                working_dir: /home/rstudio
+        resource_allocation:
+          display_name: Resource Allocation
+          choices:
+            mem_8:
+              display_name: 8 GB RAM
+              kubespawner_override:
+                mem_guarantee: 8G
+                mem_limit: 8G
+                cpu_limit: 12
+              default: true
+            mem_32:
+              display_name: 32 GB RAM
+              kubespawner_override:
+                mem_guarantee: 32G
+                mem_limit: 32G 
+            mem_64:
+              display_name: 64 GB RAM
+              kubespawner_override:
+                mem_guarantee: 64G
+                mem_limit: 64G 
+
+
 
 hub:
   allowNamedServers: true
@@ -125,5 +115,15 @@ hub:
       oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
+  services:
+    binder:
+      url: http://binderhub
+  image:
+    name: quay.io/yuvipanda/z2jh-hub-with-fancy-profiles
+    tag: z2jh-v4.0.0-fancy-profiles-sha-f80b661      
+  extraConfig:
+    enable-fancy-profiles: |
+      from jupyterhub_fancy_profiles import setup_ui
+      setup_ui(c)
 
 

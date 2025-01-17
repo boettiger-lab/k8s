@@ -8,7 +8,7 @@ helm upgrade \
   --create-namespace \
   --devel \
   --wait \
-  --namespace testjupyter \
+  --namespace jupyter \
   my-binderhub \
   binderhub-service/binderhub-service \
   --values binderhub-service-config.yaml \
