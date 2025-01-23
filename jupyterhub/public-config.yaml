@@ -89,6 +89,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 64G
                 mem_limit: 64G 
+            special:
+              display_name: special use
+              kubespawner_override:
+                mem_guarantee: 64G
+                mem_limit: 120G 
+
 
 
 
