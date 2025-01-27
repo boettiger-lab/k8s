@@ -1,5 +1,5 @@
-githubConfigUrl: "https://github.com/eco4cast"
-maxRunners: 1
+githubConfigUrl: "https://github.com/espm-288"
+maxRunners: 2
 runnerGroup: "default"
 
 ## Container mode is an object that provides out-of-box configuration
@@ -31,7 +31,7 @@ template:
            requests:
              memory: "1Gi"
            limits:
-             memory: "40Gi"
+             memory: "5Gi"
          env:
            - name: DOCKER_HOST
              value: unix:///var/run/docker.sock
@@ -46,7 +46,7 @@ template:
            requests:
              memory: "1Gi"
            limits:
-             memory: "40Gi"
+             memory: "5Gi"
          args:
            - dockerd
            - --host=unix:///var/run/docker.sock
