@@ -7,7 +7,6 @@ dependencies:
   - huggingface_hub
   - nox
   - nvitop
-  - glances
   - plotnine
   - PyYaml
   - pytest
