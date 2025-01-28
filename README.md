@@ -1,6 +1,10 @@
 # Self-hosting JupyterHub on GPU workstations
 
-See [blog post](https://hackmd.io/wJPNgpUETrG2F_-TthQTYw)
+Home to the configuration files for our lab jupyterhub.
+
+See [Zero to JupyterHub](https://z2jh.jupyter.org/en/stable/) for excellent official documentation on everything.  
+
+See [blog post](https://hackmd.io/wJPNgpUETrG2F_-TthQTYw) for some notes on this setup, specifically for k3s and GPU. 
 
 
 ## With external Caddy

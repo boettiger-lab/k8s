@@ -1,33 +1,43 @@
-#!/bin/bash 
+# May need to: 
+# helm registry logout ghcr.io
 
-helm repo add openebs https://openebs.github.io/openebs
-helm repo update
-helm install openebs openebs/openebs -n openebs --create-namespace
-
-
-# make sure we don't have stale ghcr.io credentials:
-#docker logout ghcr.io
-
+## do not think auth is needed in this...
 NAMESPACE="arc-systems"
 helm upgrade --cleanup-on-fail --install arc \
-    --namespace "${NAMESPACE}" \
-    --create-namespace \
-    oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+      --namespace "${NAMESPACE}" \
+      --create-namespace \
+      oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 
 
-
-
-INSTALLATION_NAME="arc-runner-espm157-f24"
+## APP Must be installed from https://github.com/organizations/eco4cast/settings/apps/cirrus-arc-runner/installations
+INSTALLATION_NAME="efi-cirrus"
 NAMESPACE="arc-runners"
 helm upgrade --cleanup-on-fail --install "${INSTALLATION_NAME}" \
   --namespace "${NAMESPACE}" \
   --create-namespace \
-  --values values.yaml \
+  --values secret_pat.yaml \
+  --values cirrus-efi-values.yaml \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
 
+INSTALLATION_NAME="arc-runner-espm157"
+NAMESPACE="arc-runners"
+helm upgrade --cleanup-on-fail --install "${INSTALLATION_NAME}" \
+  --namespace "${NAMESPACE}" \
+  --create-namespace \
+  --values secret_pat.yaml \
+  --values cirrus-espm157-values.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
-#  --set githubConfigSecret.github_token=${GITHUB_PAT} \
-#  --set githubConfigUrl=${GITHUB_CONFIG_URL} \
+INSTALLATION_NAME="arc-runner-espm288"
+NAMESPACE="arc-runners"
+helm upgrade --cleanup-on-fail --install "${INSTALLATION_NAME}" \
+  --namespace "${NAMESPACE}" \
+  --create-namespace \
+  --values secret_pat.yaml \
+  --values cirrus-espm288-values.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+
 
 

@@ -33,3 +33,10 @@ USER ${NB_USER}
 
 RUN echo "ms-python.python ms-toolsai.jupyter quarto.quarto continue.continue ms-vscode.live-server posit.shiny reditorsupport.r alefragnani.project-manager" | xargs -n 1 code-server --install-extension
 
+COPY spatial-env.yml spatial-env.yml
+RUN conda update -n base -c conda-forge conda && \
+    conda env update --file spatial-env.yml
+# GDAL env var for vsi
+ENV CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES
+
+

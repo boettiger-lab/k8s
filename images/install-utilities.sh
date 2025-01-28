@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # some apt-get utilities
-apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-openssl-dev libxml2-dev wget curl libtiff-dev
+apt-get update -qq && apt-get -y install vim git-lfs python3-venv libcurl4-openssl-dev libxml2-dev wget curl libtiff-dev qpdf
 
 # awscli tool
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
