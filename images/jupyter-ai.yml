@@ -24,4 +24,5 @@ dependencies:
     - git+https://gitlab.nrp-nautilus.io/prp/jupyter-ai-nrp
     - langchain-anthropic
     - langchain-openai
+    - jupyter-keepalive
 
