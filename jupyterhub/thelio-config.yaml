@@ -20,7 +20,7 @@ singleuser:
   storage:
     capacity: 60Gi
     extraVolumeMounts:
-      - name: "volume-{username}{servername}"
+      - name: "volume-{escaped_user_server}"
         mountPath: /home/rstudio
 #      - name: shm-volume
 #        mountPath: /dev/shm
@@ -28,6 +28,10 @@ singleuser:
 #      - name: shm-volume
 #        emptyDir:
 #          medium: Memory
+  lifecycleHooks:
+    postStart:
+      exec:
+        command: ["/bin/bash", "-c", "if [ -f '/opt/share/start.sh' ]; then /bin/bash '/opt/share/start.sh'; fi"]
   extraFiles:
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
