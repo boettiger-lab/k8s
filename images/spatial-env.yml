@@ -12,6 +12,8 @@ dependencies:
   - geoarrow-types
   - geopandas
   - geocube
+  - icechunk
+  - jupytergis
   - leafmap
   - libgdal-arrow-parquet
   - localtileserver
@@ -42,5 +44,6 @@ dependencies:
   - zarr
   - pip
   - pip:
+    - pcodec
     - git+https://github.com/boettiger-lab/cng-python.git
 
