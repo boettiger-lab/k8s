@@ -50,6 +50,8 @@ singleuser:
           unlisted_choice:
             enabled: True
             display_name: "Custom image"
+            display_name_in_choices: "Specify an existing docker image"
+            description_in_choices: "Use a pre-existing docker image from a public docker registry"
             description: Specify your own docker image (must have python and jupyterhub installed in it)
             validation_regex: "^.+:.+$"
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
@@ -80,7 +82,7 @@ singleuser:
                 cpu_limit: 12
               default: true
             mem_16:
-              display_name: 8 GB RAM
+              display_name: 16 GB RAM
               kubespawner_override:
                 mem_guarantee: 16G
                 mem_limit: 16G
