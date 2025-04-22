@@ -28,10 +28,10 @@ singleuser:
 #      - name: shm-volume
 #        emptyDir:
 #          medium: Memory
-  lifecycleHooks:
-    postStart:
-      exec:
-        command: ["/bin/bash", "-c", "if [ -f '/opt/share/start.sh' ]; then /bin/bash '/opt/share/start.sh'; fi"]
+#  lifecycleHooks:
+#    postStart:
+#      exec:
+#        command: ["/bin/bash", "-c", "if [ -f '/opt/share/start.sh' ]; then /bin/bash '/opt/share/start.sh'; fi"]
   extraFiles:
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
@@ -54,25 +54,24 @@ singleuser:
           unlisted_choice:
             enabled: True
             display_name: "Custom image"
+            display_name_in_choices: "Specify an existing docker image"
+            description_in_choices: "Use a pre-existing docker image from a public docker registry"
             description: Specify your own docker image (must have python and jupyterhub installed in it)
             validation_regex: "^.+:.+$"
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-              working_dir: /home/rstudio
           choices:
             01-cpu:
               display_name: CPU 
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-                working_dir: /home/rstudio
             02-gpu:
               display_name: GPU
               description: CUDA GPU environment, with RL 
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-                working_dir: /home/rstudio
         resource_allocation:
           display_name: Resource Allocation
           choices:

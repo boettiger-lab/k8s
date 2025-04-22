@@ -2,16 +2,11 @@ channels:
   - conda-forge
 dependencies:
   - altair
-  - code-server >=3.2
-  - ibis-duckdb
-  - ibis-pandas
   - jupyterlab-myst
-  - jupyter-vscode-proxy
   - libwebp
   - mystmd
   - nodejs>=20,<21
   - pip
-  - streamlit
   - vegafusion 
   - vegafusion-python-embed 
   - vegafusion-jupyter
