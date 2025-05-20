@@ -9,9 +9,16 @@
 # Available chart versions: https://hub.jupyter.org/helm-chart/
 ingress:
   enabled: true
-proxy:
-  service:
-    type: NodePort
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    kubernetes.io/ingress.class: traefik
+  tls:
+  - hosts:
+    - jupyterhub.thelio.carlboettiger.info
+    secretName: jupyter-thelio-tls
+#proxy:
+#  service:
+#    type: NodePort
 cull:
   enabled: false
 singleuser:
