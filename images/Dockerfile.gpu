@@ -1,5 +1,9 @@
 FROM ghcr.io/rocker-org/cuda-spatial 
 
+# Config will be populated by env vars and moved to HOME via start script: (hub-dependent)
+COPY continue/config.json /opt/share/continue/config.json
+COPY continue/config.ts /opt/share/continue/config.ts
+
 COPY rl-env.yml rl-env.yml
 RUN conda update -n base -c conda-forge conda && \
     conda env update --file rl-env.yml
