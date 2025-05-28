@@ -3,9 +3,11 @@ helm repo update
 
 
 helm upgrade \
- cert-manager jetstack/cert-manager \
+  --cleanup-on-fail \
+  --install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --create-namespace \
   --set installCRDs=true
 
+kubectl apply -f cluster-issuer-prod.yaml
 

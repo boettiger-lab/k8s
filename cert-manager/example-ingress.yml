@@ -5,12 +5,13 @@ kind: Ingress
 metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
-    kubernetes.io/ingress.class: traefik
+#    kubernetes.io/ingress.class: traefik
   labels:
     app: nginx
   name: nginx
   namespace: default
 spec:
+  ingressClassName: traefik
   rules:
   - host: thelio.carlboettiger.info # Change by your domain
     http:

@@ -16,9 +16,6 @@ ingress:
   - hosts:
     - jupyterhub.thelio.carlboettiger.info
     secretName: jupyter-thelio-tls
-#proxy:
-#  service:
-#    type: NodePort
 cull:
   enabled: false
 singleuser:
@@ -27,19 +24,20 @@ singleuser:
   storage:
     capacity: 60Gi
     extraVolumeMounts:
-      - name: "volume-{escaped_user_server}"
-        mountPath: /home/rstudio
-#      - name: shm-volume
-#        mountPath: /dev/shm
-#    extraVolumes:
-#      - name: shm-volume
-#        emptyDir:
-#          medium: Memory
+#      - name: "volume-{escaped_user_server}"
+#        mountPath: /home/rstudio
+      - name: shm-volume
+        mountPath: /dev/shm
+    extraVolumes:
+      - name: shm-volume
+        emptyDir:
+          medium: Memory
 #  lifecycleHooks:
 #    postStart:
 #      exec:
 #        command: ["/bin/bash", "-c", "if [ -f '/opt/share/start.sh' ]; then /bin/bash '/opt/share/start.sh'; fi"]
   extraFiles:
+    # mounts containing folder as read-only
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
         data:
@@ -69,30 +67,30 @@ singleuser:
             kubespawner_override:
               image: "{value}"
           choices:
-            01-cpu:
+            02-cpu:
               display_name: CPU 
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-            02-gpu:
+            01-gpu:
               display_name: GPU
-              description: CUDA GPU environment, with RL 
+              description: CUDA GPU environment, with spatial-GPU 
               kubespawner_override:
-                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                image: "ghcr.io/rocker-org/cuda-spatial:latest"
         resource_allocation:
           display_name: Resource Allocation
           choices:
-            mem_8:
+            small:
               display_name: 8 GB RAM
               kubespawner_override:
                 mem_guarantee: 8G
                 mem_limit: 8G
-              default: true
-            mem_32:
-              display_name: 32 GB RAM
+            big:
+              display_name: 50 GB RAM
               kubespawner_override:
-                mem_guarantee: 32G
-                mem_limit: 32G 
+                mem_guarantee: 50G
+                mem_limit: 50G 
+              default: true
 
 hub:
   allowNamedServers: true
@@ -104,6 +102,8 @@ hub:
         SHELL: /usr/bin/bash
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
         GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
+        AWS_S3_ENDPOINT: "minio.carlboettiger.info"
+        AWS_HTTPS: "true"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
