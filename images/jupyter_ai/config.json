@@ -1,0 +1,25 @@
+{
+    "model_provider_id": "openai-chat-custom:llama3-sdsc",
+    "embeddings_provider_id": "openai-custom:mistral-embed",
+    "send_with_shift_enter": false,
+    "fields": {
+        "openai-chat-custom:llama3": {
+            "openai_api_base": "https://llm.nrp-nautilus.io"
+        },
+        "openai-chat-custom:llama3-sdsc": {
+            "openai_api_base": "https://llm.nrp-nautilus.io"
+        }
+    },
+    "api_keys": {
+        "OPENAI_API_KEY": "$OPENAI_API_KEY"
+    },
+    "completions_model_provider_id": null,
+    "completions_fields": {},
+    "embeddings_fields": {
+        "openai-custom:mistral-embed": {
+            "openai_api_base": "https://llm.nrp-nautilus.io"
+        }
+    }
+}
+
+
