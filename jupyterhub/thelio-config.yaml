@@ -32,10 +32,6 @@ singleuser:
       - name: shm-volume
         emptyDir:
           medium: Memory
-#  lifecycleHooks:
-#    postStart:
-#      exec:
-#        command: ["/bin/bash", "-c", "if [ -f '/opt/share/start.sh' ]; then /bin/bash '/opt/share/start.sh'; fi"]
   extraFiles:
     # mounts containing folder as read-only
     jupyter_server_config.json:
