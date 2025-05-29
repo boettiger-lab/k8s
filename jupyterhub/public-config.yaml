@@ -66,11 +66,16 @@ singleuser:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
                 working_dir: /home/rstudio
             02-gpu:
-              display_name: GPU
+              display_name: RL
               description: CUDA GPU environment, with RL 
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
                 working_dir: /home/rstudio
+            03-gpu-spatial:
+              display_name: GPU Spatial
+              description: Rapids-AI GPU Spatial environment
+              kubespawner_override:
+                image: "ghcr.io/rocker-org/cuda-spatial:latest"
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -100,7 +105,7 @@ singleuser:
             special:
               display_name: special use
               kubespawner_override:
-                mem_guarantee: 64G
+                mem_guarantee: 32G
                 mem_limit: 120G 
 
 
@@ -116,7 +121,9 @@ hub:
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
         GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
         AWS_S3_ENDPOINT: "minio.carlboettiger.info"
+        AWS_PUBLIC_ENDPOINT: "$AWS_S3_ENDPOINT"
         AWS_HTTPS: "true"
+        AWS_VIRTUAL_HOSTING: "FALSE"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
