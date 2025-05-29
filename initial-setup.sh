@@ -6,18 +6,18 @@
 #
 # (Don't really curl ... | sh without inspecting source!)
 # If we are use K8s's default ingress controller (traefik) and use k8s  cert-manager.io for https:
-# curl -sfL https://get.k3s.io | sh -
+curl -sfL https://get.k3s.io | sh -
 
 # Otherwise, to use jupyter's cert manager, or manual caddy, do:
-curl -sfL https://get.k3s.io | sh -s - --disable=traefik 
+# curl -sfL https://get.k3s.io | sh -s - --disable=traefik 
 
 echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> ~/.bashrc
 source ~/.bashrc
 sudo chown $(id -u) /etc/rancher/k3s/k3s.yaml
 
-# Install Helm
+# Install Helm (Not needed, already installed in k3s)
 # ============================
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Enable GPU + timeslicing
 # ============================

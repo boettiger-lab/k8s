@@ -1,0 +1,31 @@
+# ingress ingress-nginx.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+#    kubernetes.io/ingress.class: traefik
+  labels:
+    app: nginx
+  name: nginx
+  namespace: default
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: thelio.carlboettiger.info # Change by your domain
+    http:
+      paths:
+      - backend:
+          service:
+            name: nginx
+            port: 
+              number: 80
+        path: /
+        pathType: Prefix  
+  tls:
+  - hosts:
+    - thelio.carlboettiger.info # Change by your domain
+    secretName: example-com-tls
+
+

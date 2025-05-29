@@ -7,6 +7,15 @@ See [Zero to JupyterHub](https://z2jh.jupyter.org/en/stable/) for excellent offi
 See [blog post](https://hackmd.io/wJPNgpUETrG2F_-TthQTYw) for some notes on this setup, specifically for k3s and GPU. 
 
 
+
+Nvidia container toolkit setup
+
+(not strictly necessary?  install nvidia-container-toolkit and simply enable nvidia runtime in Jupyter)
+
+<https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
+
+
+
 ## With external Caddy
 
 - Run `K3s` with `--disabled=traefik` (as Caddy will be handling the external network; otherwise this creates conflicts over the http/https ports, 80 & 443).

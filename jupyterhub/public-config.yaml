@@ -108,9 +108,6 @@ singleuser:
                 mem_guarantee: 32G
                 mem_limit: 120G 
 
-
-
-
 hub:
   allowNamedServers: true
   config:
