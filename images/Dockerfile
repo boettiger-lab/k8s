@@ -8,7 +8,7 @@ USER root
 RUN mkdir /opt/share/jupyter && chown -R jovyan:users /opt/share/jupyter
 USER jovyan
 
-COPY jupyter_ai/config.json /opt/share/jupyter/jupyter_ai/config.json
+# COPY jupyter_ai/config.json /opt/share/jupyter/jupyter_ai/config.json
 # COPY jupyter_ai/config_schema.json /opt/share/jupyter_ai/config_schema.json
 
 
