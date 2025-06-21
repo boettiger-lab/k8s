@@ -22,10 +22,16 @@ singleuser:
   image: 
     pullPolicy: Always
   storage:
+    type: dynamic
+    extraLabels: {}
     capacity: 60Gi
+    homeMountPath: /home/jovyan
+    dynamic:
+      storageClass:  openebs-zfs
+      pvcNameTemplate: claim-{escaped_user_server}
+      volumeNameTemplate: volume-{escaped_user_server}
+      storageAccessModes: [ReadWriteOnce]
     extraVolumeMounts:
-#      - name: "volume-{escaped_user_server}"
-#        mountPath: /home/rstudio
       - name: shm-volume
         mountPath: /dev/shm
     extraVolumes:
