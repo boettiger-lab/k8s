@@ -76,6 +76,7 @@ singleuser:
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
                 image: "ghcr.io/rocker-org/cuda-spatial:latest"
+                default_url: /vscode
         resource_allocation:
           display_name: Resource Allocation
           choices:
