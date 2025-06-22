@@ -79,6 +79,7 @@ singleuser:
               description: CUDA GPU environment, with spatial-GPU 
               kubespawner_override:
                 image: "ghcr.io/rocker-org/cuda-spatial:latest"
+                default_url: "/vscode"
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -88,15 +89,15 @@ singleuser:
                 mem_guarantee: 8G
                 mem_limit: 8G
             big:
-              display_name: 50 GB RAM
+              display_name: 45 GB RAM
               kubespawner_override:
-                mem_guarantee: 50G
-                mem_limit: 50G 
+                mem_guarantee: 45G
+                mem_limit: 45G 
               default: true
 
 hub:
   allowNamedServers: true
-  namedServerLimitPerUser: 2
+  namedServerLimitPerUser: 1
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:

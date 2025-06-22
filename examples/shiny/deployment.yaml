@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shiny-deployment
+  labels:
+    k8s-app: shiny-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: shiny-app
+  template:
+    metadata:
+      labels:
+        k8s-app: shiny-app
+    spec:
+      containers:
+      - name: shiny
+        image:  ghcr.io/boettiger-lab/nautilus-shiny
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: 2
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 2Gi

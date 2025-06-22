@@ -1,0 +1,31 @@
+## NOTE: Assumes cert-manager and external-dns have been set up.
+## Ensure A record exists first if external-dns is not setup
+## cloudflare-proxied specific option to cloudflare, subdomains only, does not support sub.sub domains.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shiny-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: shiny-deployment
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: shiny-thelio.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: shiny-svc
+            port:
+              number: 8080
+  tls:
+  - hosts:
+    - shiny-thelio.carlboettiger.info
+    secretName: shiny-tls
+
