@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-helm repo add minio-operator https://operator.min.io
+# helm repo add minio-operator https://operator.min.io
 
 helm install \
   --namespace minio-operator \
