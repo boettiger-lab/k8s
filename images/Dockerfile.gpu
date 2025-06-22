@@ -1,4 +1,4 @@
-FROM ghcr.io/rocker-org/cuda-spatial 
+FROM ghcr.io/rocker-org/cuda
 
 # Config will be populated by env vars and moved to HOME via start script: (hub-dependent)
 COPY continue/config.json /opt/share/continue/config.json
