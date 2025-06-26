@@ -16,6 +16,8 @@ ingress:
   - hosts:
     - jupyterhub.thelio.carlboettiger.info
     secretName: jupyter-thelio-tls
+  hosts: 
+  - "jupyterhub.thelio.carlboettiger.info"
 cull:
   enabled: false
 singleuser:

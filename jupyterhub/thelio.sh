@@ -5,7 +5,7 @@ helm repo update
 
 ## use your name for install name and namespace name
 helm upgrade --cleanup-on-fail \
-  --install juypter jupyterhub/jupyterhub \
+  --install jupyter jupyterhub/jupyterhub \
   --namespace jupyter \
   --create-namespace \
   --version=4.0.0 \
