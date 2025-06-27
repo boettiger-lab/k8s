@@ -1,0 +1,134 @@
+# Deploys a new Namespace for the MinIO Pod
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio-dev # Change this value if you want a different namespace name
+  labels:
+    name: minio-dev # Change this value to match metadata.name
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-deployment
+  namespace: minio-dev
+  labels:
+    k8s-app: minio-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: minio-app
+  template:
+    metadata:
+      labels:
+        k8s-app: minio-app
+    spec:
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:latest
+        command:
+        - /bin/bash
+        - -c
+        args: 
+        - minio server /data --console-address :9090
+        volumeMounts:
+        - mountPath: /data
+          name: localvolume # Corresponds to the `spec.volumes` Persistent Volume
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: mnio-secrets
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: my-secret
+              key: MINIO_ROOT_PASSWORD
+      volumes:
+      - name: localvolume
+        hostPath: # MinIO generally recommends using locally-attached volumes
+          path: /media/minio/data # Specify a path to a local drive or volume on the Kubernetes worker node
+          type: DirectoryOrCreate # The path to the last directory must exist
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-svc
+  namespace: minio-dev
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: minio-thelio.carlboettiger.info,data-thelio.carlboettiger.info
+spec:
+  ports:
+    - name: console 
+      port: 9090
+      protocol: TCP
+      targetPort: 9090
+    - name: api 
+      port: 9000
+      protocol: TCP
+      targetPort: 9000
+  selector:
+    k8s-app: minio-app
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: minio-dev
+  name: minio-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: minio-deployment
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: minio-thelio.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-svc
+            port:
+              name: console 
+  tls:
+  - hosts:
+    - minio-thelio.carlboettiger.info
+    secretName: minio-tls
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: minio-dev
+  name: data-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: minio-deployment
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: data-thelio.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-svc
+            port:
+              name: api 
+  tls:
+  - hosts:
+    - data-thelio.carlboettiger.info
+    secretName: data-tls
+
+
