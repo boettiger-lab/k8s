@@ -1,0 +1,7 @@
+# Ignore actual secrets file
+secrets.sh
+
+# Ignore any other local secret files
+*.local
+*.secret
+.env
