@@ -21,6 +21,7 @@ RAM use (etc) of active container (cgroup)
 
 ```
 cat /sys/fs/cgroup/memory.max | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
+cat /sys/fs/cgroup/memory.usage_in_bytes | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
 ```
 
 
