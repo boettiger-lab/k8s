@@ -7,5 +7,5 @@ USER root
 RUN mkdir -p /opt/share/jupyter/jupyter_ai && chown -R jovyan:users /opt/share/jupyter
 USER jovyan
 
-RUN install2.r rsvg nimble
+RUN install2.r rsvg nimble jqr av
 
