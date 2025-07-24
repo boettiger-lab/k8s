@@ -1,0 +1,25 @@
+## NOTE: Assumes cert-manager and external-dns have been set up.
+## Ensure A record exists first if external-dns is not setup
+## cloudflare-proxied specific option to cloudflare, subdomains only, does not support sub.sub domains.
+##
+## This uses Traefik's TCP routing to expose PostgreSQL directly
+## Clients can connect using: psql -h postgres-cirrus.carlboettiger.info -p 5432 -U postgres
+
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: postgres-tcp-ingress
+  annotations:
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"  # TCP traffic cannot be proxied through Cloudflare
+  labels:
+    app: postgres
+spec:
+  entryPoints:
+    - postgres-tcp  # You'll need to configure this entrypoint in Traefik
+  routes:
+  - match: HostSNI(`postgres-cirrus.carlboettiger.info`)
+    services:
+    - name: postgres-service
+      port: 5432
+  tls:
+    secretName: postgres-tls

@@ -15,8 +15,19 @@ Nvidia container toolkit setup
 <https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
 
 
+# Tricks
+
+RAM use (etc) of active container (cgroup)
+
+```
+cat /sys/fs/cgroup/memory.max | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
+cat /sys/fs/cgroup/memory.current | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
+```
+
 
 ## With external Caddy
+
+(Deprecating)
 
 - Run `K3s` with `--disabled=traefik` (as Caddy will be handling the external network; otherwise this creates conflicts over the http/https ports, 80 & 443).
 - For `jupyterhub`, config needs:
