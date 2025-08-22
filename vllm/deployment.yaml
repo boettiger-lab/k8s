@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-deployment
+  labels:
+    k8s-app: vllm-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-app
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-app
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.8.5
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vllm-huggingface-token
+              key: token
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "8"
+        - name: NCCL_P2P_LEVEL
+          value: "NVL"
+        - name: NCCL_DEBUG
+          value: "TRACE"
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
+        args:
+        - "--dtype=half"
+        - "--model"
+        - "Qwen/Qwen3-32B-AWQ"
+        - "--served-model-name"
+        - "cirrus"
+        - "--tool-call-parser"
+        - "hermes"
+        - "--enable-auto-tool-choice"
+        - "--tensor-parallel-size"
+        - "2"
+        - "--enforce-eager"
+        - "--trust-remote-code"
+        - "--gpu-memory-utilization"
+        - "0.9"
+        volumeMounts:
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        - name: dshm
+          mountPath: /dev/shm
+        resources:
+          requests:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
+          limits:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: huggingface-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: DirectoryOrCreate
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-svc
+  labels:
+    k8s-app: vllm-svc
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: vllm-cirrus.carlboettiger.info
+    external-dns.alpha.kubernetes.io/ttl: "120" #optional
+
+
+# ports.targetPort is the port exposed by the Docker container
+# ports.port is the port matched to the ingress
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    k8s-app: vllm-app
+  type: ClusterIP
