@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# DEPRECATED -- much more concise, persistent change in public-config.yaml.  
+# Can apply this after launching hub to restore self-minio access if needed.  
+
 # Enable external service access for JupyterHub singleuser pods
 # This patch allows Jupyter pods to access external services via hairpin mode
 # and connect to services in other namespaces (like MinIO and Traefik)
