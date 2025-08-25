@@ -1,4 +1,11 @@
-# Self-hosting JupyterHub on GPU workstations
+# K3S Deployments for local servers
+
+This respository contains all the configuration files (modulo appropriate secrets) for deploying the computational environment of our research team across our local (i.e. campus-based) workstations.  
+
+We now use a kubernetes-based approach, replacing the pure-docker approach we used across our platforms previously (see [servers repo](https://github.com/boettiger-lab/servers)). This retains the same containerized abstractions for the software stack (often the very same docker containers), but provides additional abstractions around the hardware, orchestration, and resource management.
+
+
+## JupyterHub on GPU workstations
 
 Home to the configuration files for our lab jupyterhub.
 
@@ -24,34 +31,6 @@ cat /sys/fs/cgroup/memory.max | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
 cat /sys/fs/cgroup/memory.current | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'
 ```
 
-
-## With external Caddy
-
-(Deprecating)
-
-- Run `K3s` with `--disabled=traefik` (as Caddy will be handling the external network; otherwise this creates conflicts over the http/https ports, 80 & 443).
-- For `jupyterhub`, config needs:
-
-```
-ingress:
-  enabled: true
-proxy:
-  service:
-    type: NodePort
-```
-
-nothing else is needed in `proxy` (i.e. we don't need `https` section as Caddy will handle this. (ClusterIP may be a more natural choice but I think will be an internal node IP either way). 
-
-- Then, in Caddyfile, just map to the Cluster-IP shown for the proxy service (i.e. by `kubectrl -n testjupyter get services proxy-public`), e.g. something like:
-
-```
-<insert-domain-name> {
-  tls <insert-email-address>
-  reverse_proxy <insert-cluster-ip> {
-    header_up Host {host}
-  }
-}
-```
 
 
 
