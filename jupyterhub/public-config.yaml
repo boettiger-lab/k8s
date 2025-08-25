@@ -7,6 +7,11 @@
 # Chart config reference:   https://zero-to-jupyterhub.readthedocs.io/en/stable/resources/reference.html
 # Chart default values:     https://github.com/jupyterhub/zero-to-jupyterhub-k8s/blob/HEAD/jupyterhub/values.yaml
 # Available chart versions: https://hub.jupyter.org/helm-chart/
+#
+# NOTE: The singleuser.networkPolicy configuration below replaces the functionality
+# of enable-external-access.sh and allows hairpin connections for JupyterHub pods
+# to access external services like minio.carlboettiger.info and other cluster services.
+#
 ingress:
   enabled: true
   annotations:
@@ -34,6 +39,26 @@ singleuser:
       - name: shm-volume
         emptyDir:
           medium: Memory
+  networkPolicy:
+    enabled: true
+    egressAllowRules:
+      # Enable access to private IP ranges (for MinIO and other cluster services)
+      privateIPs: true
+      # Keep DNS resolution working
+      dnsPortsPrivateIPs: true
+      dnsPortsKubeSystemNamespace: true
+      # Allow internet access (excluding private ranges) - enables hairpin connections
+      nonPrivateIPs: true
+    egress:
+      # Specific access to your external IP (minio.carlboettiger.info at 128.32.85.8)
+      - to:
+          - ipBlock:
+              cidr: 128.32.85.8/32
+      # Allow access to MinIO namespace by label selector
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                name: minio
   extraFiles:
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
