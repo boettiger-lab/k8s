@@ -26,17 +26,20 @@ spec:
       containers:
       - name: minio
         image: quay.io/minio/minio:latest
-        command:
-        - /bin/bash
-        - -c
-        args: 
-        - minio server /data1 /data2 --console-address :9090
+        args:
+        - server
+        - /data1
+        - /data2
+        - --console-address
+        - ":9090"
         volumeMounts:
         - mountPath: /data1
           name: nvme2 # Corresponds to the `spec.volumes` Persistent Volume
         - mountPath: /data2
           name: nvme3 # Corresponds to the `spec.volumes` Persistent Volume
         env:
+        - name: MINIO_SERVER_ADDRESS
+          value: "0.0.0.0:9000"
         - name: MINIO_ROOT_USER
           valueFrom:
             secretKeyRef:
@@ -64,7 +67,7 @@ metadata:
   name: minio-svc
   namespace: minio
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: minio-thelio.carlboettiger.info,data-thelio.carlboettiger.info
+    external-dns.alpha.kubernetes.io/hostname: minio.carlboettiger.info,data.carlboettiger.info
 spec:
   ports:
     - name: console 
