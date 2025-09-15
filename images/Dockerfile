@@ -1,7 +1,7 @@
 FROM ghcr.io/rocker-org/ml-spatial
 
-COPY continue/config.json /opt/share/continue/config.json
-COPY continue/config.ts /opt/share/continue/config.ts
+# COPY continue/config.json /opt/share/continue/config.json
+# COPY continue/config.ts /opt/share/continue/config.ts
 
 # If XDG_CONFIG_DIR is set only
 # USER root
