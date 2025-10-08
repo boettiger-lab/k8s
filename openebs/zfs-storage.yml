@@ -4,10 +4,10 @@ metadata:
   name: openebs-zfs
 parameters:
   recordsize: "128k"
-  compression: "off"
+  compression: "lz4"
   dedup: "off"
   fstype: "zfs"
-  poolname: "openebs-zpool"
+  poolname: "tank"
 provisioner: zfs.csi.openebs.io
 
 

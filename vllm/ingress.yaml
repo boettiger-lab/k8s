@@ -23,7 +23,7 @@ spec:
           service:
             name: vllm-svc
             port:
-              number: 8080
+              number: 8000
   tls:
   - hosts:
     - vllm-cirrus.carlboettiger.info

@@ -1,0 +1,142 @@
+# Deploys a new Namespace for the MinIO Pod
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio # Change this value if you want a different namespace name
+  labels:
+    name: minio # Change this value to match metadata.name
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-deployment
+  namespace: minio
+  labels:
+    k8s-app: minio-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: minio-app
+  template:
+    metadata:
+      labels:
+        k8s-app: minio-app
+    spec:
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:latest
+        args:
+        - server
+        - /data1
+        - /data2
+        - --console-address
+        - ":9090"
+        volumeMounts:
+        - mountPath: /data1
+          name: nvme2 # Corresponds to the `spec.volumes` Persistent Volume
+        - mountPath: /data2
+          name: nvme3 # Corresponds to the `spec.volumes` Persistent Volume
+        env:
+        - name: MINIO_SERVER_ADDRESS
+          value: "0.0.0.0:9000"
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-secrets
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-secrets
+              key: MINIO_ROOT_PASSWORD
+      volumes:
+      - name: nvme2
+        hostPath: # MinIO generally recommends using locally-attached volumes
+          path: /mnt/nvme2/ # Specify a path to a local drive or volume on the Kubernetes worker node
+          type: DirectoryOrCreate # The path to the last directory must exist
+      - name: nvme3
+        hostPath: # MinIO generally recommends using locally-attached volumes
+          path: /mnt/nvme3/ # Specify a path to a local drive or volume on the Kubernetes worker node
+          type: DirectoryOrCreate # The path to the last directory must exist
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-svc
+  namespace: minio
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: minio.carlboettiger.info,data.carlboettiger.info
+spec:
+  ports:
+    - name: console 
+      port: 9090
+      protocol: TCP
+      targetPort: 9090
+    - name: api 
+      port: 9000
+      protocol: TCP
+      targetPort: 9000
+  selector:
+    k8s-app: minio-app
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: minio
+  name: minio-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: minio-deployment
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: minio.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-svc
+            port:
+              name: api 
+  tls:
+  - hosts:
+    - minio.carlboettiger.info
+    secretName: minio-tls
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: minio
+  name: data-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: minio-deployment
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: data.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-svc
+            port:
+              name: console
+  tls:
+  - hosts:
+    - data.carlboettiger.info
+    secretName: data-tls
+
+
