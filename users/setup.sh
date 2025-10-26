@@ -23,7 +23,8 @@ echo "Applying RBAC configuration (templated with USERID) ..."
 export USERID
 
 # Render templates and apply
-for f in serviceaccount.yaml role.yaml rolebinding.yaml; do
+# Includes cluster-scoped read permissions to list/describe nodes
+for f in serviceaccount.yaml role.yaml rolebinding.yaml clusterrole.yaml clusterrolebinding.yaml; do
 	if [ -f "$f" ]; then
 		envsubst < "$f" | kubectl apply -f -
 	else

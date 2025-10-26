@@ -9,6 +9,8 @@ The configuration creates:
 - A ServiceAccount for that user
 - A Role with permissions limited to that namespace
 - A RoleBinding that connects the ServiceAccount to the Role
+- A ClusterRole granting read-only access to cluster Nodes (plus pods/events for better `kubectl describe node`)
+- A ClusterRoleBinding that connects the ServiceAccount to the ClusterRole
 - A kubeconfig file for the user to access the cluster
 
 ## Permissions
@@ -23,9 +25,8 @@ The user ($USERID) has the following permissions within the `$USERID` namespace:
 All with full CRUD permissions (get, list, watch, create, update, delete, patch).
 
 The user **cannot**:
-- Access other namespaces
+- Access or modify other namespaces' resources (except read-only access to pods/events for `describe node`)
 - Create or modify cluster-wide resources
-- View nodes or other cluster infrastructure
 - Manage RBAC permissions
 
 ## Setup
@@ -138,8 +139,18 @@ kubectl --kubeconfig=${USERID}-kubeconfig.yaml get pods
 # Should fail - cannot access other namespaces
 kubectl --kubeconfig=${USERID}-kubeconfig.yaml get pods -n kube-system
 
-# Should fail - cannot list nodes
+# Should work - can read cluster Nodes
 kubectl --kubeconfig=${USERID}-kubeconfig.yaml get nodes
+
+# Should work - can describe a node (may include pods/events if permitted)
+kubectl --kubeconfig=${USERID}-kubeconfig.yaml describe node $(kubectl get nodes -o name | head -n1 | cut -d/ -f2)
+
+Note on `describe`:
+- `kubectl describe` is a client-side convenience that performs one or more API calls (e.g., `get`, `list`). There is no `describe` verb in Kubernetes RBAC.
+- For Nodes, `describe` requires:
+  - `get`, `list` on `nodes` (cluster-scoped)
+  - optionally `get`, `list` on namespaced `pods` across all namespaces to show the "Non-terminated Pods" section
+  - optionally `get`, `list` on namespaced `events` across all namespaces to show related events
 ```
 
 ## Token Expiration
@@ -156,10 +167,11 @@ kubectl config set-credentials ${USERID} --token=${NEW_TOKEN} --kubeconfig=${USE
 
 ## Modifying Permissions
 
-To add or remove permissions, edit `role.yaml` and reapply:
+To add or remove permissions, edit `role.yaml` (namespace-scoped) or `clusterrole.yaml` (cluster-scoped) and reapply:
 
 ```bash
 env USERID=$USERID envsubst < role.yaml | kubectl apply -f -
+env USERID=$USERID envsubst < clusterrole.yaml | kubectl apply -f -
 ```
 
 Changes take effect immediately without needing to regenerate the kubeconfig.
