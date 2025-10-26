@@ -6,14 +6,15 @@
 #
 # (Don't really curl ... | sh without inspecting source!)
 # If we are use K8s's default ingress controller (traefik) and use k8s  cert-manager.io for https:
-curl -sfL https://get.k3s.io | sh -
+curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
 
 # Otherwise, to use jupyter's cert manager, or manual caddy, do:
 # curl -sfL https://get.k3s.io | sh -s - --disable=traefik 
 
 echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> ~/.bashrc
 source ~/.bashrc
-sudo chown $(id -u) /etc/rancher/k3s/k3s.yaml
+# With --write-kubeconfig-mode 644, the kubeconfig is readable by non-root users.
+# No need to change ownership.
 
 # Install Helm (Not needed, already installed in k3s)
 # ============================

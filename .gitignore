@@ -1,4 +1,41 @@
+# Archives
 *.tgz
+
+# Generic secret markers (broad)
 *secret*
 *private*
+
+# Kubeconfig files (contain tokens)
+*-kubeconfig.yaml
+*kubeconfig*.yaml
+k3s/k3s-remote-kubeconfig.yaml
+users/*-kubeconfig.yaml
+
+# Environment files
+.env
+.env.*
+*.env
+
+# Private keys and certificates
+*.key
+*.pem
+*.p12
+*.pfx
+*.p8
+*.csr
+*.crt
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+id_ed25519_sk
+
+# Kubernetes secrets manifests
+*secret*.yml
+*secret*.yaml
+*-secrets.yml
+*-secrets.yaml
+
+# Helm values that commonly store secrets
+*values.private*.yaml
 
