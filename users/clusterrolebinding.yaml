@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${USERID}-readnodes-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ${USERID}-cluster-readnodes
+subjects:
+  - kind: ServiceAccount
+    name: ${USERID}
+    namespace: ${USERID}

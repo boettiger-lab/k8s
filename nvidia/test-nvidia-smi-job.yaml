@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nvidia-smi
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: nvidia-smi-test
+    spec:
+      restartPolicy: Never
+      runtimeClassName: nvidia
+      containers:
+        - name: nvidia-smi
+          image: docker.io/nvidia/cuda:12.4.1-base-ubuntu22.04
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-lc", "nvidia-smi && echo 'GPU OK' || (echo 'nvidia-smi failed' && sleep 5 && nvidia-smi)" ]
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              nvidia.com/gpu: 1
+              cpu: "100m"
+              memory: "128Mi"
