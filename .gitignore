@@ -1,5 +1,6 @@
 # Archives
 *.tgz
+*.tar.gz
 
 # Generic secret markers (broad)
 *secret*
@@ -38,4 +39,7 @@ id_ed25519_sk
 
 # Helm values that commonly store secrets
 *values.private*.yaml
+
+# Hugo local artifacts
+hugo_extended_*.tar.gz
 

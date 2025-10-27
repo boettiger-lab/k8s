@@ -14,30 +14,30 @@ This repository contains all the configuration files for deploying our research 
 ## Quick Links
 
 ### Infrastructure Setup
-- [K3s Installation & Configuration]({{< relref "infrastructure/k3s" >}})
-- [NVIDIA GPU Support]({{< relref "infrastructure/nvidia" >}})
-- [Storage with OpenEBS]({{< relref "infrastructure/openebs" >}})
-- [Certificate Manager]({{< relref "infrastructure/cert-manager" >}})
-- [External DNS]({{< relref "infrastructure/external-dns" >}})
+- [K3s Installation & Configuration]({{< relref "docs/infrastructure/k3s" >}})
+- [NVIDIA GPU Support]({{< relref "docs/infrastructure/nvidia" >}})
+- [Storage with OpenEBS]({{< relref "docs/infrastructure/openebs" >}})
+- [Certificate Manager]({{< relref "docs/infrastructure/cert-manager" >}})
+- [External DNS]({{< relref "docs/infrastructure/external-dns" >}})
 
 ### Services
-- [JupyterHub]({{< relref "services/jupyterhub" >}})
-- [PostgreSQL]({{< relref "services/postgres" >}})
-- [MinIO]({{< relref "services/minio" >}})
-- [GitHub Actions Runners]({{< relref "services/github-actions" >}})
-- [vLLM]({{< relref "services/vllm" >}})
+- [JupyterHub]({{< relref "docs/services/jupyterhub" >}})
+- [PostgreSQL]({{< relref "docs/services/postgres" >}})
+- [MinIO]({{< relref "docs/services/minio" >}})
+- [GitHub Actions Runners]({{< relref "docs/services/github-actions" >}})
+- [vLLM]({{< relref "docs/services/vllm" >}})
 
 ### Administration
-- [User Access Management]({{< relref "admin/users" >}})
-- [Secrets Management]({{< relref "admin/secrets" >}})
-- [Tips & Tricks]({{< relref "admin/tips-tricks" >}})
+- [User Access Management]({{< relref "docs/admin/users" >}})
+- [Secrets Management]({{< relref "docs/admin/secrets" >}})
+- [Tips & Tricks]({{< relref "docs/admin/tips-tricks" >}})
 
 ## Getting Started
 
 If you're new to this cluster:
 
-1. **For Users**: Start with the [User Access Management]({{< relref "admin/users" >}}) guide to get your credentials
-2. **For Administrators**: Begin with [K3s Installation]({{< relref "infrastructure/k3s" >}}) to understand the base setup
+1. **For Users**: Start with the [User Access Management]({{< relref "docs/admin/users" >}}) guide to get your credentials
+2. **For Administrators**: Begin with [K3s Installation]({{< relref "docs/infrastructure/k3s" >}}) to understand the base setup
 3. **For Service Deployment**: Check the specific service documentation in the Services section
 
 ## Architecture
