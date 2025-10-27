@@ -48,7 +48,6 @@ singleuser:
 
 User pods automatically receive environment variables for MinIO access:
 - `AWS_S3_ENDPOINT: "minio.carlboettiger.info"`
-- `AWS_PUBLIC_ENDPOINT: "$AWS_S3_ENDPOINT"`
 - `AWS_HTTPS: "true"`
 - `AWS_VIRTUAL_HOSTING: "FALSE"`
 

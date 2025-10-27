@@ -1,0 +1,32 @@
+baseURL = 'https://boettiger-lab.github.io/k8s/'
+languageCode = 'en-us'
+title = 'K8s Cluster Documentation'
+theme = 'hugo-book'
+
+# GitHub Pages deployment
+canonifyURLs = true
+
+[params]
+  # Book theme configuration
+  BookRepo = 'https://github.com/boettiger-lab/k8s'
+  BookEditPath = 'edit/main'
+  BookSection = 'docs'
+  BookMenuBundle = '/menu'
+  BookToC = true
+  BookComments = false
+  BookSearch = true
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+  [markup.tableOfContents]
+    endLevel = 4
+    ordered = false
+    startLevel = 2
+
+[menu]
+  [[menu.main]]
+    name = 'GitHub'
+    url = 'https://github.com/boettiger-lab/k8s'
+    weight = 10
