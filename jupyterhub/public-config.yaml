@@ -29,10 +29,16 @@ singleuser:
   image:
     pullPolicy: Always
   storage:
-    capacity: 60Gi
+    type: dynamic
+    extraLabels: {}
+    capacity: 100Gi
+    homeMountPath: /home/jovyan
+    dynamic:
+      storageClass:  openebs-zfs
+      pvcNameTemplate: claim-{escaped_user_server}
+      volumeNameTemplate: volume-{escaped_user_server}
+      storageAccessModes: [ReadWriteOnce]
     extraVolumeMounts:
-      - name: "volume-{user_server}"
-        mountPath: /home/rstudio
       - name: shm-volume
         mountPath: /dev/shm
     extraVolumes:
@@ -47,7 +53,7 @@ singleuser:
       # Keep DNS resolution working
       dnsPortsPrivateIPs: true
       dnsPortsKubeSystemNamespace: true
-      # Allow internet access (excluding private ranges) - enables hairpin connections
+      # Allow internet access (excluding private ranges) - enables 'hairpin' connections
       nonPrivateIPs: true
     egress:
       # Specific access to your external IP (minio.carlboettiger.info at 128.32.85.8)
@@ -88,20 +94,17 @@ singleuser:
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-              working_dir: /home/rstudio
           choices:
             01-cpu:
               display_name: CPU 
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-                working_dir: /home/rstudio
             02-gpu:
               display_name: RL
               description: CUDA GPU environment, with RL 
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-                working_dir: /home/rstudio
             03-gpu-spatial:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
