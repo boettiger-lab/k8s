@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Theme requires Hugo >= 0.146.0 (extended). Use a recent stable version.
-      HUGO_VERSION: 0.153.0
+      HUGO_VERSION: 0.146.0
     steps:
       - name: Install Hugo CLI
         run: |
