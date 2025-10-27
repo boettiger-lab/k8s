@@ -5,6 +5,10 @@ This respository contains all the configuration files (modulo appropriate secret
 We now use a kubernetes-based approach, replacing the pure-docker approach we used across our platforms previously (see [servers repo](https://github.com/boettiger-lab/servers)). This retains the same containerized abstractions for the software stack (often the very same docker containers), but provides additional abstractions around the hardware, orchestration, and resource management.
 
 
+
+
+
+
 ## JupyterHub on GPU workstations
 
 Home to the configuration files for our lab jupyterhub.
@@ -15,16 +19,15 @@ See [blog post](https://hackmd.io/wJPNgpUETrG2F_-TthQTYw) for some notes on this
 
 
 
-Nvidia container toolkit setup
 
-(not strictly necessary?  install nvidia-container-toolkit and simply enable nvidia runtime in Jupyter)
+Nvidia container toolkit setup, (not strictly necessary?  install nvidia-container-toolkit and simply enable nvidia runtime in Jupyter)
 
 <https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
 
 
-# Tricks
+## Tricks
 
-RAM use (etc) of active container (cgroup)
+Quikcly check RAM use (etc) of active containers (cgroup)
 
 ```
 cat /sys/fs/cgroup/memory.max | awk '{printf "%.2f GB\n", $1/1024/1024/1024}'

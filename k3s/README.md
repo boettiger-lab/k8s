@@ -4,6 +4,43 @@
 
 Default deployment works well.  A few additional steps to configure nvidia, etc.
 
+## Installation
+
+### Install K3s
+
+The default installation uses K3s's built-in Traefik ingress controller and works with cert-manager for HTTPS:
+
+```bash
+# Install K3s (inspect the script before running!)
+curl -sfL https://get.k3s.io | sh
+```
+
+
+### Configure kubectl Access
+
+Set up the default config in a location you can write to and that will be recognized by helm:
+
+```bash
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $USER:$USER ~/.kube/config
+```
+
+### Enable GPU Support (Optional)
+
+If you have NVIDIA GPUs and want to enable GPU support with time-slicing:
+
+```bash
+# From the repository root
+bash nvidia/nvidia-device-plugin.sh
+```
+
+See the `../nvidia/` directory for more details on GPU configuration.
+
+### Helm
+
+Helm is already included with k3s, so no separate installation is needed.
+
 ## Remote kubectl Access
 
 To access the k3s cluster from a remote machine using kubectl:
