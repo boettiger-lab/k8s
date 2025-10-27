@@ -33,7 +33,9 @@ spec:
         - name: VLLM_LOGGING_LEVEL
           value: "DEBUG"
         args:
-        - "vllm serve openai/gpt-oss-120b"
+        - "vllm"
+        - "serve"
+        - "openai/gpt-oss-120b"
         - "--served-model-name"
         - "nimbus"
         - "--gpu-memory-utilization"
