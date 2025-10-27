@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-nimbus-deployment
+  labels:
+    k8s-app: vllm-nimbus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: nvcr.io/nvidia/vllm:25.09-py3
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: TIKTOKEN_ENCODINGS_BASE
+          value: /etc/encodings
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
+        args:
+        - "vllm serve openai/gpt-oss-120b"
+        - "--served-model-name"
+        - "nimbus"
+        - "--gpu-memory-utilization"
+        - "0.7"
+        volumeMounts:
+        - name: encodings
+          mountPath: /etc/encodings
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        resources:
+          requests:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
+          limits:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: encodings
+        hostPath:
+          path: /home/cboettig/Documents/github/boettiger-lab/k8s/vllm/nimbus/gpt-oss/encodings
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
