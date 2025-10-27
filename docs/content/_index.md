@@ -53,6 +53,6 @@ Our cluster is built on:
 ## Support
 
 For issues or questions:
-- Check the [Tips & Tricks]({{< relref "admin/tips-tricks" >}}) section
+- Check the [Tips & Tricks]({{< relref "docs/admin/tips-tricks" >}}) section
 - Review the relevant service documentation
 - Consult the [GitHub repository](https://github.com/boettiger-lab/k8s)
