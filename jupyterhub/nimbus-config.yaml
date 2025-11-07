@@ -19,8 +19,8 @@ ingress:
     kubernetes.io/ingress.class: traefik
   tls:
   - hosts:
-    - jupyterhub.cirrus.carlboettiger.info
-    secretName: jupyter-cirrus-tls
+    - jupyter-nimbus.carlboettiger.info
+    secretName: jupyter-nimbus-tls
   hosts: 
   - "jupyterhub.cirrus.carlboettiger.info"  
 cull:
@@ -29,36 +29,14 @@ singleuser:
   image:
     pullPolicy: Always
   storage:
-    capacity: 60Gi
+    capacity: 20Gi
     extraVolumeMounts:
-      - name: "volume-{user_server}"
-        mountPath: /home/rstudio
       - name: shm-volume
         mountPath: /dev/shm
     extraVolumes:
       - name: shm-volume
         emptyDir:
           medium: Memory
-  networkPolicy:
-    enabled: true
-    egressAllowRules:
-      # Enable access to private IP ranges (for MinIO and other cluster services)
-      privateIPs: true
-      # Keep DNS resolution working
-      dnsPortsPrivateIPs: true
-      dnsPortsKubeSystemNamespace: true
-      # Allow internet access (excluding private ranges) - enables hairpin connections
-      nonPrivateIPs: true
-    egress:
-      # Specific access to your external IP (minio.carlboettiger.info at 128.32.85.8)
-      - to:
-          - ipBlock:
-              cidr: 128.32.85.8/32
-      # Allow access to MinIO namespace by label selector
-      - to:
-          - namespaceSelector:
-              matchLabels:
-                name: minio
   extraFiles:
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
@@ -90,23 +68,11 @@ singleuser:
               image: "{value}"
               working_dir: /home/rstudio
           choices:
-            01-cpu:
-              display_name: CPU 
-              description: General purpose python + R (with RStudio) environment 
+            01-default:
+              display_name: spark 
+              description: NVIDIA Spark (arm+cuda image)
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-                working_dir: /home/rstudio
-            02-gpu:
-              display_name: RL
-              description: CUDA GPU environment, with RL 
-              kubespawner_override:
-                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-                working_dir: /home/rstudio
-            03-gpu-spatial:
-              display_name: GPU Spatial
-              description: Rapids-AI GPU Spatial environment
-              kubespawner_override:
-                image: "ghcr.io/rocker-org/cuda-spatial:latest"
                 default_url: /vscode
         resource_allocation:
           display_name: Resource Allocation
@@ -147,10 +113,7 @@ hub:
     KubeSpawner:
       environment:
         SHELL: /usr/bin/bash
-        GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
-        GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
         AWS_S3_ENDPOINT: "minio.carlboettiger.info"
-        AWS_PUBLIC_ENDPOINT: "$AWS_S3_ENDPOINT"
         AWS_HTTPS: "true"
         AWS_VIRTUAL_HOSTING: "FALSE"
       extra_pod_config:
@@ -159,24 +122,32 @@ hub:
       admin_users:
         - cboettig 
     GitHubOAuthenticator:
+      client_id:
+        valueFrom:
+          secretKeyRef:
+            name: jupyter-secrets
+            key: GH_OAUTH_ID
+      client_secret:
+        valueFrom:
+          secretKeyRef:
+            name: jupyter-secrets
+            key: GH_OAUTH_SECRET
       allowed_organizations:
         - boettiger-lab:current-members
-        - boettiger-lab
         - SchmidtDSE
       scope:
         - read:org
-      oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback
+      oauth_callback_url: https://jupyter-nimbus.carlboettiger.info/hub/oauth_callback
     JupyterHub:
       authenticator_class: github
   services:
     binder:
       url: http://binderhub
-  image:
-    name: quay.io/yuvipanda/z2jh-hub-with-fancy-profiles
-    tag: z2jh-v4.0.0-fancy-profiles-sha-f80b661      
-  extraConfig:
-    enable-fancy-profiles: |
-      from jupyterhub_fancy_profiles import setup_ui
-      setup_ui(c)
-
+#  image:
+#    name: quay.io/yuvipanda/z2jh-hub-with-fancy-profiles
+#    tag: z2jh-v4.2.0-fancy-profiles-sha-c35dafa
+#  extraConfig:
+#    enable-fancy-profiles: |
+#      from jupyterhub_fancy_profiles import setup_ui
+#      setup_ui(c)
 
