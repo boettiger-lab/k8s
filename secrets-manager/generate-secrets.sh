@@ -8,7 +8,18 @@ set -euo pipefail
 # Directory of this script
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-ENV_FILE="${DIR}/.env"
+# Optional argument: path to .env file (defaults to ./.env)
+if [[ $# -ge 1 ]]; then
+  # If argument is an absolute path, use it directly; otherwise treat as relative to script directory
+  if [[ "$1" = /* ]]; then
+    ENV_FILE="$1"
+  else
+    ENV_FILE="${DIR}/$1"
+  fi
+else
+  ENV_FILE="${DIR}/.env"
+fi
+
 OUTPUT_FILE="${DIR}/secret.yaml"
 
 # Verify .env exists
