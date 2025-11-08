@@ -20,9 +20,9 @@ ingress:
   tls:
   - hosts:
     - jupyter-nimbus.carlboettiger.info
-    secretName: jupyter-nimbus-tls
+    secretName: nimbus-tls
   hosts: 
-  - "jupyterhub.cirrus.carlboettiger.info"  
+  - "jupyter-nimbus.carlboettiger.info"  
 cull:
   enabled: false
 singleuser:
@@ -66,14 +66,12 @@ singleuser:
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-              working_dir: /home/rstudio
           choices:
             01-default:
               display_name: spark 
-              description: NVIDIA Spark (arm+cuda image)
+              description: Rocker ML (arm+cuda image)
               kubespawner_override:
-                image:  "ghcr.io/boettiger-lab/k8s:latest"
-                default_url: /vscode
+                image:  "ghcr.io/rocker-org/cuda:arm64"
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -82,14 +80,13 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 8G
                 mem_limit: 8G
-                cpu_limit: 12
+                cpu_limit: 2
               default: true
             mem_16:
               display_name: 16 GB RAM
               kubespawner_override:
                 mem_guarantee: 16G
                 mem_limit: 16G
-                cpu_limit: 12
             mem_32:
               display_name: 32 GB RAM
               kubespawner_override:
@@ -122,16 +119,6 @@ hub:
       admin_users:
         - cboettig 
     GitHubOAuthenticator:
-      client_id:
-        valueFrom:
-          secretKeyRef:
-            name: jupyter-secrets
-            key: GH_OAUTH_ID
-      client_secret:
-        valueFrom:
-          secretKeyRef:
-            name: jupyter-secrets
-            key: GH_OAUTH_SECRET
       allowed_organizations:
         - boettiger-lab:current-members
         - SchmidtDSE
@@ -143,11 +130,11 @@ hub:
   services:
     binder:
       url: http://binderhub
-#  image:
-#    name: quay.io/yuvipanda/z2jh-hub-with-fancy-profiles
-#    tag: z2jh-v4.2.0-fancy-profiles-sha-c35dafa
-#  extraConfig:
-#    enable-fancy-profiles: |
-#      from jupyterhub_fancy_profiles import setup_ui
-#      setup_ui(c)
+  image:
+    name: ghcr.io/cboettig/jupyterhub-fancy-profiles/fancy-profiles-4.3.1
+    tag: arm64
+  extraConfig:
+    enable-fancy-profiles: |
+      from jupyterhub_fancy_profiles import setup_ui
+      setup_ui(c)
 

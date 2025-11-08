@@ -10,7 +10,7 @@ helm upgrade --cleanup-on-fail \
   --install jupyter jupyterhub/jupyterhub \
   --namespace jupyter \
   --create-namespace \
-  --version=4.2.0 \
+  --version=4.3.1 \
   --timeout 10m0s \
   --values nimbus-config.yaml \
   --values private-config.yaml
