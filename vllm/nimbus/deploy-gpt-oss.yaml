@@ -18,7 +18,7 @@ spec:
       containers:
       - name: vllm
         image: nvcr.io/nvidia/vllm:25.09-py3
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
           name: http
@@ -35,7 +35,7 @@ spec:
         args:
         - "vllm"
         - "serve"
-        - "openai/gpt-oss-120b"
+        - "/models/openai-gpt-oss-120b"
         - "--served-model-name"
         - "nimbus"
         - "--gpu-memory-utilization"
@@ -46,6 +46,9 @@ spec:
           readOnly: true
         - name: dshm
           mountPath: /dev/shm
+        - name: model-volume
+          mountPath: /models
+          readOnly: true
         resources:
           requests:
             cpu: 8
@@ -68,3 +71,6 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 1Gi
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: vllm-model-pvc
