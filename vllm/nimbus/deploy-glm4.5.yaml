@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-nimbus-deployment
+  labels:
+    k8s-app: vllm-nimbus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: nvcr.io/nvidia/vllm:25.09-py3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
+        args:
+        - "vllm"
+        - "serve"
+        - "zai-org/GLM-4.5"
+        - "--served-model-name"
+        - "nimbus"
+        - "--gpu-memory-utilization"
+        - "0.7"
+        volumeMounts:
+        - name: encodings
+          mountPath: /etc/encodings
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        - name: model-volume
+          mountPath: /models
+          readOnly: true
+        resources:
+          requests:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 1
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: vllm-model-pvc
