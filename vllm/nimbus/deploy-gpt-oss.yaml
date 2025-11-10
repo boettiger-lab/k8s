@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm-nimbus-deployment
+  name: gpt-oss
   labels:
     k8s-app: vllm-nimbus
 spec:
@@ -25,6 +25,16 @@ spec:
         env:
         - name: TIKTOKEN_ENCODINGS_BASE
           value: /etc/encodings
+        - name: HF_HOME
+          value: /models
+        - name: TRANSFORMERS_CACHE
+          value: /models/hub
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -35,7 +45,7 @@ spec:
         args:
         - "vllm"
         - "serve"
-        - "/models/openai-gpt-oss-120b"
+        - "openai-gpt-oss-120b"
         - "--served-model-name"
         - "nimbus"
         - "--gpu-memory-utilization"
@@ -48,16 +58,16 @@ spec:
           mountPath: /dev/shm
         - name: model-volume
           mountPath: /models
-          readOnly: true
+          readOnly: false
         resources:
           requests:
             cpu: 8
             memory: 32Gi
-            nvidia.com/gpu: 2
+            nvidia.com/gpu: 1
           limits:
             cpu: 8
             memory: 32Gi
-            nvidia.com/gpu: 2
+            nvidia.com/gpu: 1
         securityContext:
           capabilities:
             add:
@@ -73,4 +83,4 @@ spec:
           sizeLimit: 1Gi
       - name: model-volume
         persistentVolumeClaim:
-          claimName: vllm-model-pvc
+          claimName: vllm-pvc
