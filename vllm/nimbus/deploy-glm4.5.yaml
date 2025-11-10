@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm-nimbus-deployment
+  name: glm4.5
   labels:
     k8s-app: vllm-nimbus
 spec:
@@ -23,6 +23,16 @@ spec:
         - containerPort: 8000
           name: http
         env:
+        - name: HF_HOME
+          value: /models
+        - name: TRANSFORMERS_CACHE
+          value: /models/hub
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -39,14 +49,11 @@ spec:
         - "--gpu-memory-utilization"
         - "0.7"
         volumeMounts:
-        - name: encodings
-          mountPath: /etc/encodings
-          readOnly: true
         - name: dshm
           mountPath: /dev/shm
         - name: model-volume
           mountPath: /models
-          readOnly: true
+          readOnly: false
         resources:
           requests:
             cpu: 8
