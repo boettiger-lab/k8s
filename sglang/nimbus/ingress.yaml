@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sglang-nimbus-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+  labels:
+    app: sglang-nimbus
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: sglang-nimbus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sglang-nimbus-service
+            port:
+              number: 30000
+  tls:
+  - hosts:
+    - sglang-nimbus.carlboettiger.info
+    secretName: sglang-nimbus-tls

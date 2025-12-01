@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpt-oss-sglang
+  labels:
+    k8s-app: sglang-nimbus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: sglang-nimbus
+  template:
+    metadata:
+      labels:
+        k8s-app: sglang-nimbus
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: sglang
+        image: lmsysorg/sglang:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 30000
+          name: http
+        env:
+        - name: HF_HOME
+          value: /models
+        - name: TRANSFORMERS_CACHE
+          value: /models/hub
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        command:
+        - "python3"
+        - "-m"
+        - "sglang.launch_server"
+        args:
+        - "--model-path"
+        - "openai/gpt-oss-120b"
+        - "--served-model-name"
+        - "nimbus"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "30000"
+        - "--mem-fraction-static"
+        - "0.7"
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: model-volume
+          mountPath: /models
+          readOnly: false
+        resources:
+          requests:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 1
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: sglang-pvc
