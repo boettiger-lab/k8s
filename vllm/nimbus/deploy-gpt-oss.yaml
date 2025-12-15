@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gpt-oss
+  namespace: llm
   labels:
     k8s-app: vllm-nimbus
 spec:
@@ -17,7 +18,7 @@ spec:
       runtimeClassName: nvidia
       containers:
       - name: vllm
-        image: nvcr.io/nvidia/vllm:25.09-py3
+        image: nvcr.io/nvidia/vllm:25.11-py3
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
@@ -40,16 +41,16 @@ spec:
             secretKeyRef:
               name: vllm-api-key
               key: api-key
-        - name: VLLM_LOGGING_LEVEL
-          value: "DEBUG"
+#        - name: VLLM_LOGGING_LEVEL
+#          value: "DEBUG"
         args:
         - "vllm"
         - "serve"
-        - "openai/gpt-oss-120b"
+        - "openai/gpt-oss-20b"
         - "--served-model-name"
         - "nimbus"
         - "--gpu-memory-utilization"
-        - "0.7"
+        - "0.85"
         volumeMounts:
         - name: encodings
           mountPath: /etc/encodings
@@ -61,12 +62,12 @@ spec:
           readOnly: false
         resources:
           requests:
-            cpu: 8
-            memory: 32Gi
+            cpu: 4
+            memory: 12Gi
             nvidia.com/gpu: 1
           limits:
-            cpu: 8
-            memory: 32Gi
+            cpu: 4
+            memory: 12Gi
             nvidia.com/gpu: 1
         securityContext:
           capabilities:

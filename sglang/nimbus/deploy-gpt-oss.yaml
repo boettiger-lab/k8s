@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gpt-oss-sglang
+  namespace: llm
   labels:
     k8s-app: sglang-nimbus
 spec:
@@ -17,12 +18,14 @@ spec:
       runtimeClassName: nvidia
       containers:
       - name: sglang
-        image: lmsysorg/sglang:latest
-        imagePullPolicy: IfNotPresent
+        image: lmsysorg/sglang:spark
+        imagePullPolicy: Always
         ports:
         - containerPort: 30000
           name: http
         env:
+        - name: TIKTOKEN_ENCODINGS_BASE
+          value: /tiktoken_encodings
         - name: HF_HOME
           value: /models
         - name: TRANSFORMERS_CACHE
@@ -33,22 +36,44 @@ spec:
               name: huggingface-token
               key: token
               optional: true
+        - name: SGLANG_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
         command:
         - "python3"
         - "-m"
         - "sglang.launch_server"
         args:
         - "--model-path"
-        - "openai/gpt-oss-120b"
+        - "unsloth/gpt-oss-20b"  # Ensure you pull the FP4 version instead of "openai/gpt-oss-20b"
+        - "--quantization"
+        - "mxfp4"                         # Explicitly enable FP4 for Blackwell
+           # Compresses cache to fit more context
         - "--served-model-name"
         - "nimbus"
         - "--host"
         - "0.0.0.0"
         - "--port"
         - "30000"
+        - "--context-length"
+        - "65536"
+        - "--disable-cuda-graph"
+        - "--load-format"
+        - "safetensors"
         - "--mem-fraction-static"
-        - "0.7"
+        - "0.75"
+        - "--reasoning-parser"
+        - "gpt-oss"
+        - "--tool-call-parser"
+        - "gpt-oss"
+        - "--api-key"
+        - "$(SGLANG_API_KEY)"
         volumeMounts:
+        - name: encodings
+          mountPath: /tiktoken_encodings
+          readOnly: true
         - name: dshm
           mountPath: /dev/shm
         - name: model-volume
@@ -57,21 +82,25 @@ spec:
         resources:
           requests:
             cpu: 8
-            memory: 32Gi
+            memory: 20Gi
             nvidia.com/gpu: 1
           limits:
             cpu: 8
-            memory: 32Gi
+            memory: 100Gi
             nvidia.com/gpu: 1
         securityContext:
           capabilities:
             add:
             - IPC_LOCK
       volumes:
+      - name: encodings
+        hostPath:
+          path: /home/cboettig/Documents/github/boettiger-lab/k8s/sglang/nimbus/gpt-oss/encodings
+          type: Directory
       - name: dshm
         emptyDir:
           medium: Memory
-          sizeLimit: 1Gi
+          sizeLimit: 32Gi
       - name: model-volume
         persistentVolumeClaim:
-          claimName: sglang-pvc
+          claimName: vllm-pvc

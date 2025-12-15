@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: vllm-nimbus-service
+  namespace: llm
   labels:
     k8s-app: vllm-nimbus
 spec:

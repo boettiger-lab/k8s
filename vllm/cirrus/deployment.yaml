@@ -17,7 +17,7 @@ spec:
       runtimeClassName: nvidia
       containers:
       - name: vllm
-        image: vllm/vllm-openai:v0.8.5
+        image: vllm/vllm-openai:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -42,20 +42,26 @@ spec:
         - name: VLLM_LOGGING_LEVEL
           value: "DEBUG"
         args:
-        - "--dtype=half"
         - "--model"
-        - "Qwen/Qwen3-32B-AWQ"
+        - "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+        - "--dtype"
+        - "auto"
+        - "--trust-remote-code"
         - "--served-model-name"
-        - "cirrus"
-        - "--tool-call-parser"
-        - "hermes"
+        - "nemotron"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "8000"
         - "--enable-auto-tool-choice"
+        - "--tool-call-parser"
+        - "qwen3_coder"
+        - "--reasoning-parser-plugin"
+        - "NVIDIA-Nemotron-3-Nano-30B-A3B-FP8/nano_v3_reasoning_parser.py"
+        - "--reasoning-parser"
+        - "nano_v3"
         - "--tensor-parallel-size"
         - "2"
-        - "--enforce-eager"
-        - "--trust-remote-code"
-        - "--gpu-memory-utilization"
-        - "0.9"
         volumeMounts:
         - name: huggingface-cache
           mountPath: /root/.cache/huggingface
