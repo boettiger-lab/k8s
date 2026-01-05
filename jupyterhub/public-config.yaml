@@ -22,7 +22,10 @@ ingress:
     - jupyterhub.cirrus.carlboettiger.info
     secretName: jupyter-cirrus-tls
   hosts: 
-  - "jupyterhub.cirrus.carlboettiger.info"  
+  - "jupyterhub.cirrus.carlboettiger.info"
+proxy:
+  service:
+    type: ClusterIP
 cull:
   enabled: false
 singleuser:
