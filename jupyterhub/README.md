@@ -1,63 +1,74 @@
-## Jupyterhub setup
+# JupyterHub Setup
 
-Overall [z2jh](https://z2jh.jupyter.org/en/stable/) docs are very good, follow those directions.  
+## Overview
 
-k3s system should be configured first, see k3s
+This directory contains the Helm chart configuration for deploying JupyterHub on the Nimbus cluster.
 
-## Network Policy Configuration
+## Deployment Steps
+
+### 1. Secrets Setup
+
+We use Kubernetes Secrets to manage sensitive information (OAuth credentials, Image Registry tokens). **Do not store secrets in plaintext config files.**
+
+Run the interactive setup script to create the necessary secrets:
+
+```bash
+./setup-secrets.sh
+```
+
+This will prompt for:
+- **GitHub OAuth Client ID & Secret**: For user authentication.
+- **GitHub Container Registry (GHCR) Token**: For pulling private/custom images (e.g. `fancy-profiles`).
+
+It creates the following secrets in the `jupyter` namespace:
+- `jupyter-oauth-secret`: Contains `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+- `ghcr-pull-secret`: Docker registry secret for authenticating with GHCR.
+
+### 2. Deployment
+
+To deploy or upgrade JupyterHub on Nimbus:
+
+```bash
+./nimbus.sh
+```
+
+This script:
+1. Checks that required secrets exist.
+2. Updates Helm repositories.
+3. Deploys using `nimbus-config.yaml`.
+
+## Configuration
+
+### Secrets Management
+
+The configuration (`nimbus-config.yaml`) references K8s secrets instead of having them inline:
+
+1.  **Image Pull Secrets**:
+    *   **Root level**: `imagePullSecrets` (for singleuser pods and other hooks).
+    *   **Hub image**: `hub.image.pullSecrets` (specifically for the hub pod to pull custom images).
+2.  **OAuth Credentials**:
+    *   Injected via `hub.extraEnv` using `valueFrom.secretKeyRef`.
+    *   Read by JupyterHub in `hub.extraConfig` from environment variables.
+
+### Network Policy
 
 JupyterHub is configured with network policies that enable user pods to access external services including MinIO and other cluster services via hairpin connections.
 
-### Hairpin Access to MinIO
+The `singleuser.networkPolicy` in `nimbus-config.yaml` allows:
+- Access to `minio.carlboettiger.info` (external domain) via hairpin connections.
+- Connect to MinIO services in the `minio` namespace.
+- Access other private IP ranges for cluster services.
+- Maintain DNS resolution capabilities.
 
-The `public-config.yaml` configuration includes network policies that allow JupyterHub user pods to:
+### User Environment
 
-- Access `minio.carlboettiger.info` (external domain) via hairpin connections
-- Connect to MinIO services in the `minio` namespace
-- Access other private IP ranges for cluster services
-- Maintain DNS resolution capabilities
-
-This configuration is applied automatically during Helm deployment and replaces the previous manual `enable-external-access.sh` script.
-
-### Configuration Details
-
-The network policy settings in `public-config.yaml` under `singleuser.networkPolicy`:
-
-```yaml
-singleuser:
-  networkPolicy:
-    enabled: true
-    egressAllowRules:
-      privateIPs: true                    # Access to private IP ranges
-      dnsPortsPrivateIPs: true           # DNS resolution to private IPs
-      dnsPortsKubeSystemNamespace: true  # DNS via kube-system
-      nonPrivateIPs: true                # External internet access (hairpin)
-    egress:
-      # Specific access to minio.carlboettiger.info external IP
-      - to:
-          - ipBlock:
-              cidr: 128.32.85.8/32
-      # Access to MinIO namespace services
-      - to:
-          - namespaceSelector:
-              matchLabels:
-                name: minio
-```
-
-### Environment Variables
-
-User pods automatically receive environment variables for MinIO access:
+User pods automatically receive environment variables for MinIO access (via `KubeSpawner.environment`):
 - `AWS_S3_ENDPOINT: "minio.carlboettiger.info"`
 - `AWS_HTTPS: "true"`
 - `AWS_VIRTUAL_HOSTING: "FALSE"`
 
-### Deployment
+### ARM64 Compatibility
 
-Deploy with the standard script:
-
-```bash
-./cirrus.sh
-```
-
-Network policies are applied automatically - no additional manual steps required.
-
+Nimbus is an ARM64 server.
+- **Profile Images**: The image pre-puller hook is **disabled** (`prePuller.hook.enabled: false`) to avoid failures when profile images (like `rocker/ml-verse`) do not have ARM64 builds.
+- **Hub Image**: Uses a custom ARM64 build (`ghcr.io/cboettig/jupyterhub-fancy-profiles`).

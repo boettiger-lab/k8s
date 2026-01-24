@@ -12,6 +12,18 @@
 # of enable-external-access.sh and allows hairpin connections for JupyterHub pods
 # to access external services like minio.carlboettiger.info and other cluster services.
 #
+# Reference existing docker-registry secret for private images (NOT imagePullSecret singular!)
+# See: https://github.com/jupyterhub/zero-to-jupyterhub-k8s/issues/3760
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+# Disable pre-install and continuous image pulling (profile images may not have ARM64 builds)
+prePuller:
+  hook:
+    enabled: false
+  continuous:
+    enabled: false
+
 ingress:
   enabled: true
   annotations:
@@ -67,11 +79,16 @@ singleuser:
             kubespawner_override:
               image: "{value}"
           choices:
-            01-default:
-              display_name: spark 
-              description: Rocker ML (arm+cuda image)
+            01-ml:
+              display_name: Rocker ML
+              description: Machine Learning environment (rocker/ml)
               kubespawner_override:
-                image:  "ghcr.io/rocker-org/cuda:arm64"
+                image: "rocker/ml:latest"
+            02-spatial:
+              display_name: Rocker ML Spatial
+              description: Geospatial & ML environment (rocker/ml-spatial)
+              kubespawner_override:
+                image: "rocker/ml-spatial:latest"
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -105,6 +122,19 @@ singleuser:
 
 hub:
   allowNamedServers: true
+  # Inject OAuth credentials from K8s secret into environment
+  # extraEnv uses dict format where key is env var name, value is valueFrom spec
+  extraEnv:
+    GITHUB_CLIENT_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_ID
+    GITHUB_CLIENT_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_SECRET
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
@@ -133,8 +163,15 @@ hub:
   image:
     name: ghcr.io/cboettig/jupyterhub-fancy-profiles/fancy-profiles-4.3.1
     tag: arm64
+    pullSecrets:
+      - name: ghcr-pull-secret
   extraConfig:
     enable-fancy-profiles: |
       from jupyterhub_fancy_profiles import setup_ui
       setup_ui(c)
+    # Read OAuth credentials from environment variables (set via extraEnv from K8s secret)
+    configure-oauth-from-env: |
+      import os
+      c.GitHubOAuthenticator.client_id = os.environ.get('GITHUB_CLIENT_ID')
+      c.GitHubOAuthenticator.client_secret = os.environ.get('GITHUB_CLIENT_SECRET')
 

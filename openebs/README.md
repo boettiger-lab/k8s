@@ -1,81 +1,85 @@
-# Disk Quotas on local filesystem
+# OpenEBS ZFS Storage for Kubernetes
 
+OpenEBS provides ZFS-based persistent storage with disk quotas for Kubernetes pods.
 
-See <https://github.com/openebs/zfs-localpv/blob/develop/docs/quickstart.md#setup>
+## Quick Setup
 
-Requires a zpool is setup on the host first!!
+### Option 1: Single-Disk Setup (e.g., nimbus with NVMe)
 
+For servers with a single disk already in use, use a file-backed ZFS pool:
+
+```bash
+# Install ZFS and create a 2TB pool
+sudo bash setup-zfs-pool.sh 2000
 ```
+
+This creates a sparse file at `/var/lib/openebs/zfs/openebs-zpool.img` and configures auto-import on boot.
+
+### Option 2: Multi-Disk Setup (mirror)
+
+For servers with multiple disks, create a mirrored pool:
+
+```bash
 sudo apt update && sudo apt install zfsutils-linux -y
+sudo zpool create -f openebs-zpool mirror /dev/sda /dev/sdb
 ```
 
+---
 
-Set up the zpool:
+## Install OpenEBS
 
-```
-sudo zpool create -f openebs-zpool mirror /dev/sda /dev/sdb mirror /dev/sdd /dev/sdd
-```
-
-
-
-Verify setup:
-
-```
-sudo zpool status openebs-zpool
-sudo zfs list
+```bash
+bash helm.sh
 ```
 
+Then apply the storage class:
 
-
-Install openebs using helm:
-
-```
-helm repo add openebs https://openebs.github.io/openebs
-helm repo update
-helm install openebs openebs/openebs -n openebs --create-namespace
-```
-
-
-
-Add the zfs storageClass by creating a yaml file (e.g. `zfs-storage.yml`) as follows
-
-```
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: openebs-zfs
-parameters:
-  recordsize: "128k"
-  compression: "off"
-  dedup: "off"
-  fstype: "zfs"
-  poolname: "openebs-zpool"
-provisioner: zfs.csi.openebs.io
-
-
-```
-
-See details in <https://github.com/openebs/zfs-localpv/blob/develop/docs/quickstart.md#setup>
-Note that `fstype` should be `zfs` in this case, and be sure to match the `poolname` to the one created with zpool.  The `metadata.name` should match what we will use in the pods / pvc storageClass. Apply the yaml to create the storageClass.
-
-```
+```bash
 kubectl apply -f zfs-storage.yml
 ```
 
+---
 
-Request the storageClass on pods / pvcs, e.g. in juypter:
+## Verify Setup
 
+```bash
+sudo zpool status openebs-zpool
+sudo zfs list
+kubectl get storageclass
 ```
+
+---
+
+## Using ZFS Storage in JupyterHub
+
+Add to your JupyterHub config:
+
+```yaml
 singleuser:
   storage:
     type: dynamic
     capacity: 60Gi
     homeMountPath: /home/jovyan
     dynamic:
-      storageClass:  openebs-zfs
+      storageClass: openebs-zfs
       pvcNameTemplate: claim-{escaped_user_server}
       volumeNameTemplate: volume-{escaped_user_server}
       storageAccessModes: [ReadWriteOnce]
 ```
 
+---
 
+## Troubleshooting
+
+**Pool not imported after reboot:**
+```bash
+sudo zpool import -d /var/lib/openebs/zfs openebs-zpool
+sudo systemctl enable zfs-import-openebs.service
+```
+
+**Check pool health:**
+```bash
+sudo zpool status -v openebs-zpool
+```
+
+See: https://github.com/openebs/zfs-localpv/blob/develop/docs/quickstart.md
