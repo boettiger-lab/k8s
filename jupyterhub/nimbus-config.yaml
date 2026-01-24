@@ -41,7 +41,9 @@ singleuser:
   image:
     pullPolicy: Always
   storage:
-    capacity: 20Gi
+    capacity: 60Gi
+    dynamic:
+      storageClass: openebs-zfs
     extraVolumeMounts:
       - name: shm-volume
         mountPath: /dev/shm
