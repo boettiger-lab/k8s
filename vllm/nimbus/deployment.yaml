@@ -1,8 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gpt-oss
-  namespace: llm
+  name: vllm-nimbus-deployment
   labels:
     k8s-app: vllm-nimbus
 spec:
@@ -18,57 +17,44 @@ spec:
       runtimeClassName: nvidia
       containers:
       - name: vllm
-        image: nvcr.io/nvidia/vllm:25.11-py3
-        imagePullPolicy: IfNotPresent
+        image: nvcr.io/nvidia/vllm:25.09-py3
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
         env:
         - name: TIKTOKEN_ENCODINGS_BASE
           value: /etc/encodings
-        - name: HF_HOME
-          value: /models
-        - name: TRANSFORMERS_CACHE
-          value: /models/hub
-        - name: HF_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: huggingface-token
-              key: token
-              optional: true
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
               name: vllm-api-key
               key: api-key
-#        - name: VLLM_LOGGING_LEVEL
-#          value: "DEBUG"
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
         args:
         - "vllm"
         - "serve"
-        - "openai/gpt-oss-20b"
+        - "openai/gpt-oss-120b"
         - "--served-model-name"
         - "nimbus"
         - "--gpu-memory-utilization"
-        - "0.85"
+        - "0.7"
         volumeMounts:
         - name: encodings
           mountPath: /etc/encodings
           readOnly: true
         - name: dshm
           mountPath: /dev/shm
-        - name: model-volume
-          mountPath: /models
-          readOnly: false
         resources:
           requests:
-            cpu: 4
-            memory: 12Gi
-            nvidia.com/gpu: 1
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
           limits:
-            cpu: 4
-            memory: 12Gi
-            nvidia.com/gpu: 1
+            cpu: 8
+            memory: 32Gi
+            nvidia.com/gpu: 2
         securityContext:
           capabilities:
             add:
@@ -82,6 +68,3 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 1Gi
-      - name: model-volume
-        persistentVolumeClaim:
-          claimName: vllm-pvc

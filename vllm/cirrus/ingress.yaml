@@ -8,7 +8,7 @@ metadata:
   name: vllm-ingress
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"  
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
   labels:
     app: vllm-deployment
 spec:
@@ -28,4 +28,54 @@ spec:
   - hosts:
     - vllm-cirrus.carlboettiger.info
     secretName: vllm-tls
+
+---
+# Traefik Middleware to increase timeouts for VLLM inference
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: vllm-timeout
+spec:
+  # Increase response header timeout to 10 minutes
+  forwardAuth:
+    responseHeaderTimeout: 600s
+
+---
+# Traefik IngressRoute with timeout middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vllm-ingressroute
+spec:
+  entryPoints:
+    - websecure
+  routes:
+  - match: Host(`vllm-cirrus.carlboettiger.info`)
+    kind: Rule
+    services:
+    - name: vllm-svc
+      port: 8000
+      responseForwarding:
+        flushInterval: 100ms
+      # This is where we set the timeout
+      serversTransport: vllm-transport
+    middlewares:
+    - name: vllm-timeout
+  tls:
+    secretName: vllm-tls
+
+---
+# ServersTransport to configure backend timeouts
+apiVersion: traefik.containo.us/v1alpha1
+kind: ServersTransport
+metadata:
+  name: vllm-transport
+spec:
+  serverName: vllm-svc
+  insecureSkipVerify: false
+  # Set dial and response header timeouts
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 90s
 
