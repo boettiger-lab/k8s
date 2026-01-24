@@ -7,7 +7,7 @@ parameters:
   compression: "lz4"
   dedup: "off"
   fstype: "zfs"
-  poolname: "tank"
+  poolname: "openebs-zpool"
 provisioner: zfs.csi.openebs.io
 
 
