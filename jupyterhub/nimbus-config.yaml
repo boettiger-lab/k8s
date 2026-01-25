@@ -37,7 +37,9 @@ ingress:
   - "jupyter-nimbus.carlboettiger.info"  
 cull:
   enabled: false
+
 singleuser:
+  allowPrivilegeEscalation: true
   image:
     pullPolicy: Always
   storage:
