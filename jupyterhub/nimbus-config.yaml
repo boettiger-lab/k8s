@@ -91,11 +91,13 @@ singleuser:
               description: Machine Learning environment (rocker/ml)
               kubespawner_override:
                 image: "rocker/ml:latest"
+                defaultUrl: "/vscode"
             02-spatial:
               display_name: Rocker ML Spatial
               description: Geospatial & ML environment (rocker/ml-spatial)
               kubespawner_override:
                 image: "rocker/ml-spatial:latest"
+                defaultUrl: "/vscode"
         resource_allocation:
           display_name: Resource Allocation
           choices:
