@@ -1,4 +1,5 @@
 githubConfigUrl: "https://github.com/eco4cast"
+githubConfigSecret: github-runner-token
 maxRunners: 1
 runnerGroup: "default"
 
@@ -70,4 +71,3 @@ template:
          emptyDir: {}
        - name: dind-externals
          emptyDir: {}
-

@@ -1,4 +1,6 @@
 # cluster-issuer-production.yaml
+# Updated to use DNS-01 challenge with Cloudflare (Jan 2026)
+# This fixes certificate renewal issues with HTTP-01 challenges
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -13,7 +15,8 @@ spec:
       name: letsencrypt-production
     solvers:
     - selector: {}
-      http01:
-        ingress:
-          class: traefik
-
+      dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cf-api-token
+            key: CF_API_TOKEN
