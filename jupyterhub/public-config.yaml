@@ -33,6 +33,7 @@ proxy:
 cull:
   enabled: false
 singleuser:
+  allowPrivilegeEscalation: true
   image:
     pullPolicy: Always
   storage:
