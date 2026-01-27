@@ -12,6 +12,10 @@
 # of enable-external-access.sh and allows hairpin connections for JupyterHub pods
 # to access external services like minio.carlboettiger.info and other cluster services.
 #
+# Reference existing docker-registry secret for private images
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
 ingress:
   enabled: true
   annotations:
@@ -99,10 +103,10 @@ singleuser:
               image: "{value}"
           choices:
             01-cpu:
-              display_name: CPU 
+              display_name: Default (rocker/ml)
               description: General purpose python + R (with RStudio) environment 
               kubespawner_override:
-                image:  "ghcr.io/boettiger-lab/k8s:latest"
+                image:  "ghcr.io/rocker-org/ml:latest"
             02-gpu:
               display_name: RL
               description: CUDA GPU environment, with RL 
@@ -112,7 +116,7 @@ singleuser:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
-                image: "ghcr.io/rocker-org/cuda-spatial:latest"
+                image: "ghcr.io/rocker-org/ml-spatial:latest"
                 default_url: /vscode
         resource_allocation:
           display_name: Resource Allocation
@@ -148,6 +152,49 @@ singleuser:
 
 hub:
   allowNamedServers: true
+  # Inject OAuth credentials and other secrets from K8s secret into environment
+  # extraEnv uses dict format where key is env var name, value is valueFrom spec
+  extraEnv:
+    GITHUB_CLIENT_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_ID
+    GITHUB_CLIENT_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_SECRET
+    MINIO_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: MINIO_KEY
+    MINIO_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: MINIO_SECRET
+    AWS_ACCESS_KEY_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: AWS_SECRET_ACCESS_KEY
+    GHCR_USERNAME:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: GHCR_USERNAME
+    GHCR_PASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: GHCR_PASSWORD
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
@@ -184,5 +231,19 @@ hub:
     enable-fancy-profiles: |
       from jupyterhub_fancy_profiles import setup_ui
       setup_ui(c)
+    # Read OAuth credentials from environment variables (set via extraEnv from K8s secret)
+    configure-oauth-from-env: |
+      import os
+      c.GitHubOAuthenticator.client_id = os.environ.get('GITHUB_CLIENT_ID')
+      c.GitHubOAuthenticator.client_secret = os.environ.get('GITHUB_CLIENT_SECRET')
+    # Pass secrets to singleuser pods via environment variables
+    configure-singleuser-secrets: |
+      import os
+      c.KubeSpawner.environment.update({
+          'MINIO_KEY': os.environ.get('MINIO_KEY'),
+          'MINIO_SECRET': os.environ.get('MINIO_SECRET'),
+          'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
+          'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+      })
 
 
