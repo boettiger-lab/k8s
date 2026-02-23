@@ -1,12 +1,11 @@
 FROM ghcr.io/rocker-org/ml-spatial
 
-# COPY continue/config.json /opt/share/continue/config.json
-# COPY continue/config.ts /opt/share/continue/config.ts
-
 # If XDG_CONFIG_DIR is set only
-# USER root
-# RUN mkdir -p /opt/share/jupyter/jupyter_ai && chown -R jovyan:users /opt/share/jupyter
-# USER jovyan
+
+USER root
+COPY install-kubectl-tools.sh
+RUN bash install-kubectl-tools.sh 
+USER ${NB_USER} 
 
 RUN install2.r rsvg nimble jqr av
 
