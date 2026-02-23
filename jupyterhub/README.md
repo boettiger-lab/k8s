@@ -2,13 +2,13 @@
 
 ## Overview
 
-This directory contains the Helm chart configuration for deploying JupyterHub on the Nimbus cluster.
+This directory contains the Helm chart configuration for deploying JupyterHub on Kubernetes clusters.
 
 ## Deployment Steps
 
 ### 1. Secrets Setup
 
-We use Kubernetes Secrets to manage sensitive information (OAuth credentials, Image Registry tokens). **Do not store secrets in plaintext config files.**
+We use Kubernetes Secrets to manage sensitive information (OAuth credentials, API keys, MinIO credentials, Image Registry tokens). **Do not store secrets in plaintext config files.**
 
 Run the interactive setup script to create the necessary secrets:
 
@@ -18,30 +18,39 @@ Run the interactive setup script to create the necessary secrets:
 
 This will prompt for:
 - **GitHub OAuth Client ID & Secret**: For user authentication.
-- **GitHub Container Registry (GHCR) Token**: For pulling private/custom images (e.g. `fancy-profiles`).
+- **OpenAI API Key**: For AI features in JupyterHub.
+- **MinIO Access Key & Secret**: For S3-compatible object storage.
+- **GitHub Container Registry (GHCR) Username & Token**: For pulling private/custom images.
 
 It creates the following secrets in the `jupyter` namespace:
 - `jupyter-oauth-secret`: Contains `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+- `jupyter-secrets`: Contains `OPENAI_API_KEY`, `MINIO_KEY`, `MINIO_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, and `GHCR_PASSWORD`.
 - `ghcr-pull-secret`: Docker registry secret for authenticating with GHCR.
 
 ### 2. Deployment
 
-To deploy or upgrade JupyterHub on Nimbus:
+To deploy or upgrade JupyterHub:
 
+**For Cirrus:**
+```bash
+./cirrus.sh
+```
+
+**For Nimbus:**
 ```bash
 ./nimbus.sh
 ```
 
-This script:
-1. Checks that required secrets exist.
-2. Updates Helm repositories.
-3. Deploys using `nimbus-config.yaml`.
+These scripts:
+1. Check that required secrets exist (recommended to run `setup-secrets.sh` first).
+2. Update Helm repositories.
+3. Deploy using the appropriate config files.
 
 ## Configuration
 
 ### Secrets Management
 
-The configuration (`nimbus-config.yaml`) references K8s secrets instead of having them inline:
+The configurations (`public-config.yaml`, `nimbus-config.yaml`) reference K8s secrets instead of having them inline:
 
 1.  **Image Pull Secrets**:
     *   **Root level**: `imagePullSecrets` (for singleuser pods and other hooks).
