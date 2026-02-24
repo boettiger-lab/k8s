@@ -104,12 +104,12 @@ singleuser:
               image: "{value}"
           choices:
             01-cpu:
-              display_name: Default (rocker/ml)
-              description: General purpose python + R (with RStudio) environment 
+              display_name: Default CPU environment
+              description: General purpose python/R environment 
               kubespawner_override:
-                image:  "ghcr.io/rocker-org/ml:latest"
+                image:  "ghcr.io/boettiger-lab/k8s:latest"
             02-gpu:
-              display_name: RL
+              display_name: RL GPU
               description: CUDA GPU environment, with RL 
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
