@@ -37,8 +37,7 @@ jobs:
         with:
           context: images/
           file: images/Dockerfile.gpu
-          # CUDA does not support linux/arm64; amd64 only for GPU image
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           no-cache: true
           tags: ghcr.io/boettiger-lab/k8s-gpu:latest
