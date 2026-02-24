@@ -1,6 +1,8 @@
 name: Docker Image CI
 on:
   workflow_dispatch: null
+  schedule:
+    - cron: '0 0 * * 0'
   push:
     paths: ['images/Dockerfile',  'images/install.r', 'images/rl-env.yml', 'images/spatial-env.yml', 'images/jupyter-ai.yml']
 jobs:
