@@ -7,7 +7,7 @@
 # Required environment variables (or will prompt):
 #   GITHUB_CLIENT_ID     - GitHub OAuth App client ID
 #   GITHUB_CLIENT_SECRET - GitHub OAuth App client secret  
-#   OPENAI_API_KEY       - OpenAI API key
+#   OPENAI_API_KEY       - NRP API key for ellm.nrp-nautilus.io (goose/OpenAI-compatible)
 #   MINIO_KEY            - MinIO access key
 #   MINIO_SECRET         - MinIO secret key
 #   GHCR_USERNAME        - GitHub Container Registry username
@@ -36,7 +36,7 @@ if [ -z "$GITHUB_CLIENT_SECRET" ]; then
 fi
 
 if [ -z "$OPENAI_API_KEY" ]; then
-    read -sp "OpenAI API Key: " OPENAI_API_KEY
+    read -sp "NRP API Key (for ellm.nrp-nautilus.io): " OPENAI_API_KEY
     echo ""
 fi
 

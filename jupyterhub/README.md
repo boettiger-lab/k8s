@@ -18,7 +18,7 @@ Run the interactive setup script to create the necessary secrets:
 
 This will prompt for:
 - **GitHub OAuth Client ID & Secret**: For user authentication.
-- **OpenAI API Key**: For AI features in JupyterHub.
+- **NRP API Key**: For AI features via the NRP ellm endpoint (goose, OpenAI-compatible).
 - **MinIO Access Key & Secret**: For S3-compatible object storage.
 - **GitHub Container Registry (GHCR) Username & Token**: For pulling private/custom images.
 

@@ -196,6 +196,11 @@ hub:
         secretKeyRef:
           name: jupyter-secrets
           key: GHCR_PASSWORD
+    OPENAI_API_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: OPENAI_API_KEY
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
@@ -207,6 +212,10 @@ hub:
         AWS_PUBLIC_ENDPOINT: "$AWS_S3_ENDPOINT"
         AWS_HTTPS: "true"
         AWS_VIRTUAL_HOSTING: "FALSE"
+        GOOSE_PROVIDER: "openai"
+        OPENAI_HOST: "https://ellm.nrp-nautilus.io"
+        OPENAI_BASE_PATH: "/v1"
+        GOOSE_MODEL: "minimax-m2"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
@@ -245,6 +254,7 @@ hub:
           'MINIO_SECRET': os.environ.get('MINIO_SECRET'),
           'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
           'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+          'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY'),
       })
 
 
