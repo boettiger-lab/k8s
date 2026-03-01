@@ -27,6 +27,27 @@ It creates the following secrets in the `jupyter` namespace:
 - `jupyter-secrets`: Contains `OPENAI_API_KEY`, `MINIO_KEY`, `MINIO_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, and `GHCR_PASSWORD`.
 - `ghcr-pull-secret`: Docker registry secret for authenticating with GHCR.
 
+#### Updating a Single Secret Key
+
+To rotate or update one key without recreating all secrets, use the `--update-key` flag:
+
+```bash
+./setup-secrets.sh --update-key SECRET_NAME KEY [VALUE]
+```
+
+You will be prompted securely if `VALUE` is omitted. Examples:
+
+```bash
+# Update just the OpenAI/NRP API key (prompted):
+./setup-secrets.sh --update-key jupyter-secrets OPENAI_API_KEY
+
+# Update GitHub OAuth secret (value from env var):
+./setup-secrets.sh --update-key jupyter-oauth-secret GITHUB_CLIENT_SECRET "$GITHUB_CLIENT_SECRET"
+
+# Update GHCR token:
+./setup-secrets.sh --update-key jupyter-secrets GHCR_PASSWORD
+```
+
 ### 2. Deployment
 
 To deploy or upgrade JupyterHub:

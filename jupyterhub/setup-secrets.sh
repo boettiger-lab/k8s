@@ -3,6 +3,10 @@
 # This replaces the plaintext private-config.yaml approach
 #
 # Usage: ./setup-secrets.sh
+#        ./setup-secrets.sh --update-key SECRET_NAME KEY VALUE
+#            SECRET_NAME: the k8s secret to patch (e.g. jupyter-secrets, jupyter-oauth-secret)
+#            KEY:         the literal key within that secret (e.g. OPENAI_API_KEY)
+#            VALUE:       the new value (omit to be prompted securely)
 #
 # Required environment variables (or will prompt):
 #   GITHUB_CLIENT_ID     - GitHub OAuth App client ID
@@ -16,6 +20,28 @@
 set -e
 
 NAMESPACE="jupyter"
+
+# --update-key mode: patch a single key in an existing secret
+if [ "${1}" = "--update-key" ]; then
+    SECRET_NAME="${2:-}"
+    KEY="${3:-}"
+    VALUE="${4:-}"
+    if [ -z "$SECRET_NAME" ] || [ -z "$KEY" ]; then
+        echo "Usage: $0 --update-key SECRET_NAME KEY [VALUE]"
+        echo "  e.g. $0 --update-key jupyter-secrets OPENAI_API_KEY"
+        exit 1
+    fi
+    if [ -z "$VALUE" ]; then
+        read -sp "New value for $KEY: " VALUE
+        echo ""
+    fi
+    ENCODED=$(printf '%s' "$VALUE" | base64 -w0)
+    kubectl patch secret "$SECRET_NAME" -n "$NAMESPACE" \
+        --type='json' \
+        -p="[{\"op\":\"replace\",\"path\":\"/data/$KEY\",\"value\":\"$ENCODED\"}]"
+    echo "✅ Updated $KEY in secret '$SECRET_NAME' (namespace: $NAMESPACE)"
+    exit 0
+fi
 
 echo "============================================"
 echo "JupyterHub Secrets Setup"
