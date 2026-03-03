@@ -4,8 +4,17 @@ FROM ghcr.io/rocker-org/cuda
 COPY continue/config.json /opt/share/continue/config.json
 COPY continue/config.ts /opt/share/continue/config.ts
 
-COPY rl-env.yml rl-env.yml
-RUN conda update -n base -c conda-forge conda && \
-    conda env update --file rl-env.yml
+RUN /opt/venv/bin/pip install \
+    huggingface_hub \
+    nox \
+    nvitop \
+    plotnine \
+    PyYaml \
+    pytest \
+    scikit-optimize \
+    "ray[rllib,tune]" \
+    huggingface_sb3 \
+    stable-baselines3 \
+    sb3-contrib
 
 
