@@ -1,0 +1,40 @@
+name: Rebuild on upstream ml-spatial update
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # poll every 6 hours
+  workflow_dispatch:
+
+jobs:
+  check-and-rebuild:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: Check if upstream built after our last build
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          upstream_time=$(gh api \
+            "repos/rocker-org/ml/actions/workflows/build-ml-spatial.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].updated_at')
+
+          our_time=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/docker-image.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].updated_at // "1970-01-01T00:00:00Z"')
+
+          echo "Upstream last built: $upstream_time"
+          echo "We last built:       $our_time"
+
+          if [[ "$upstream_time" > "$our_time" ]]; then
+            echo "trigger=true" >> $GITHUB_OUTPUT
+          else
+            echo "trigger=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger image rebuild
+        if: steps.check.outputs.trigger == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run docker-image.yml --repo ${{ github.repository }}
