@@ -5,7 +5,11 @@ FROM ghcr.io/rocker-org/ml-spatial
 USER root
 COPY install-kubectl-tools.sh /tmp/install-kubectl-tools.sh
 RUN bash /tmp/install-kubectl-tools.sh && rm /tmp/install-kubectl-tools.sh
-USER ${NB_USER} 
+
+COPY install-claude.sh /tmp/install-claude.sh
+RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
+
+USER ${NB_USER}
 
 RUN install2.r rsvg nimble jqr av
 
