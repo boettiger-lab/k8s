@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-test
+  namespace: default
+  labels:
+    k8s-app: vllm-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-test
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-test
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: nvcr.io/nvidia/vllm:25.11-py3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
+        args:
+        - "vllm"
+        - "serve"
+        - "facebook/opt-125m"
+        - "--served-model-name"
+        - "test"
+        - "--dtype"
+        - "float16"
+        - "--gpu-memory-utilization"
+        - "0.3"
+        - "--tensor-parallel-size"
+        - "1"
+        - "--max-model-len"
+        - "2048"
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        resources:
+          requests:
+            cpu: 2
+            memory: 32Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 2
+            memory: 32Gi
+            nvidia.com/gpu: 1
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
