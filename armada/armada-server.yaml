@@ -46,6 +46,11 @@ spec:
       openIdAuth:
         providerUrl: https://dex.carlboettiger.info
         groupsClaim: groups
+      basicAuth:
+        users:
+          cboettig:
+            password: ${ARMADA_BASIC_AUTH_PASSWORD}
+            groups: ["boettiger-lab"]
       permissionGroupMapping:
         create_queue: ["boettiger-lab"]
         delete_queue: ["boettiger-lab"]
