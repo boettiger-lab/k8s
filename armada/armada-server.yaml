@@ -42,12 +42,15 @@ spec:
       forceNoTls: true
 
     auth:
-      anonymousAuth: true   # Switch to OIDC or basic auth for production
+      anonymousAuth: false
+      openIdAuth:
+        providerUrl: https://dex.carlboettiger.info
+        groupsClaim: groups
       permissionGroupMapping:
-        create_queue: ["everyone"]
-        delete_queue: ["everyone"]
-        cancel_any_jobs: ["everyone"]
-        reprioritize_any_jobs: ["everyone"]
-        watch_all_events: ["everyone"]
-        submit_any_jobs: ["everyone"]
-        execute_jobs: ["everyone"]
+        create_queue: ["boettiger-lab"]
+        delete_queue: ["boettiger-lab"]
+        cancel_any_jobs: ["boettiger-lab"]
+        reprioritize_any_jobs: ["boettiger-lab"]
+        watch_all_events: ["boettiger-lab"]
+        submit_any_jobs: ["boettiger-lab"]
+        execute_jobs: ["boettiger-lab"]
