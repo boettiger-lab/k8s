@@ -9,5 +9,6 @@ parameters:
   fstype: "zfs"
   poolname: "openebs-zpool"
 provisioner: zfs.csi.openebs.io
+volumeBindingMode: Immediate
 
 
