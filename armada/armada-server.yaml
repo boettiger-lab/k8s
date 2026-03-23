@@ -1,0 +1,53 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: ArmadaServer
+metadata:
+  name: armada-server
+  namespace: armada
+spec:
+  replicas: 1
+  pulsarInit: false
+
+  image:
+    repository: gresearch/armada-server
+    tag: "latest"
+
+  # gRPC API ingress — Traefik requires h2c (HTTP/2 cleartext) backend scheme
+  ingress:
+    ingressClass: traefik
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/service.serverScheme: h2c
+      cert-manager.io/cluster-issuer: letsencrypt-production
+
+  hostNames:
+    - armada-api.carlboettiger.info
+
+  clusterIssuer: letsencrypt-production
+
+  applicationConfig:
+    pulsar:
+      URL: "pulsar://armada-pulsar-broker.armada.svc.cluster.local:6650"
+
+    postgres:
+      connection:
+        host: armada-postgresql.armada.svc.cluster.local
+        port: 5432
+        user: armada
+        password: ${ARMADA_POSTGRES_PASSWORD}
+        dbname: lookout
+        sslmode: disable
+
+    schedulerApiConnection:
+      armadaUrl: "armada-scheduler.armada.svc.cluster.local:50051"
+      forceNoTls: true
+
+    auth:
+      anonymousAuth: true   # Switch to OIDC or basic auth for production
+      permissionGroupMapping:
+        create_queue: ["everyone"]
+        delete_queue: ["everyone"]
+        cancel_any_jobs: ["everyone"]
+        reprioritize_any_jobs: ["everyone"]
+        watch_all_events: ["everyone"]
+        submit_any_jobs: ["everyone"]
+        execute_jobs: ["everyone"]

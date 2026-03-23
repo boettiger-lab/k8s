@@ -1,0 +1,44 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: Scheduler
+metadata:
+  name: armada-scheduler
+  namespace: armada
+spec:
+  replicas: 1
+
+  image:
+    repository: gresearch/armada-scheduler
+    tag: "latest"
+
+  applicationConfig:
+    pulsar:
+      URL: "pulsar://armada-pulsar-broker.armada.svc.cluster.local:6650"
+
+    postgres:
+      connection:
+        host: armada-postgresql.armada.svc.cluster.local
+        port: 5432
+        user: armada
+        password: ${ARMADA_POSTGRES_PASSWORD}
+        dbname: scheduler
+        sslmode: disable
+
+    grpc:
+      port: 50051
+
+    leader:
+      mode: standalone
+
+    armadaApi:
+      armadaUrl: "armada-server.armada.svc.cluster.local:50051"
+      forceNoTls: true
+
+    auth:
+      anonymousAuth: true
+      permissionGroupMapping:
+        execute_jobs: ["everyone"]
+        submit_any_jobs: ["everyone"]
+        cancel_any_jobs: ["everyone"]
+        reprioritize_any_jobs: ["everyone"]
+        watch_all_events: ["everyone"]
+        create_queue: ["everyone"]

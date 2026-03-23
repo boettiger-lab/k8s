@@ -1,0 +1,38 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: Lookout
+metadata:
+  name: armada-lookout
+  namespace: armada
+spec:
+  replicas: 1
+
+  image:
+    repository: gresearch/armada-lookout
+    tag: "latest"
+
+  ingress:
+    ingressClass: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-production
+      external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+
+  hostNames:
+    - armada.carlboettiger.info
+
+  clusterIssuer: letsencrypt-production
+
+  applicationConfig:
+    # Override API port to match what the operator's liveness probe expects (port 8080)
+    apiPort: 8080
+
+    postgres:
+      connection:
+        host: armada-postgresql.armada.svc.cluster.local
+        port: 5432
+        user: armada
+        password: ${ARMADA_POSTGRES_PASSWORD}
+        dbname: lookout
+        sslmode: disable
+
+    uiConfig:
+      armadaApiBaseUrl: "http://armada-server.armada.svc.cluster.local:8080"

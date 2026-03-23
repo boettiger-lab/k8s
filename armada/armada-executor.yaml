@@ -1,0 +1,21 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: Executor
+metadata:
+  name: armada-executor
+  namespace: armada
+spec:
+  prometheus:
+    enabled: false
+
+  image:
+    repository: gresearch/armada-executor
+    tag: "latest"
+
+  applicationConfig:
+    application:
+      # Unique ID for this k8s cluster — used in Armada job submissions
+      clusterId: "cirrus"
+
+    executorApiConnection:
+      armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
+      forceNoTls: true

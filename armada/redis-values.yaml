@@ -1,0 +1,9 @@
+architecture: standalone
+
+auth:
+  enabled: false
+
+master:
+  persistence:
+    storageClass: local-path
+    size: 5Gi

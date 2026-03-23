@@ -1,0 +1,13 @@
+auth:
+  database: armada
+  username: armada
+  # Password set via secret: armada-postgres-secret
+  existingSecret: armada-postgres-secret
+  secretKeys:
+    adminPasswordKey: postgres-password
+    userPasswordKey: password
+
+primary:
+  persistence:
+    storageClass: local-path
+    size: 10Gi
