@@ -37,6 +37,12 @@ spec:
         dbname: lookout
         sslmode: disable
 
+    eventsApiRedis:
+      addrs:
+        - armada-redis-master.armada.svc.cluster.local:6379
+      password: ""
+      db: 1
+
     schedulerApiConnection:
       armadaUrl: "armada-scheduler.armada.svc.cluster.local:50051"
       forceNoTls: true
@@ -47,7 +53,7 @@ spec:
         providerUrl: https://dex.carlboettiger.info
         groupsClaim: groups
         clientId: armadactl
-permissionGroupMapping:
+      permissionGroupMapping:
         create_queue: ["boettiger-lab"]
         delete_queue: ["boettiger-lab"]
         cancel_any_jobs: ["boettiger-lab"]

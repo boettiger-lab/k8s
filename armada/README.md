@@ -75,7 +75,7 @@ Key constraints discovered through testing:
 - **Minimum resources:** `cpu: 1, memory: 1Gi` — smaller requests (e.g. cpu: 100m) are not scheduled
 - **No opportunistic priority class** — only `armada-default`, `armada-preemptible`, `armada-resilient`
 - **No pool annotation needed** — the default pool works without explicit annotation
-- **`armadactl watch` does not receive completion events** (see issue #10) — use `armadactl get job-report` instead
+- **`armadactl watch` requires `eventsApiRedis` configured** — the base config defaults to `redis:6379` (wrong hostname); fixed in `armada-server.yaml` and the patched secret
 
 ## Submitting Jobs
 
@@ -104,7 +104,12 @@ EOF
 armadactl submit job.yaml
 ```
 
-Check job status (watch is broken, use job-report):
+Watch job events (streams until job completes):
+```bash
+armadactl watch test my-first-jobs
+```
+
+Or check job status with:
 ```bash
 armadactl get job-report -q test --jobset my-first-jobs
 ```
@@ -201,6 +206,22 @@ by `install.sh` but must exist before job submission. If jobs fail with
 ```bash
 kubectl apply -f priority-classes.yaml  # created inline in install.sh
 ```
+
+### Watch events: `eventsApiRedis` key (not `redis`)
+
+`armadactl watch` relies on the server's `GetJobSetEvents` streaming RPC, which
+reads from Redis. The base config (`/app/config/server/config.yaml`) defaults to
+`eventsApiRedis.addrs: [redis:6379]` — the wrong hostname. Override with:
+
+```yaml
+eventsApiRedis:
+  addrs:
+    - armada-redis-master.armada.svc.cluster.local:6379
+  password: ""
+  db: 1
+```
+
+Already set in `armada-server.yaml` and the `armada-server` secret.
 
 ### Auth permissions (`permissionGroupMapping`)
 
