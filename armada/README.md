@@ -9,6 +9,7 @@ armada namespace
 ├── armada-server            — gRPC API server (job submission)
 ├── armada-scheduler         — Batch job scheduler (owns scheduler DB schema)
 ├── armada-scheduleringester — Ingests Pulsar events → Scheduler DB
+├── armada-eventingester     — Ingests Pulsar events → Redis streams (required for armadactl watch)
 ├── armada-executor          — Watches this k3s cluster; submits jobs as pods
 ├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
@@ -252,8 +253,9 @@ traefik.ingress.kubernetes.io/service.serverScheme: h2c
 
 ```bash
 kubectl delete -f armada-server.yaml -f armada-scheduler.yaml \
-  -f armada-scheduleringester.yaml -f armada-lookout.yaml \
-  -f armada-executor.yaml -f armada-executor-deployment.yaml
+  -f armada-scheduleringester.yaml -f armada-eventingester.yaml \
+  -f armada-lookout.yaml -f armada-executor.yaml \
+  -f armada-executor-deployment.yaml
 helm uninstall armada-operator armada-pulsar armada-redis armada-postgresql -n armada
 kubectl delete namespace armada armada-jobs
 kubectl delete priorityclass armada-default armada-preemptible armada-resilient

@@ -1,0 +1,22 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: EventIngester
+metadata:
+  name: armada-eventingester
+  namespace: armada
+spec:
+  replicas: 1
+
+  image:
+    repository: gresearch/armada-event-ingester
+    tag: "latest"
+
+  applicationConfig:
+    pulsar:
+      URL: "pulsar://armada-pulsar-broker.armada.svc.cluster.local:6650"
+      jobsetEventsTopic: "events"
+
+    redis:
+      addrs:
+        - armada-redis-master.armada.svc.cluster.local:6379
+      password: ""
+      db: 1
