@@ -49,15 +49,43 @@ Install `armadactl`:
 go install github.com/armadaproject/armada/cmd/armadactl@latest
 ```
 
-Configure `~/.armadactl.yaml`:
+Configure `~/.armadactl.yaml` (OIDC via GitHub — boettiger-lab org membership required):
 ```yaml
-armadaUrl: armada-api.carlboettiger.info:443
+currentContext: cirrus
+contexts:
+  cirrus:
+    armadaUrl: armada-api.carlboettiger.info:443
+    openIdDeviceAuth:
+      providerUrl: https://dex.carlboettiger.info
+      clientId: armadactl
+      scopes: [openid, profile, email, groups, offline_access]
+    cacheRefreshToken: true
 ```
 
-Create a queue and submit a job:
+On first use, armadactl will prompt you to authenticate via GitHub in a browser.
+Token is cached in the OS keyring for subsequent calls (requires CGO-enabled binary;
+build with `CGO_ENABLED=1 go install github.com/armadaproject/armada/cmd/armadactl@latest`).
+
+## Cirrus Cluster Notes
+
+Key constraints discovered through testing:
+
+- **Namespace:** `armada-jobs` (jobs must specify this explicitly)
+- **Queue:** `test` (already exists; create new queues with `armadactl create queue <name> --priority-factor 1`)
+- **Minimum resources:** `cpu: 1, memory: 1Gi` — smaller requests (e.g. cpu: 100m) are not scheduled
+- **No opportunistic priority class** — only `armada-default`, `armada-preemptible`, `armada-resilient`
+- **No pool annotation needed** — the default pool works without explicit annotation
+- **`armadactl watch` does not receive completion events** (see issue #10) — use `armadactl get job-report` instead
+
+## Submitting Jobs
+
+Create a queue (one-time):
 ```bash
 armadactl create queue test --priority-factor 1
+```
 
+Submit a job:
+```bash
 cat > job.yaml <<EOF
 queue: test
 jobSetId: my-first-jobs
@@ -70,15 +98,15 @@ jobs:
           image: alpine:3
           command: ["echo", "hello from Armada"]
           resources:
-            requests: { cpu: "100m", memory: "64Mi" }
-            limits:   { cpu: "100m", memory: "64Mi" }
+            requests: { cpu: "1", memory: "1Gi" }
+            limits:   { cpu: "1", memory: "1Gi" }
 EOF
 armadactl submit job.yaml
 ```
 
-Watch job status:
+Check job status (watch is broken, use job-report):
 ```bash
-armadactl watch test my-first-jobs
+armadactl get job-report -q test --jobset my-first-jobs
 ```
 
 Or open the Lookout UI at https://armada.carlboettiger.info.
