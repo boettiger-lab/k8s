@@ -54,10 +54,10 @@ spec:
         groupsClaim: groups
         clientId: armadactl
       permissionGroupMapping:
-        create_queue: ["boettiger-lab"]
-        delete_queue: ["boettiger-lab"]
-        cancel_any_jobs: ["boettiger-lab"]
-        reprioritize_any_jobs: ["boettiger-lab"]
-        watch_all_events: ["boettiger-lab"]
-        submit_any_jobs: ["boettiger-lab"]
-        execute_jobs: ["boettiger-lab"]
+        create_queue: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        delete_queue: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        cancel_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        reprioritize_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        watch_all_events: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        submit_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        execute_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
