@@ -46,6 +46,7 @@ spec:
       openIdAuth:
         providerUrl: https://dex.carlboettiger.info
         groupsClaim: groups
+        clientId: armadactl
       basicAuth:
         users:
           cboettig:

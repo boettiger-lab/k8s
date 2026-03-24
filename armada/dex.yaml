@@ -36,6 +36,7 @@ data:
       public: true
       redirectURIs:
       - http://localhost:26512/callback
+      - /device/callback
 
     enablePasswordDB: false
 ---
