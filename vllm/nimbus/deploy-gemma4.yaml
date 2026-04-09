@@ -47,6 +47,9 @@ spec:
         - --dtype
         - auto
         - --trust-remote-code
+        - --enable-auto-tool-choice
+        - --tool-call-parser
+        - gemma4
         - --tensor-parallel-size
         - "1"
         - --gpu-memory-utilization
