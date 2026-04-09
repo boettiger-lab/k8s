@@ -63,11 +63,11 @@ spec:
         resources:
           requests:
             cpu: 4
-            memory: 22Gi
+            memory: 10Gi
             nvidia.com/gpu: 2
           limits:
             cpu: 4
-            memory: 22Gi
+            memory: 10Gi
             nvidia.com/gpu: 2
         securityContext:
           capabilities:
