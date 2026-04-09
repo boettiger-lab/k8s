@@ -4,6 +4,7 @@ metadata:
   name: vllm-nimbus-service
   labels:
     k8s-app: vllm-nimbus
+
 spec:
   type: LoadBalancer
   ports:
