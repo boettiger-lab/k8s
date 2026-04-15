@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisper
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-whisper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-cirrus-whisper
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-cirrus-whisper
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+      - name: whisper
+        image: ghcr.io/speaches-ai/speaches:latest-cuda
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: WHISPER__MODEL
+          value: Systran/faster-whisper-large-v3
+        - name: WHISPER__DEVICE
+          value: cuda
+        - name: WHISPER__COMPUTE_TYPE
+          value: float16
+        - name: WHISPER__INFERENCE_DEVICE
+          value: cuda
+        - name: WHISPER__MODELS_DIR
+          value: /home/ubuntu/.cache/huggingface/faster-whisper
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /home/ubuntu/.cache/huggingface
+        resources:
+          requests:
+            cpu: 4
+            memory: 8Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 4
+            memory: 8Gi
+            nvidia.com/gpu: 1
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-whisper-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-whisper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    k8s-app: vllm-cirrus-whisper
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-whisper-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-cirrus-whisper
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: whisper-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-whisper-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - whisper-cirrus.carlboettiger.info
+    secretName: vllm-whisper-tls
