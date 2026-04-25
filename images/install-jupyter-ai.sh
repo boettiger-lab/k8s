@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Node.js + npm are needed for @zed-industries/claude-agent-acp, the ACP
-# bridge that jupyter-ai spawns when the user @mentions @Claude in the
-# chat panel. OpenCode ships its own standalone binary, already installed
+# Node.js (with bundled npm) is needed for @zed-industries/claude-agent-acp,
+# the ACP bridge that jupyter-ai spawns when the user @mentions @Claude in
+# the chat panel. OpenCode ships its own standalone binary, already installed
 # to /usr/local/bin/opencode by the base image.
-apt-get update
-apt-get install -y --no-install-recommends nodejs npm
+#
+# Ubuntu 24.04's apt ships Node 18, but the ACP bridge uses ESM import
+# attributes (`with { type: "json" }`) which require Node >= 20, so pull
+# Node 22 LTS from NodeSource instead.
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y --no-install-recommends nodejs
 rm -rf /var/lib/apt/lists/*
 
 # Claude ACP bridge — installs a `claude-agent-acp` binary onto PATH.
