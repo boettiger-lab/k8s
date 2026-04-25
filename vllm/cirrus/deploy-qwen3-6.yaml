@@ -40,23 +40,20 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
-        - name: NCCL_P2P_LEVEL
-          value: "NVL"
         args:
         - --model
-        - Qwen/Qwen3.6-35B-A3B
+        - cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
         - --served-model-name
         - qwen3-6
         - --dtype
-        - float16
+        - auto
         - --trust-remote-code
         - --tensor-parallel-size
-        - "2"
+        - "1"
         - --gpu-memory-utilization
         - "0.9"
         - --max-model-len
         - "131072"
-        - --language-model-only
         - --enable-auto-tool-choice
         - --tool-call-parser
         - qwen3_coder
@@ -72,11 +69,11 @@ spec:
           requests:
             cpu: 4
             memory: 16Gi
-            nvidia.com/gpu: 14
+            nvidia.com/gpu: 2
           limits:
             cpu: 4
             memory: 16Gi
-            nvidia.com/gpu: 14
+            nvidia.com/gpu: 2
         securityContext:
           capabilities:
             add:

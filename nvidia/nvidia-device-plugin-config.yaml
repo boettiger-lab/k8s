@@ -12,7 +12,7 @@ config:
         failOnInitError: true
         nvidiaDriverRoot: "/"
         plugin:
-          passDeviceSpecs: true
+          passDeviceSpecs: false
           deviceListStrategy: "envvar"
           deviceIDStrategy: "uuid"
         gfd:
