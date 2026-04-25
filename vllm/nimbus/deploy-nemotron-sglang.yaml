@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron
+  namespace: default
+  labels:
+    k8s-app: vllm-nimbus-nemotron
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-nemotron
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-nemotron
+    spec:
+      runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ngc-pull
+      containers:
+      - name: sglang
+        # Official NVIDIA NGC container: pre-compiled for ARM64 + SM121, all
+        # dependency issues (PyTorch CUDA 13, Triton SM121, FlashInfer) pre-solved.
+        # Requires NGC pull secret — see README for setup.
+        # Alternative if NGC auth is unavailable:
+        #   scitrera/dgx-spark-sglang:0.5.8-t4
+        image: nvcr.io/nvidia/sglang:26.03-py3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        - name: SGLANG_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        command: ["python", "-m", "sglang.launch_server"]
+        args:
+        - --model
+        - nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+        - --served-model-name
+        - nemotron
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --api-key
+        - $(SGLANG_API_KEY)
+        - --trust-remote-code
+        - --enable-metrics
+        - --log-requests
+        - --tp
+        - "1"
+        - --tool-call-parser
+        - qwen3_coder
+        - --mem-fraction-static
+        - "0.875"
+        - --context-length
+        - "262144"
+        - --kv-cache-dtype
+        - fp8_e4m3
+        # no_buffer required — extra_buffer asserts on NemotronHForCausalLM
+        - --mamba-scheduler-strategy
+        - no_buffer
+        - --max-running-requests
+        - "10"
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        resources:
+          requests:
+            cpu: 4
+            memory: 85Gi
+            nvidia.com/gpu: 7
+          limits:
+            cpu: 4
+            memory: 85Gi
+            nvidia.com/gpu: 7
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
