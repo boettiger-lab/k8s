@@ -1,37 +1,38 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gemma4
-  namespace: default
+  name: qwen3-6
+  namespace: vllm
   labels:
-    k8s-app: vllm-nimbus-gemma4
+    k8s-app: vllm-cirrus-qwen3-6
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      k8s-app: vllm-nimbus-gemma4
+      k8s-app: vllm-cirrus-qwen3-6
   template:
     metadata:
       labels:
-        k8s-app: vllm-nimbus-gemma4
+        k8s-app: vllm-cirrus-qwen3-6
     spec:
       runtimeClassName: nvidia
-      imagePullSecrets:
-      - name: ghcr-pull
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
       containers:
       - name: vllm
-        image: ghcr.io/boettiger-lab/vllm-gemma4-audio:latest
+        image: vllm/vllm-openai:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
         env:
-        - name: HF_TOKEN
+        - name: HUGGING_FACE_HUB_TOKEN
           valueFrom:
             secretKeyRef:
-              name: huggingface-token
+              name: vllm-huggingface-token
               key: token
-              optional: true
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -39,28 +40,29 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
+        - name: NCCL_P2P_LEVEL
+          value: "NVL"
         args:
         - --model
-        - google/gemma-4-E2B-it
+        - Qwen/Qwen3.6-35B-A3B
         - --served-model-name
-        - gemma4
+        - qwen3-6
         - --dtype
-        - auto
+        - float16
         - --trust-remote-code
-        - --enable-auto-tool-choice
-        - --tool-call-parser
-        - gemma4
         - --tensor-parallel-size
-        - "1"
+        - "2"
         - --gpu-memory-utilization
-        - "0.18"
+        - "0.9"
         - --max-model-len
-        - "65536"
-        - --limit-mm-per-prompt
-        - '{"audio": 1, "image": 4}'
+        - "131072"
+        - --language-model-only
         - --enable-auto-tool-choice
         - --tool-call-parser
-        - gemma4
+        - qwen3_coder
+        - --reasoning-parser
+        - qwen3
+        - --enforce-eager
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
@@ -69,12 +71,12 @@ spec:
         resources:
           requests:
             cpu: 4
-            memory: 14Gi
-            nvidia.com/gpu: 2
+            memory: 16Gi
+            nvidia.com/gpu: 14
           limits:
             cpu: 4
-            memory: 14Gi
-            nvidia.com/gpu: 2
+            memory: 16Gi
+            nvidia.com/gpu: 14
         securityContext:
           capabilities:
             add:
@@ -92,9 +94,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm-gemma4-service
+  name: vllm-qwen3-6-service
+  namespace: vllm
   labels:
-    k8s-app: vllm-nimbus-gemma4
+    k8s-app: vllm-cirrus-qwen3-6
 spec:
   type: ClusterIP
   ports:
@@ -103,32 +106,33 @@ spec:
       protocol: TCP
       name: http
   selector:
-    k8s-app: vllm-nimbus-gemma4
+    k8s-app: vllm-cirrus-qwen3-6
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vllm-gemma4-ingress
+  name: vllm-qwen3-6-ingress
+  namespace: vllm
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-    traefik.ingress.kubernetes.io/service.servertransport: default-vllm-long-timeout@kubernetescrd
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
   labels:
-    app: vllm-nimbus-gemma4
+    app: vllm-cirrus-qwen3-6
 spec:
   ingressClassName: traefik
   rules:
-  - host: gemma4-nimbus.carlboettiger.info
+  - host: qwen3-cirrus.carlboettiger.info
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: vllm-gemma4-service
+            name: vllm-qwen3-6-service
             port:
               number: 8000
   tls:
   - hosts:
-    - gemma4-nimbus.carlboettiger.info
-    secretName: vllm-gemma4-tls
+    - qwen3-cirrus.carlboettiger.info
+    secretName: vllm-qwen3-tls
