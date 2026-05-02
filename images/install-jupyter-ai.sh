@@ -22,6 +22,14 @@ npm cache clean --force
 # Goose personas automatically. jupyter-geoagent (this lab) registers
 # the GeoAgent Map launcher tile plus `geoagent:*` JupyterLab commands
 # so the LLM personas can drive the map directly from chat.
+#
+# jupyter-ai-acp-bridge is our PoC fork that adds a Zed-style per-thread
+# harness selector to the new-chat dialog and supersedes the legacy
+# `@Claude` / `@OpenCode` personas. Not on PyPI; installed from the
+# acp-bridge-impl branch of cboettig/jupyter-ai. The build hook runs
+# jlpm to bundle the JupyterLab extension, which is why Node must be
+# installed above this step.
 /opt/venv/bin/pip install --no-cache-dir \
   "jupyter-ai>=3,<4" \
+  "jupyter-ai-acp-bridge @ git+https://github.com/cboettig/jupyter-ai.git@acp-bridge-impl#subdirectory=jupyter-ai-acp-bridge" \
   "jupyter-geoagent @ git+https://github.com/boettiger-lab/jupyter-geoagent.git@main"
