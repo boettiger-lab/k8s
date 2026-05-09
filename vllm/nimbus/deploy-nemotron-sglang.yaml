@@ -7,6 +7,11 @@ metadata:
     k8s-app: vllm-nimbus-nemotron
 spec:
   replicas: 1
+  # Recreate (not RollingUpdate): the nimbus node has only 7 GPUs, all held by
+  # the running pod, so a surge-first rollout pins the new pod in Pending
+  # forever. Tear down old before creating new.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       k8s-app: vllm-nimbus-nemotron
@@ -25,7 +30,7 @@ spec:
         # Requires NGC pull secret — see README for setup.
         # Alternative if NGC auth is unavailable:
         #   scitrera/dgx-spark-sglang:0.5.8-t4
-        image: nvcr.io/nvidia/sglang:26.03-py3
+        image: nvcr.io/nvidia/sglang:26.04-py3
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
@@ -44,8 +49,35 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
-        command: ["python", "-m", "sglang.launch_server"]
+        # Pre-warm the FP4 SM120 quantization kernel BEFORE sglang.launch_server
+        # starts torch.compile / piecewise-cuda-graph capture. FlashInfer's
+        # gen_fp4_quantization_sm120f_module shells out to `nvcc --version`,
+        # whose `threading.Lock()` cannot be traced by torch.dynamo — so the
+        # first FP4 call inside a captured graph crashes the worker. Building
+        # the module eagerly here populates ~/.cache/flashinfer so the in-graph
+        # call hits a cached `.so` and never invokes the JIT path.
+        # See SGLang 26.02 release-notes known issue (Nemotron Nano on Spark/Thor):
+        # "the user will need to install the flashinfer-jit-cache before running."
+        command: ["bash", "-c"]
         args:
+        - |
+          set -euo pipefail
+          echo "[prewarm] flashinfer=$(python3 -c 'import flashinfer; print(flashinfer.__version__)')"
+          pip install --no-cache-dir --quiet flashinfer-jit-cache 2>&1 | tail -5 \
+            || echo "[prewarm] flashinfer-jit-cache install failed (non-fatal)"
+          python3 - <<'PY'
+          import time, torch
+          maj, mn = torch.cuda.get_device_capability(0)
+          key = f"{maj}{mn}"
+          print(f"[prewarm] device={torch.cuda.get_device_name(0)} sm={key}")
+          from flashinfer.quantization.fp4_quantization import get_fp4_quantization_module
+          t0 = time.time()
+          mod = get_fp4_quantization_module(key)
+          print(f"[prewarm] built sm{key} fp4_quantization in {time.time()-t0:.1f}s -> {mod}")
+          PY
+          echo "[prewarm] launching sglang.launch_server"
+          exec python3 -m sglang.launch_server "$@"
+        - prewarm-launcher
         - --model
         - nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
         - --served-model-name
@@ -74,6 +106,13 @@ spec:
         - no_buffer
         - --max-running-requests
         - "10"
+        # Disable piecewise CUDA graph: SGLang's PCG path traces forward() under
+        # torch.dynamo, and FlashInfer's fp4_quantize calls
+        # is_cuda_version_at_least() which shells out to `nvcc --version` on
+        # every call (to construct build flags). Dynamo refuses to trace
+        # subprocess.Popen/threading.Lock and aborts. Disabling PCG keeps
+        # forward() in eager Python so the subprocess call works fine.
+        - --disable-piecewise-cuda-graph
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
