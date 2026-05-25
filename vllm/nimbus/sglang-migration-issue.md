@@ -1,6 +1,6 @@
 # Nemotron-Super on SGLang/DGX Spark — status & open issues
 
-_Last updated 2026-05-08._
+_Last updated 2026-05-24._
 
 ## TL;DR
 
@@ -144,26 +144,43 @@ What an upstream fix likely looks like, in increasing quality:
 3. **Register `fp4_quantize` as `torch.compiler.allow_in_graph`** — the proper fix. Tells dynamo to treat the call as opaque. This is the path the dynamo error message itself suggests.
 4. **Ship AOT `sm121a` cubins via `flashinfer-jit-cache`** — eliminates the JIT path entirely on GB10.
 
-Likely vehicle: FlashInfer 0.6.11+ → NGC SGLang 26.05 or 26.06.
+Likely vehicle: FlashInfer 0.6.12 → NGC SGLang 26.05 or 26.06.
 
-## FlashInfer 0.6.11 (2026-05-07) — SM121-relevant changes
+## FlashInfer 0.6.12rc1 (2026-05-22) — the PCG fix has landed
 
-FlashInfer 0.6.11 (pre-release, published 2026-05-07) contains the most SM120/SM121-targeted changes of any release to date. NGC 26.05 has not yet dropped as of 2026-05-08; when it does, it will likely bundle this version.
+FlashInfer 0.6.12rc1 shipped May 22 and contains **the explicit fix for our PCG dynamo crash**. NGC 26.05 has not yet dropped as of 2026-05-24 but is imminent.
 
-**Directly relevant PRs:**
+**Critical fix:**
 
 | PR | Title | Why it matters |
 |----|-------|---------------|
-| [#3175](https://github.com/flashinfer-ai/flashinfer/pull/3175) | `fix: align is_sm120f_supported with SM12x family semantics` | Changes how SM121 is classified relative to SM120f. If SM121 now resolves to AOT-covered paths, the JIT path (and its `is_cuda_version_at_least` subprocess call) may never be entered — potentially fixing the PCG dynamo bug without an explicit patch. |
-| [#3173](https://github.com/flashinfer-ai/flashinfer/pull/3173) | `fix: add sm_121 to TMEM column fallback map` | SM121 was missing from the tensor-memory fallback map — a correctness gap specific to our chip. |
-| [#3152](https://github.com/flashinfer-ai/flashinfer/pull/3152) | `Integrate CUTLASS Small Tile N Blockscaled GEMMs/Grouped GEMMs for SM120 and SM121` | Adds native blockscaled (NVFP4) GEMM support for SM121. This is the performance gap identified in the A/B results — the activation-quant tax without the FP4-MMA payoff. Expect measurable decode throughput improvement. |
-| [#3192](https://github.com/flashinfer-ai/flashinfer/pull/3192) | `fix cudnn sm120 nan` | Fixes NaN values from cuDNN on SM120-family; we use `--fp4-gemm-backend=flashinfer_cudnn`. |
-| [#3191](https://github.com/flashinfer-ai/flashinfer/pull/3191) | `fix(sm12x): fix micro-kernel workspace sizing when routed_rows > num_local_experts` | Workspace sizing fix for SM12x MoE; may address the CUTLASS TMA alignment crash in #2776. |
+| [#3081](https://github.com/flashinfer-ai/flashinfer/pull/3081) | `Add torch.compile-compatible custom op for fp4_quantize` | Registers `fp4_quantize` as a proper `torch.compile`-compatible custom op — exactly fix #3 from the upstream fix list above. Dynamo can now trace through it without hitting `_thread.allocate_lock`. **Drop `--disable-piecewise-cuda-graph` when NGC 26.05 drops.** |
+
+**Other SM121-relevant PRs in 0.6.12rc1:**
+
+| PR | Title | Why it matters |
+|----|-------|---------------|
+| [#3180](https://github.com/flashinfer-ai/flashinfer/pull/3180) | `Fix/3170 dense blockscaled sm12x` | Directly references #3170 audit; adds dense blockscaled GEMM coverage for SM12x. |
+| [#3237](https://github.com/flashinfer-ai/flashinfer/pull/3237) | `perf: optimize per-token nvfp4 quantization kernel` | Direct throughput improvement on the activation-quant path that caused our A/B regression. |
+| [#2885](https://github.com/flashinfer-ai/flashinfer/pull/2885) | `feat: add SM120 fmha_v2 kernels to AOT pip wheel builds` | AOT attention kernels for SM120-family, reducing JIT compile burden. |
+| [#3290](https://github.com/flashinfer-ai/flashinfer/pull/3290) | `Fix [Spark unit test CI]: defer torch._dynamo.disable to avoid import-time crash in CI` | Spark-specific dynamo import fix — confirms active Spark attention in upstream CI. |
+
+**Status of #3170 (AOT coverage audit):** Still open, but #3180 closes one item. A community user (`eelbaz`) confirmed in-production hits of the SM121 99 KiB smem constraint. FlashInfer maintainer noted they are "slightly short-staffed for Spark work" — remaining items will take time. **#2776** (NVFP4 MoE PCG crash) also still open with no new activity.
+
+## FlashInfer 0.6.11 (2026-05-07) — SM121-relevant changes (superseded by 0.6.12)
+
+0.6.11 was the first release with significant SM121 coverage. Key PRs for reference:
+
+| PR | Title | Why it matters |
+|----|-------|---------------|
+| [#3175](https://github.com/flashinfer-ai/flashinfer/pull/3175) | `fix: align is_sm120f_supported with SM12x family semantics` | Fixes SM121 classification relative to SM120f. |
+| [#3173](https://github.com/flashinfer-ai/flashinfer/pull/3173) | `fix: add sm_121 to TMEM column fallback map` | SM121 was missing from the tensor-memory fallback map. |
+| [#3152](https://github.com/flashinfer-ai/flashinfer/pull/3152) | `Integrate CUTLASS Small Tile N Blockscaled GEMMs/Grouped GEMMs for SM120 and SM121` | Native blockscaled (NVFP4) GEMM for SM121 — addresses the activation-quant gap from the A/B results. |
+| [#3192](https://github.com/flashinfer-ai/flashinfer/pull/3192) | `fix cudnn sm120 nan` | Fixes NaN values from cuDNN on SM120-family. |
+| [#3191](https://github.com/flashinfer-ai/flashinfer/pull/3191) | `fix(sm12x): fix micro-kernel workspace sizing when routed_rows > num_local_experts` | Workspace sizing fix for SM12x MoE. |
 | [#3193](https://github.com/flashinfer-ai/flashinfer/pull/3193) | `perf(moe): optimize SM120 b12x MoE short decode` | Decode throughput improvement for SM120-family. |
 
-**What's still not fixed explicitly:** No PR in 0.6.11 directly patches `is_cuda_version_at_least` or registers `fp4_quantize` as `torch.compiler.allow_in_graph`. PR #3175 is the wild card — untested whether it eliminates the JIT path for SM121 and thus the PCG dynamo crash.
-
-**Action when NGC 26.05 drops:** pull the new container and test with `--disable-piecewise-cuda-graph` removed. If PCG no longer crashes, drop the flag and recover the prefill win. If it still crashes, the monkey-patch workaround remains the next step.
+**Action when NGC 26.05 drops:** pull the new container, remove `--disable-piecewise-cuda-graph`, and test. With #3081 in 0.6.12, PCG should work. Also remove the prewarm workaround if the JIT path is no longer triggered. Expect both the prefill win (~25–35% at long context) and better decode throughput from #3237/#3152 to materialize together.
 
 ## Local workaround to recover PCG (untested)
 
