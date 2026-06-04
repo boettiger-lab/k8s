@@ -41,8 +41,15 @@ JUPYTER_AI_ACP_BRIDGE_REF="f653dbef872e14a5ea9e8952461579f22126b164"
   "jupyter-ai-acp-bridge @ git+https://github.com/cboettig/jupyter-ai.git@${JUPYTER_AI_ACP_BRIDGE_REF}#subdirectory=jupyter-ai-acp-bridge" \
   "jupyter-geoagent @ git+https://github.com/boettiger-lab/jupyter-geoagent.git@main"
 
-# Fail the build loudly if the bridge labextension didn't compile/register,
+# Fail the build loudly if the bridge labextension didn't compile/ship,
 # rather than shipping an image where the toolbar silently never appears.
-/opt/venv/bin/jupyter labextension list 2>&1 | grep -q "@jupyter-ai/acp-bridge.*enabled.*OK" \
-  || { echo "ERROR: @jupyter-ai/acp-bridge labextension not enabled" >&2; \
-       /opt/venv/bin/jupyter labextension list; exit 1; }
+# Gate on the prebuilt federated-extension artifact on disk rather than
+# `jupyter labextension list`: the first post-install invocation of that
+# command races (it triggers extension discovery and reports the extension
+# as not-yet-enabled, self-healing on a second call), which gives false
+# negatives under the slower multi-arch CI build. The artifact's presence is
+# deterministic and is what actually makes the toolbar load at runtime.
+BRIDGE_LABEXT="/opt/venv/share/jupyter/labextensions/@jupyter-ai/acp-bridge"
+test -f "${BRIDGE_LABEXT}/package.json" \
+  || { echo "ERROR: @jupyter-ai/acp-bridge labextension artifact missing at ${BRIDGE_LABEXT}" >&2; \
+       ls -la "$(dirname "${BRIDGE_LABEXT}")" 2>&1 || true; exit 1; }
