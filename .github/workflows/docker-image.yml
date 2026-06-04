@@ -4,7 +4,16 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
-    paths: ['images/Dockerfile',  'images/install.r', 'images/rl-env.yml', 'images/spatial-env.yml', 'images/jupyter-ai.yml']
+    # Trigger on the files the CPU Dockerfile actually consumes. The previous
+    # list referenced install.r / spatial-env.yml / jupyter-ai.yml (which don't
+    # exist) and omitted the install-*.sh scripts the Dockerfile COPYs and runs,
+    # so script edits silently never rebuilt the image — only the weekly
+    # schedule or a manual dispatch did.
+    paths:
+      - 'images/Dockerfile'
+      - 'images/install-kubectl-tools.sh'
+      - 'images/install-claude.sh'
+      - 'images/install-jupyter-ai.sh'
 jobs:
   build:
     runs-on: ubuntu-latest
