@@ -23,13 +23,26 @@ npm cache clean --force
 # the GeoAgent Map launcher tile plus `geoagent:*` JupyterLab commands
 # so the LLM personas can drive the map directly from chat.
 #
-# jupyter-ai-acp-bridge is our PoC fork that adds a Zed-style per-thread
-# harness selector to the new-chat dialog and supersedes the legacy
-# `@Claude` / `@OpenCode` personas. Not on PyPI; installed from the
-# acp-bridge-impl branch of cboettig/jupyter-ai. The build hook runs
-# jlpm to bundle the JupyterLab extension, which is why Node must be
+# jupyter-ai-acp-bridge is our PoC fork that adds a Zed-style per-chat
+# harness toolbar (model picker, mode picker, config toggles, slash-command
+# autocomplete) to the new-chat dialog and supersedes the legacy `@Claude` /
+# `@OpenCode` personas. It depends on (but does not fork) the upstream
+# jupyter_ai_acp_client / persona_manager packages that jupyter-ai>=3 already
+# provides. Not on PyPI; installed from cboettig/jupyter-ai. The build hook
+# runs jlpm to bundle the JupyterLab extension, which is why Node must be
 # installed above this step.
+#
+# Pinned to a commit SHA rather than the acp-bridge-impl branch tip so the
+# weekly no-cache image rebuild is reproducible — bump this when the bridge
+# lands new work.
+JUPYTER_AI_ACP_BRIDGE_REF="f653dbef872e14a5ea9e8952461579f22126b164"
 /opt/venv/bin/pip install --no-cache-dir \
   "jupyter-ai>=3,<4" \
-  "jupyter-ai-acp-bridge @ git+https://github.com/cboettig/jupyter-ai.git@acp-bridge-impl#subdirectory=jupyter-ai-acp-bridge" \
+  "jupyter-ai-acp-bridge @ git+https://github.com/cboettig/jupyter-ai.git@${JUPYTER_AI_ACP_BRIDGE_REF}#subdirectory=jupyter-ai-acp-bridge" \
   "jupyter-geoagent @ git+https://github.com/boettiger-lab/jupyter-geoagent.git@main"
+
+# Fail the build loudly if the bridge labextension didn't compile/register,
+# rather than shipping an image where the toolbar silently never appears.
+/opt/venv/bin/jupyter labextension list 2>&1 | grep -q "@jupyter-ai/acp-bridge.*enabled.*OK" \
+  || { echo "ERROR: @jupyter-ai/acp-bridge labextension not enabled" >&2; \
+       /opt/venv/bin/jupyter labextension list; exit 1; }
