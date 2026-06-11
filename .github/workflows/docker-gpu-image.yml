@@ -4,21 +4,33 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
-    paths: ['images/Dockerfile.gpu', 'images/rl-env.yml', 'images/spatial-env.yml', 'images/jupyter-ai.yml', 'images/install.r']
+    # Trigger on the files the GPU Dockerfile actually consumes. The previous
+    # list referenced spatial-env.yml / jupyter-ai.yml / install.r (which don't
+    # exist) and omitted the install-*.sh scripts the Dockerfile now COPYs and
+    # runs, so script edits would silently never rebuild the image.
+    paths:
+      - 'images/Dockerfile.gpu'
+      - 'images/install-claude.sh'
+      - 'images/install-jupyter-ai.sh'
+      - '.github/workflows/docker-gpu-image.yml'
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
-    # For biggish images, github actions runs out of disk space.
-    # So we cleanup some unwanted things in the disk image, and reclaim that space for our docker use
-    # https://github.com/actions/virtual-environments/issues/2606#issuecomment-772683150
-    # and https://github.com/easimon/maximize-build-space/blob/b4d02c14493a9653fe7af06cc89ca5298071c66e/action.yml#L104
-    # This gives us a total of about 52G of free space, which should be enough for now
+    # The no-cache multi-arch (amd64+arm64) CUDA+torch build materializes both
+    # arch filesystems at once and overruns the ~14G free on a stock runner.
+    # The old inline `rm` of android/dotnet/ghc wasn't enough once the image
+    # grew the claude + jupyter-sidekick assistant layers, so reclaim the big
+    # preinstalled toolchains (hostedtoolcache, .NET, GHC, Android, Swift, CodeQL)
+    # via the well-worn free-disk-space action — frees ~30G.
       - name: cleanup disk space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
-          df -h
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
       - uses: actions/checkout@v3
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

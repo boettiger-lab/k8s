@@ -1,8 +1,17 @@
 FROM ghcr.io/rocker-org/cuda
 
-# Config will be populated by env vars and moved to HOME via start script: (hub-dependent)
-COPY continue/config.json /opt/share/continue/config.json
-COPY continue/config.ts /opt/share/continue/config.ts
+USER root
+
+# Claude Code CLI + the jupyter-sidekick ACP assistant stack, matching the CPU
+# image (images/Dockerfile). install-claude.sh drops the `claude` binary on
+# PATH; install-jupyter-ai.sh adds Node 22, the claude-agent-acp ACP agent, and
+# the jupyter-sidekick + jupyter-geoagent JupyterLab extensions. This replaces
+# the previous Continue.dev config that lived here.
+COPY install-claude.sh /tmp/install-claude.sh
+RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
+
+COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
+RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
 RUN /opt/venv/bin/pip install \
     huggingface_hub \
@@ -16,5 +25,3 @@ RUN /opt/venv/bin/pip install \
     huggingface_sb3 \
     stable-baselines3 \
     sb3-contrib
-
-
