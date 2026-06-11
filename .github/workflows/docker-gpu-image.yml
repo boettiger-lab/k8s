@@ -12,6 +12,7 @@ on:
       - 'images/Dockerfile.gpu'
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
+      - '.github/workflows/docker-gpu-image.yml'
 jobs:
   build:
     runs-on: ubuntu-latest
