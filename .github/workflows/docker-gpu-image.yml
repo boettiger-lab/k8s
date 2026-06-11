@@ -4,7 +4,14 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
-    paths: ['images/Dockerfile.gpu', 'images/rl-env.yml', 'images/spatial-env.yml', 'images/jupyter-ai.yml', 'images/install.r']
+    # Trigger on the files the GPU Dockerfile actually consumes. The previous
+    # list referenced spatial-env.yml / jupyter-ai.yml / install.r (which don't
+    # exist) and omitted the install-*.sh scripts the Dockerfile now COPYs and
+    # runs, so script edits would silently never rebuild the image.
+    paths:
+      - 'images/Dockerfile.gpu'
+      - 'images/install-claude.sh'
+      - 'images/install-jupyter-ai.sh'
 jobs:
   build:
     runs-on: ubuntu-latest
