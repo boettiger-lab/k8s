@@ -13,17 +13,33 @@ on:
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
       - '.github/workflows/docker-gpu-image.yml'
+
+# Build each architecture on its own native runner (arm64 on ubuntu-24.04-arm,
+# no QEMU), push by digest, then assemble one multi-arch manifest. Native
+# per-arch builds are much faster than emulating arm64, and each runner only
+# materializes one arch filesystem -- halving the disk pressure that the large
+# no-cache CUDA+torch image puts on a stock ~14G runner.
+env:
+  IMAGE: ghcr.io/boettiger-lab/k8s-gpu
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    if: github.repository == 'boettiger-lab/k8s'
+    runs-on: ${{ matrix.runner }}
     permissions: write-all
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm   # native arm64 runner, no QEMU
     steps:
-    # The no-cache multi-arch (amd64+arm64) CUDA+torch build materializes both
-    # arch filesystems at once and overruns the ~14G free on a stock runner.
-    # The old inline `rm` of android/dotnet/ghc wasn't enough once the image
-    # grew the claude + jupyter-sidekick assistant layers, so reclaim the big
-    # preinstalled toolchains (hostedtoolcache, .NET, GHC, Android, Swift, CodeQL)
-    # via the well-worn free-disk-space action — frees ~30G.
+      - name: Prepare platform name
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
       - name: cleanup disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -31,25 +47,61 @@ jobs:
           large-packages: false
           docker-images: false
           swap-storage: false
-      - uses: actions/checkout@v3
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
-        if: github.repository == 'boettiger-lab/k8s'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{github.actor}}
           password: ${{secrets.GITHUB_TOKEN}}
-      - name: Build and push
-        if: github.repository == 'boettiger-lab/k8s'
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: images/
           file: images/Dockerfile.gpu
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: ${{ matrix.platform }}
           no-cache: true
-          tags: ghcr.io/boettiger-lab/k8s-gpu:latest
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.repository == 'boettiger-lab/k8s'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions: write-all
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+      - name: Create multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create -t "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+      - name: Inspect
+        run: docker buildx imagetools inspect "${IMAGE}:latest"
