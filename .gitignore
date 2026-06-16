@@ -43,3 +43,6 @@ id_ed25519_sk
 # Hugo local artifacts
 hugo_extended_*.tar.gz
 
+# Local-only ops/maintenance journal (drive serials, host topology, security posture)
+/ops/
+
