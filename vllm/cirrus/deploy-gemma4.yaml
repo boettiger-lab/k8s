@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemma4
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-gemma4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: vllm-cirrus-gemma4
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-cirrus-gemma4
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      imagePullSecrets:
+      - name: ghcr-pull-secret
+      containers:
+      - name: vllm
+        image: ghcr.io/boettiger-lab/vllm-gemma4-audio:amd64
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vllm-huggingface-token
+              key: token
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        args:
+        - --model
+        - google/gemma-4-E2B-it
+        - --served-model-name
+        - gemma4
+        - --dtype
+        - auto
+        - --trust-remote-code
+        - --tensor-parallel-size
+        - "1"
+        - --gpu-memory-utilization
+        - "0.5"
+        - --max-model-len
+        - "65536"
+        - --limit-mm-per-prompt
+        - '{"audio": 1, "image": 4}'
+        - --enable-auto-tool-choice
+        - --tool-call-parser
+        - gemma4
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        resources:
+          requests:
+            cpu: 4
+            memory: 10Gi
+            nvidia.com/gpu: 2
+          limits:
+            cpu: 4
+            memory: 10Gi
+            nvidia.com/gpu: 2
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma4-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-gemma4
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    k8s-app: vllm-cirrus-gemma4
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: vllm-long-timeout
+  namespace: vllm
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 600s
+    readIdleTimeout: 600s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-gemma4-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-cirrus-gemma4
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: gemma4-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-gemma4-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - gemma4-cirrus.carlboettiger.info
+    secretName: vllm-gemma4-tls
