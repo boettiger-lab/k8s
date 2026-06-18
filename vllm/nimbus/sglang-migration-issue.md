@@ -1,6 +1,8 @@
 # Nemotron-Super on SGLang/DGX Spark — status & open issues
 
-_Last updated 2026-05-24._
+_Last updated 2026-06-18._
+
+**Current production posture (decision, 2026-06-18):** stay on **vLLM-Marlin** and **wait for a clean upstream path to native SM121 FP4 performance** — no partial workarounds. The one blocker we could close ourselves (the PCG dynamo crash, fixed in FlashInfer ≥0.6.12) only buys back prefill; it does not address the decode regression. The thing that actually delivers petaflop-class native FP4 — a correct, tuned `sm121a` NVFP4 GEMM that the FlashInfer dispatcher selects — is unwritten upstream kernel work (FlashInfer #3170), not a packaging gap. Flipping the dispatch heuristic to force the path is rejected: the b12x FP4 GEMM isn't validated on SM12x (NaN/garbage reports), so it risks correctness, not just perf. We re-evaluate when #3170 lands a real SM121 path. The SGLang manifest (`deploy-nemotron-sglang.yaml`) is kept ready to re-apply at that point.
 
 ## TL;DR
 
@@ -128,14 +130,17 @@ So we kept three of four advantages. The prefill-speed advantage waits on upstre
 
 ## Upstream issues we're tracking
 
-| Tracker | What it is | Why it matters | State |
+| Tracker | What it is | Why it matters | State (2026-06-18) |
 |---|---|---|---|
-| [FlashInfer #2776](https://github.com/flashinfer-ai/flashinfer/issues/2776) | NVFP4 MoE crash on GB10 during PCG capture | Same failure family as ours | Open since Mar 2026 |
-| [FlashInfer #3170](https://github.com/flashinfer-ai/flashinfer/issues/3170) | SM121 AOT-coverage audit | Confirms `sm121a` kernels are JIT-only; no AOT path exists yet | Open since Apr 24 2026 |
-| [FlashInfer #2252](https://github.com/flashinfer-ai/flashinfer/issues/2252) | vLLM+FlashInfer nvcc subprocess fails on Spark | Same `subprocess.check_output(nvcc)` choke point | Open since Dec 2025 |
+| [FlashInfer #3170](https://github.com/flashinfer-ai/flashinfer/issues/3170) | DGX Spark (SM121) support audit — the real umbrella | Confirms `sm121a` GEMM is JIT-only (no AOT cubins); fast b12x FP4 path still **excludes** SM121 by heuristic (runtime redirects `121→120f`). This is the root cause of our A/B decode regression. | **Open**, last active Jun 15 2026 (~17 action items) |
+| [FlashInfer #2776](https://github.com/flashinfer-ai/flashinfer/issues/2776) | NVFP4 MoE crash on GB10 during PCG capture | Same failure family as ours | **Open**, untouched since Apr 14 2026 |
+| [FlashInfer #2252](https://github.com/flashinfer-ai/flashinfer/issues/2252) | vLLM+FlashInfer nvcc subprocess fails on Spark | Same `subprocess.check_output(nvcc)` choke point | **Closed** Jan 16 2026 |
+| [SGLang #19637](https://github.com/sgl-project/sglang/issues/19637) | SM120 Performance Optimization Plan | Tracks NVFP4/MXFP4 GEMM, CUTLASS-vs-Triton blockscale, attn heuristics for SM120/121 | Open since Mar 2 2026 |
+| [SGLang #23386](https://github.com/sgl-project/sglang/issues/23386) | "fail to loading cuda graph on DGX Spark" — our exact stack (Nemotron-3-Super-NVFP4, GB10 CC 12.1) | Confirms the `--disable-piecewise-cuda-graph` workaround for the dynamo `allocate_lock` crash | Closed (Apr 21 2026) |
 | [SGLang #20775](https://github.com/sgl-project/sglang/issues/20775) | `flashinfer_cutlass` doesn't fully disable DeepGemm | Eliminates the obvious "just swap the FP4 backend" workaround | Closed not-planned |
-| [SGLang #17130](https://github.com/sgl-project/sglang/issues/17130) | Q1 2026 roadmap: jit-cache & cubins | Likely vehicle for shipping AOT SM121 kernels | Undated |
-| [SGLang #5389](https://github.com/sgl-project/sglang/issues/5389) | DGX Spark SGLang tracking issue | Umbrella for Spark-specific issues | Long-running |
+| [SGLang #17130](https://github.com/sgl-project/sglang/issues/17130) | NVIDIA collaboration roadmap (2026 Q1): jit-cache & cubins | Datacenter-Blackwell-centric (GB300/200/SM100); **no SM121-specific deliverable** — not the vehicle for AOT SM121 kernels after all | Closed (Q1 ended) |
+
+_Correction vs. prior versions of this doc: #2252 is closed (not open); the old "SGLang #5389 DGX Spark tracking issue" was a misattribution — #5389 is an unrelated A100 `cuda_fp8.h` bug from Apr 2025. The genuine umbrellas are FlashInfer #3170 and SGLang #19637._
 
 What an upstream fix likely looks like, in increasing quality:
 
@@ -146,15 +151,17 @@ What an upstream fix likely looks like, in increasing quality:
 
 Likely vehicle: FlashInfer 0.6.12 → NGC SGLang 26.05 or 26.06.
 
-## FlashInfer 0.6.12rc1 (2026-05-22) — the PCG fix has landed
+## FlashInfer 0.6.12 (2026-05-29) — the PCG fix has landed, but NGC 26.05 does NOT carry it
 
-FlashInfer 0.6.12rc1 shipped May 22 and contains **the explicit fix for our PCG dynamo crash**. NGC 26.05 has not yet dropped as of 2026-05-24 but is imminent.
+FlashInfer **0.6.12 final** released **2026-05-29** (0.6.12rc1 was May 22) and contains **the explicit fix for our PCG dynamo crash** (#3081, merged, shipped in the final tag). The tree has since moved to 0.6.13rc1/rc2 (Jun 10/17); no 0.6.13 final, no 0.7.x yet.
+
+> ⚠️ **The trap:** NGC SGLang **26.05 dropped** (latest tag; no 26.06 as of Jun 18) but bundles **FlashInfer 0.6.10** — *older* than 0.6.12 and **without #3081**. So the prior plan ("pull 26.05, drop `--disable-piecewise-cuda-graph`") would **re-trigger the dynamo crash**. To get the fix on this hardware you must either (a) wait for an NGC container bundling ≥0.6.12, (b) `pip install -U flashinfer-python==0.6.12` inside the 26.04/26.05 container, or (c) apply the `sitecustomize.py` monkey-patch below. Verify with `pip show flashinfer` in the actual image before assuming a version. (26.05 = SGLang 0.5.11, FlashInfer 0.6.10, CUDA 13.2.1; upstream SGLang is at 0.5.13 as of Jun 13 but none of 0.5.11–0.5.13 headline an SM121 NVFP4 fix — the real fixes are all in FlashInfer.)
 
 **Critical fix:**
 
 | PR | Title | Why it matters |
 |----|-------|---------------|
-| [#3081](https://github.com/flashinfer-ai/flashinfer/pull/3081) | `Add torch.compile-compatible custom op for fp4_quantize` | Registers `fp4_quantize` as a proper `torch.compile`-compatible custom op — exactly fix #3 from the upstream fix list above. Dynamo can now trace through it without hitting `_thread.allocate_lock`. **Drop `--disable-piecewise-cuda-graph` when NGC 26.05 drops.** |
+| [#3081](https://github.com/flashinfer-ai/flashinfer/pull/3081) | `Add torch.compile-compatible custom op for fp4_quantize` | Registers `fp4_quantize` as a proper `torch.compile`-compatible custom op — exactly fix #3 from the upstream fix list above. Dynamo can now trace through it without hitting `_thread.allocate_lock`. Merged; in 0.6.12 final. **Drop `--disable-piecewise-cuda-graph` only once running FlashInfer ≥0.6.12 — NOT just because 26.05 is available.** |
 
 **Other SM121-relevant PRs in 0.6.12rc1:**
 
@@ -165,7 +172,9 @@ FlashInfer 0.6.12rc1 shipped May 22 and contains **the explicit fix for our PCG 
 | [#2885](https://github.com/flashinfer-ai/flashinfer/pull/2885) | `feat: add SM120 fmha_v2 kernels to AOT pip wheel builds` | AOT attention kernels for SM120-family, reducing JIT compile burden. |
 | [#3290](https://github.com/flashinfer-ai/flashinfer/pull/3290) | `Fix [Spark unit test CI]: defer torch._dynamo.disable to avoid import-time crash in CI` | Spark-specific dynamo import fix — confirms active Spark attention in upstream CI. |
 
-**Status of #3170 (AOT coverage audit):** Still open, but #3180 closes one item. A community user (`eelbaz`) confirmed in-production hits of the SM121 99 KiB smem constraint. FlashInfer maintainer noted they are "slightly short-staffed for Spark work" — remaining items will take time. **#2776** (NVFP4 MoE PCG crash) also still open with no new activity.
+**Status of #3170 (AOT coverage audit), as of Jun 15 2026:** Still **open**, ~17 consolidated action items, actively updated. Key unresolved items confirming our A/B diagnosis: the fast b12x FP4 GEMM path still **excludes SM121** by heuristic (`is_sm120 = major==12 and minor==0` in `gemm_base.py`), so Spark falls through to slower CUTLASS/cuDNN; AOT builds `fp4_quantization_121` but the runtime **redirects `121→120f`**, wasting it; Mamba SSU missing from AOT (breaks `FLASHINFER_DISABLE_JIT` on Spark); no BF16 backend for SM121. **Prebuilt `sm121a` AOT cubins still have NOT shipped** — `flashinfer-cubin` ships ~12.7k FP4 cubins for Sm100a/100f/103a and zero sm120/121; the jit-cache wheel even blew past GitHub's 2 GiB asset limit while trying to add SM120/121 CUTLASS GEMM variants (#3257, closed via #3265). The JIT path now correctly emits `sm_121a`, so JIT NVFP4 MMA works — but the dispatch heuristic above means it often isn't selected. **#2776** (NVFP4 MoE PCG crash) also still open, untouched since Apr 14.
+
+**Net for our regression:** #3081 restores the *prefill* win we gave up with `--disable-piecewise-cuda-graph`, but does **not** fix the *decode* regression that drove the rollback to vLLM — that needs the SM121 dispatch/AOT work in #3170, which is unfinished.
 
 ## FlashInfer 0.6.11 (2026-05-07) — SM121-relevant changes (superseded by 0.6.12)
 
@@ -180,7 +189,7 @@ FlashInfer 0.6.12rc1 shipped May 22 and contains **the explicit fix for our PCG 
 | [#3191](https://github.com/flashinfer-ai/flashinfer/pull/3191) | `fix(sm12x): fix micro-kernel workspace sizing when routed_rows > num_local_experts` | Workspace sizing fix for SM12x MoE. |
 | [#3193](https://github.com/flashinfer-ai/flashinfer/pull/3193) | `perf(moe): optimize SM120 b12x MoE short decode` | Decode throughput improvement for SM120-family. |
 
-**Action when NGC 26.05 drops:** pull the new container, remove `--disable-piecewise-cuda-graph`, and test. With #3081 in 0.6.12, PCG should work. Also remove the prewarm workaround if the JIT path is no longer triggered. Expect both the prefill win (~25–35% at long context) and better decode throughput from #3237/#3152 to materialize together.
+**Action (revised 2026-06-18):** NGC 26.05 dropped but ships FlashInfer **0.6.10**, which lacks #3081 — pulling it alone does NOT let us drop `--disable-piecewise-cuda-graph` (see the 0.6.12 section warning above). To re-test PCG: take 26.05 (or 26.04) and `pip install -U flashinfer-python>=0.6.12` (or the `sitecustomize.py` patch), then remove the flag. Expect the prefill win (~25–35% at long context) to return, but **not** the decode parity — the SM121 GEMM dispatch fix (#3170) hasn't landed, so the activation-quant tax that caused the A/B regression persists. Re-run the decode-dominated A/B before considering any switch back from vLLM.
 
 ## Local workaround to recover PCG (untested)
 
