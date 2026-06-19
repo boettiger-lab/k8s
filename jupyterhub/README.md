@@ -108,6 +108,33 @@ User pods automatically receive environment variables for MinIO access (via `Kub
 - `AWS_HTTPS: "true"`
 - `AWS_VIRTUAL_HOSTING: "FALSE"`
 
+#### CPU thread defaults (BLAS / OpenMP / PyTorch)
+
+User pods set `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, and
+`NUMEXPR_NUM_THREADS` to **`4`**. Numeric libraries otherwise spawn one thread per
+*visible host core* (128) **per process**, so running many jobs in parallel
+(grid searches, RL sweeps, `multiprocessing`/`joblib`) oversubscribes the CPU and
+thrashes — high load, low useful throughput, and it degrades the shared node for
+everyone. Capping at 4 keeps a single op reasonably fast while bounding the
+per-process multiplier under parallel workloads.
+
+**Override if you really want to lean on parallel BLAS** (e.g. one big single-process
+linear-algebra / scikit-learn job that should use many cores):
+
+```bash
+# shell, before launching python:
+export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16
+```
+```python
+# or inside a notebook (PyTorch), before the heavy work:
+import torch; torch.set_num_threads(16)
+```
+
+Conversely, when launching **many** parallel jobs yourself, set these to `1` so the
+total threads ≈ number of jobs (no oversubscription). There is no CPU limit on
+pods, so a single op can burst across all idle cores — these caps exist only to
+stop accidental thread-thrashing, not to restrict you.
+
 ### ARM64 Compatibility
 
 Nimbus is an ARM64 server.
