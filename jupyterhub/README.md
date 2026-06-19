@@ -111,15 +111,20 @@ User pods automatically receive environment variables for MinIO access (via `Kub
 #### CPU thread defaults (BLAS / OpenMP / PyTorch)
 
 User pods set `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, and
-`NUMEXPR_NUM_THREADS` to **`4`**. Numeric libraries otherwise spawn one thread per
-*visible host core* (128) **per process**, so running many jobs in parallel
-(grid searches, RL sweeps, `multiprocessing`/`joblib`) oversubscribes the CPU and
-thrashes — high load, low useful throughput, and it degrades the shared node for
-everyone. Capping at 4 keeps a single op reasonably fast while bounding the
-per-process multiplier under parallel workloads.
+`NUMEXPR_NUM_THREADS` to **`1`**. Numeric libraries otherwise spawn one thread per
+*visible host core* (128) **per process** — so launching many workers (a grid
+search, RL sweep, `multiprocessing`/`joblib`, or `sklearn` with `n_jobs=-1`) would
+oversubscribe the CPU and thrash: high load, low useful throughput, and it degrades
+the shared node for everyone. With the default of `1`, **total threads = the number
+of processes you launch**, so the common "one worker per core" pattern is automatically
+safe and can still fill all 128 cores. There is **no CPU limit** on pods — these
+defaults exist only to stop accidental thread-thrashing, not to restrict you.
 
-**Override if you really want to lean on parallel BLAS** (e.g. one big single-process
-linear-algebra / scikit-learn job that should use many cores):
+**To parallelize: launch more processes** (each stays single-threaded) — that's the
+efficient path and it scales cleanly to the full node.
+
+**To lean on parallel BLAS instead** — i.e. one big *single-process* linear-algebra /
+scikit-learn / PyTorch-CPU job that should use many cores — raise it for that job:
 
 ```bash
 # shell, before launching python:
@@ -130,10 +135,8 @@ export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16
 import torch; torch.set_num_threads(16)
 ```
 
-Conversely, when launching **many** parallel jobs yourself, set these to `1` so the
-total threads ≈ number of jobs (no oversubscription). There is no CPU limit on
-pods, so a single op can burst across all idle cores — these caps exist only to
-stop accidental thread-thrashing, not to restrict you.
+(Don't do both at once — many processes *and* high per-process threads is exactly the
+oversubscription this default prevents.)
 
 ### ARM64 Compatibility
 

@@ -233,16 +233,18 @@ hub:
         AWS_VIRTUAL_HOSTING: "FALSE"
         GOOSE_PROVIDER: "github_copilot"
         OPENAI_BASE_URL: "https://ellm.nrp-nautilus.io/v1"
-        # CPU math-library thread caps. BLAS/OpenMP/PyTorch otherwise spawn one
-        # thread per visible host core (128) PER PROCESS, so many parallel jobs
-        # oversubscribe and thrash (context-switch + cache churn) — slow and
-        # antisocial on a shared node. Cap at 4: modest intra-op speedup, bounded
-        # multiplier under parallel sweeps. Override per-job for heavy parallel
-        # BLAS (e.g. `export OMP_NUM_THREADS=16` or `torch.set_num_threads(16)`).
-        OMP_NUM_THREADS: "4"
-        OPENBLAS_NUM_THREADS: "4"
-        MKL_NUM_THREADS: "4"
-        NUMEXPR_NUM_THREADS: "4"
+        # CPU math-library thread defaults. BLAS/OpenMP/PyTorch otherwise spawn one
+        # thread per visible host core (128) PER PROCESS, so launching many workers
+        # (a sweep, multiprocessing, sklearn n_jobs=-1) oversubscribes and thrashes
+        # (context-switch + cache churn) — slow and antisocial on this shared node.
+        # Default to 1 so threads == number of processes you launch: the common
+        # "one worker per core" pattern is then automatically safe and can still
+        # fill all 128 cores. Override per-job for a heavy SINGLE-process BLAS job
+        # (e.g. `export OMP_NUM_THREADS=16` or `torch.set_num_threads(16)`).
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        MKL_NUM_THREADS: "1"
+        NUMEXPR_NUM_THREADS: "1"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
