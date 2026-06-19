@@ -149,14 +149,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 8G
                 mem_limit: 8G
-                cpu_limit: 12
               default: true
             mem_16:
               display_name: 16 GB RAM
               kubespawner_override:
                 mem_guarantee: 16G
                 mem_limit: 16G
-                cpu_limit: 12
             mem_32:
               display_name: 32 GB RAM
               kubespawner_override:
