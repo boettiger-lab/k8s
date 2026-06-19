@@ -11,3 +11,11 @@ primary:
   persistence:
     storageClass: local-path
     size: 10Gi
+  # Default bitnami "nano" preset (192Mi limit) OOM-killed postgres (16 restarts).
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
