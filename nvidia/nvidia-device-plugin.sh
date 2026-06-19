@@ -8,7 +8,7 @@ helm repo update
 helm upgrade -i nvdp nvdp/nvidia-device-plugin \
   --namespace nvidia-device-plugin \
   --create-namespace \
-  --version 0.18.0 \
+  --version 0.19.2 \
   --wait \
   --values nvidia-device-plugin-config.yaml
 

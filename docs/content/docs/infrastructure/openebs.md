@@ -34,20 +34,20 @@ Set up a ZFS pool on your storage devices:
 
 ```bash
 # Example: Create a mirrored pool with two pairs of disks
-sudo zpool create -f openebs-zpool mirror /dev/sda /dev/sdb mirror /dev/sdc /dev/sdd
+sudo zpool create -f tank mirror /dev/sda /dev/sdb mirror /dev/sdc /dev/sdd
 ```
 
 **Important Notes**:
 - Replace device names with your actual devices
 - Use `lsblk` to identify available disks
 - Consider your redundancy needs (mirror, raidz, etc.)
-- The pool name (`openebs-zpool`) will be referenced in the StorageClass
+- The pool name (`tank`) will be referenced in the StorageClass
 
 ### Verify ZFS Setup
 
 ```bash
 # Check pool status
-sudo zpool status openebs-zpool
+sudo zpool status tank
 
 # List ZFS filesystems
 sudo zfs list
@@ -55,31 +55,34 @@ sudo zfs list
 
 ## Installation
 
-### Install OpenEBS using Helm
+### Install the ZFS LocalPV driver with Helm
+
+Install **only** the lightweight `zfs-localpv` driver — not the full `openebs/openebs`
+umbrella chart. The umbrella chart pulls in Mayastor (with its own etcd / MinIO / Loki
+stack) and LVM LocalPV, none of which we use for single-node-pool ZFS storage. A previous
+umbrella install left orphaned PVCs/PVs and LVM CRDs behind that had to be cleaned up.
 
 ```bash
-# Add OpenEBS Helm repository
-helm repo add openebs https://openebs.github.io/openebs
+# Add the ZFS LocalPV repo (separate from the umbrella openebs repo)
+helm repo add openebs-zfs https://openebs.github.io/zfs-localpv
 helm repo update
 
-# Install OpenEBS
-helm install openebs openebs/openebs -n openebs --create-namespace
+# Install just the ZFS LocalPV driver
+helm upgrade --install zfs-localpv openebs-zfs/zfs-localpv \
+  -n openebs --create-namespace --wait
 ```
 
-Or use the provided script:
+Or use the provided script for the active cluster:
 
 ```bash
-bash openebs/helm.sh
+bash openebs/cirrus/helm.sh
 ```
 
 ### Verify Installation
 
 ```bash
-# Check OpenEBS pods are running
-kubectl get pods -n openebs
-
-# Verify ZFS CSI driver is deployed
-kubectl get pods -n openebs | grep zfs
+# Check the ZFS LocalPV pods are running (controller + node daemonset)
+kubectl get pods -n openebs -l role=openebs-zfs
 ```
 
 ## Configuration
@@ -95,17 +98,17 @@ metadata:
   name: openebs-zfs
 parameters:
   recordsize: "128k"
-  compression: "off"
+  compression: "lz4"
   dedup: "off"
   fstype: "zfs"
-  poolname: "openebs-zpool"
+  poolname: "tank"
 provisioner: zfs.csi.openebs.io
 ```
 
 Apply the configuration:
 
 ```bash
-kubectl apply -f openebs/zfs-storage.yml
+kubectl apply -f openebs/cirrus/zfs-storage.yml
 ```
 
 **Configuration Parameters**:
@@ -196,7 +199,7 @@ spec:
 Use the test manifest:
 
 ```bash
-kubectl apply -f openebs/test-pvc.yml
+kubectl apply -f openebs/nimbus/test-pvc.yml
 ```
 
 This creates:
@@ -229,10 +232,10 @@ On the host system:
 sudo zfs list
 
 # Check pool usage
-sudo zpool status openebs-zpool
+sudo zpool status tank
 
 # View detailed pool information
-sudo zpool list -v openebs-zpool
+sudo zpool list -v tank
 ```
 
 ### Volume Snapshots
@@ -244,7 +247,7 @@ Create snapshots of ZFS volumes:
 sudo zfs list
 
 # Create a snapshot
-sudo zfs snapshot openebs-zpool/pvc-xxxxx@snapshot-name
+sudo zfs snapshot tank/pvc-xxxxx@snapshot-name
 
 # List snapshots
 sudo zfs list -t snapshot
@@ -256,10 +259,10 @@ ZFS quotas are set automatically based on PVC size, but you can adjust them manu
 
 ```bash
 # Check quota
-sudo zfs get quota openebs-zpool/pvc-xxxxx
+sudo zfs get quota tank/pvc-xxxxx
 
 # Set a different quota (if needed)
-sudo zfs set quota=100G openebs-zpool/pvc-xxxxx
+sudo zfs set quota=100G tank/pvc-xxxxx
 ```
 
 ## Monitoring
@@ -287,7 +290,7 @@ sudo zpool status
 sudo zpool status -x
 
 # Pool health history
-sudo zpool history openebs-zpool
+sudo zpool history tank
 ```
 
 ## Troubleshooting
@@ -336,13 +339,13 @@ sudo zpool status -v
 
 2. **Monitor I/O**:
 ```bash
-sudo zpool iostat openebs-zpool 1
+sudo zpool iostat tank 1
 ```
 
 3. **Adjust ZFS parameters** (if needed):
 ```bash
 # Enable compression for better performance
-sudo zfs set compression=lz4 openebs-zpool
+sudo zfs set compression=lz4 tank
 
 # Adjust record size for your workload
 # (This must be set on the StorageClass for new volumes)
@@ -354,10 +357,10 @@ sudo zfs set compression=lz4 openebs-zpool
 
 ```bash
 # Export pool (unmounts all datasets)
-sudo zpool export openebs-zpool
+sudo zpool export tank
 
 # Import pool
-sudo zpool import openebs-zpool
+sudo zpool import tank
 ```
 
 ### Backup Volumes
@@ -366,13 +369,13 @@ Using ZFS send/receive:
 
 ```bash
 # Create a snapshot
-sudo zfs snapshot openebs-zpool/pvc-xxxxx@backup
+sudo zfs snapshot tank/pvc-xxxxx@backup
 
 # Send to a file
-sudo zfs send openebs-zpool/pvc-xxxxx@backup > backup.zfs
+sudo zfs send tank/pvc-xxxxx@backup > backup.zfs
 
 # Send to another system
-sudo zfs send openebs-zpool/pvc-xxxxx@backup | \
+sudo zfs send tank/pvc-xxxxx@backup | \
   ssh user@backup-host sudo zfs receive backup-pool/pvc-xxxxx
 ```
 
@@ -380,10 +383,10 @@ sudo zfs send openebs-zpool/pvc-xxxxx@backup | \
 
 ```bash
 # From a file
-sudo zfs receive openebs-zpool/pvc-xxxxx < backup.zfs
+sudo zfs receive tank/pvc-xxxxx < backup.zfs
 
 # Rollback to a snapshot
-sudo zfs rollback openebs-zpool/pvc-xxxxx@snapshot-name
+sudo zfs rollback tank/pvc-xxxxx@snapshot-name
 ```
 
 ## Best Practices
@@ -391,8 +394,8 @@ sudo zfs rollback openebs-zpool/pvc-xxxxx@snapshot-name
 1. **Pool Redundancy**: Use mirrored or RAIDZ configurations for data protection
 2. **Regular Scrubs**: Schedule regular ZFS scrubs to detect and repair corruption
    ```bash
-   # Add to cron: 0 2 * * 0 /sbin/zpool scrub openebs-zpool
-   sudo zpool scrub openebs-zpool
+   # Add to cron: 0 2 * * 0 /sbin/zpool scrub tank
+   sudo zpool scrub tank
    ```
 3. **Snapshots**: Take regular snapshots before major changes
 4. **Monitoring**: Monitor pool capacity and health
