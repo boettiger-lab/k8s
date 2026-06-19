@@ -67,6 +67,17 @@ These scripts:
 2. Update Helm repositories.
 3. Deploy using the appropriate config files.
 
+### Short-URL Redirect (Cirrus)
+
+JupyterHub is served at `jupyterhub.cirrus.carlboettiger.info`. The short URL
+`cirrus.carlboettiger.info` permanently (301) redirects to it via a standalone
+Traefik ingress + middleware (not part of the Helm chart, so the OAuth callback
+URL stays unchanged). Apply it once after deploying:
+
+```bash
+kubectl apply -n jupyter -f cirrus-redirect.yaml
+```
+
 ## Configuration
 
 ### Secrets Management
