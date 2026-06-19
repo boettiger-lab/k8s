@@ -6,293 +6,167 @@ bookToc: true
 
 # NVIDIA GPU Support
 
-Enable GPU access in your K3s cluster with the NVIDIA device plugin, including support for GPU time-slicing to allow multiple pods to share a single GPU.
+GPU access in the K3s cluster is provided by the [NVIDIA Kubernetes device
+plugin](https://github.com/NVIDIA/k8s-device-plugin), deployed with Helm. It
+advertises GPUs to the scheduler and configures **GPU sharing** so multiple
+pods can use a GPU at once.
 
-## Overview
+## Live deployment (at a glance)
 
-The NVIDIA device plugin for Kubernetes enables:
-- GPU discovery and advertisement to the cluster
-- GPU resource scheduling
-- GPU time-slicing for improved utilization
-- Multiple users/pods accessing GPUs simultaneously
+| | |
+|---|---|
+| Helm release | `nvdp` |
+| Namespace | `nvidia-device-plugin` |
+| Chart / app version | `nvidia-device-plugin-0.19.2` |
+| Install/upgrade script | `nvidia/nvidia-device-plugin.sh` |
+| Values | `nvidia/nvidia-device-plugin-config.yaml` |
 
-## Prerequisites
+> Older docs referenced namespace `kube-system` and a daemonset named
+> `nvidia-device-plugin-daemonset`. That is **not** how it is deployed — it is a
+> Helm release named `nvdp` in namespace `nvidia-device-plugin`.
 
-### Host System Requirements
+### GPU nodes and sharing strategy
 
-1. **NVIDIA Drivers**: Install NVIDIA drivers on the host system
+| Node | GPU(s) | VRAM | Sharing | Result |
+|------|--------|------|---------|--------|
+| `cirrus` | 2× Quadro RTX 8000 | 48 GB each | **time-slicing**, 8 replicas/GPU | 16 `nvidia.com/gpu` slices; no VRAM cap |
+| `thelio` | 1× GeForce RTX 2080 | 8 GB | **none** | 1 whole GPU per pod (8 GB is too small to slice) |
 
-```bash
-# Check if drivers are installed
-nvidia-smi
-```
+Neither GPU supports **MIG** (both are Turing; MIG needs A100/H100/A30-class
+cards — `nvidia.com/mig.capable=false` on both nodes).
 
-2. **NVIDIA Container Toolkit**: Required for container GPU access
+## GPU sharing: time-slicing vs MPS vs MIG
 
-```bash
-# Install NVIDIA Container Toolkit
-# See: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
+The device plugin supports three sharing modes:
 
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
-  sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+- **Time-slicing** — what we use on `cirrus`. The GPU round-robins compute
+  between processes. A "slice" is **pure bookkeeping**: it does *not* partition
+  VRAM, so every pod sees and may allocate the full 48 GB of whatever physical
+  GPU it lands on. The `replicas` count just caps how many pods can share a GPU.
+  A pod may claim **multiple** slices (we leave `failRequestsGreaterThanOne`
+  false) — e.g. an LLM can claim several to crowd notebooks off its card, since
+  the count is a co-tenancy cap, not a memory cap. No protection against one pod
+  exhausting a card's VRAM (fine for cooperative / light workloads).
+- **MPS (Multi-Process Service)** — adds a hard per-client VRAM cap
+  (`total_VRAM ÷ replicas`). We do **not** use it: see the warning below.
+- **MIG** — hardware-partitioned compute+memory. Strongest isolation, but
+  unavailable on our Turing cards.
 
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
-
-# Configure the Docker daemon to use the NVIDIA runtime
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-```
-
-## Installation
-
-### Deploy NVIDIA Device Plugin
-
-Run the installation script from the repository:
-
-```bash
-# From the repository root
-bash nvidia/nvidia-device-plugin.sh
-```
-
-This script:
-- Deploys the NVIDIA device plugin as a DaemonSet
-- Configures GPU time-slicing (8 slices per GPU by default)
-- Sets up the necessary ConfigMaps
-
-### Verify Installation
-
-```bash
-# Check that the device plugin pods are running
-kubectl get pods -n kube-system | grep nvidia
-
-# Verify GPU resources are advertised
-kubectl describe nodes | grep nvidia.com/gpu
-```
-
-You should see output like:
-```
-nvidia.com/gpu: 8
-```
-
-The number represents the total number of GPU slices available (not physical GPUs).
+> ⚠️ **Why not MPS, despite the hard VRAM caps?** MPS would cap each slice at
+> `48 GB ÷ replicas`, but the plugin **cannot limit MPS to a single GPU** — it
+> ignores the per-resource `devices:` and `rename:` fields for `mps` sharing
+> (logged: *"Customizing the 'devices' field in sharing.mps.resources is not yet
+> supported … Ignoring"*). So MPS caps **all** GPUs on the node uniformly, and a
+> large model like qwen3-6 (needs ~a whole 48 GB card) then no longer fits. A
+> per-GPU MPS split would require hiding one GPU from the plugin via
+> `NVIDIA_VISIBLE_DEVICES` (no Helm lever → a second release + post-upgrade
+> patch) and running the LLM unmanaged. Not worth it; time-slicing is simpler and
+> our shared GPU work is light. See [vLLM]({{< relref "../services/vllm" >}}).
 
 ## Configuration
 
-### GPU Time-Slicing
-
-GPU time-slicing allows multiple pods to share a single GPU, improving utilization. Our default configuration sets up 8 time slices per GPU.
-
-The configuration is defined in `nvidia-device-plugin-config.yaml`:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nvidia-device-plugin-config
-  namespace: kube-system
-data:
-  config: |
-    version: v1
-    sharing:
-      timeSlicing:
-        replicas: 8
-```
-
-**Adjusting Time Slices**: To change the number of replicas, edit the `replicas` value and reapply:
+Sharing is configured **per node** using the device plugin's named-config
+feature. `nvidia/nvidia-device-plugin-config.yaml` defines a `config.map` with
+two entries — `timeslice` and `no-sharing` — and each node selects one via the
+`nvidia.com/device-plugin.config` label:
 
 ```bash
-kubectl apply -f nvidia/nvidia-device-plugin-config.yaml
-kubectl rollout restart daemonset nvidia-device-plugin-daemonset -n kube-system
+kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
+kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 ```
 
-### Resource Limits in Pods
+`config.default` is `timeslice`; both real nodes are labelled explicitly.
 
-To request GPU resources in your pods:
+### Applying changes
+
+Edit `nvidia/nvidia-device-plugin-config.yaml`, then re-run the install script
+(it is an idempotent `helm upgrade --install`):
+
+```bash
+bash nvidia/nvidia-device-plugin.sh
+```
+
+### Requesting GPUs in a pod
+
+A slice is requested like any other resource. Pods also need the `nvidia`
+runtime class:
 
 ```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gpu-pod
 spec:
-  containers:
-  - name: cuda-container
-    image: nvidia/cuda:12.0.0-base-ubuntu22.04
-    command: ["nvidia-smi"]
-    resources:
-      limits:
-        nvidia.com/gpu: 1  # Request 1 GPU slice
-```
-
-## Usage in JupyterHub
-
-GPU access can be configured in JupyterHub's `config.yaml`:
-
-```yaml
-singleuser:
-  profileList:
-    - display_name: "GPU Instance"
-      description: "Notebook with GPU access"
-      kubespawner_override:
-        extra_resource_limits:
-          nvidia.com/gpu: "1"
-        extra_resource_guarantees:
-          nvidia.com/gpu: "1"
-```
-
-Users can verify GPU access within their notebooks:
-
-```python
-import subprocess
-result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
-print(result.stdout)
-```
-
-## Testing GPU Access
-
-### Test Job
-
-Deploy a test job to verify GPU functionality:
-
-```bash
-kubectl apply -f nvidia/test-nvidia-smi-job.yaml
-```
-
-Check the job output:
-
-```bash
-# Get the pod name
-kubectl get pods | grep test-nvidia-smi
-
-# View logs
-kubectl logs test-nvidia-smi-xxxxx
-```
-
-You should see the nvidia-smi output showing your GPU.
-
-### Manual Test Pod
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gpu-test
-spec:
-  restartPolicy: Never
+  runtimeClassName: nvidia
   containers:
   - name: cuda
-    image: nvidia/cuda:12.0.0-base-ubuntu22.04
-    command: ["nvidia-smi"]
+    image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04
     resources:
       limits:
-        nvidia.com/gpu: 1
+        nvidia.com/gpu: 1   # one slice (full card VRAM on cirrus or thelio)
 ```
 
+A large LLM can request several slices (e.g. `nvidia.com/gpu: 2`) — it still gets
+the full VRAM of its card, but reserves bookkeeping slots so fewer other pods
+land on the same GPU.
+
+> **JupyterHub GPU profiles** in `jupyterhub/public-config.yaml` set
+> `extra_resource_limits: {nvidia.com/gpu: "1"}` so notebooks claim a slice and
+> are scheduled/accounted by k8s (rather than seeing all GPUs unmanaged via the
+> nvidia runtime's "visible-devices" behaviour).
+
+## Verifying
+
 ```bash
-kubectl apply -f gpu-test.yaml
-kubectl logs gpu-test
-kubectl delete pod gpu-test
+# GPUs advertised + strategy per node
+kubectl get nodes -o custom-columns=\
+'NODE:.metadata.name,ALLOC:.status.allocatable.nvidia\.com/gpu,\
+STRATEGY:.metadata.labels.nvidia\.com/gpu\.sharing-strategy,\
+REPLICAS:.metadata.labels.nvidia\.com/gpu\.replicas'
+# cirrus -> 16 / time-slicing / 8 ;  thelio -> 1 / none
+
+# Plugin pods (expect all Running; no mps-control-daemon under time-slicing)
+kubectl get pods -n nvidia-device-plugin
 ```
 
 ## Troubleshooting
 
-### GPUs Not Visible
+### All GPUs show `unhealthy` / allocatable drops to 0 after a reboot or K3s restart
 
-1. **Check device plugin pods**:
-```bash
-kubectl get pods -n kube-system | grep nvidia
-kubectl logs -n kube-system <nvidia-device-plugin-pod>
-```
+**Symptom:** `kubectl get node cirrus -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'`
+returns `0` while `capacity` still shows the full count. The device-plugin log
+shows every device `marked unhealthy: ERROR_NO_PERMISSION` / `ERROR_OPERATING_SYSTEM`.
 
-2. **Verify NVIDIA runtime**:
-```bash
-# On the host
-nvidia-smi
-docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
-```
+**Cause:** a kubelet/K3s restart (e.g. an upgrade) forces the plugin to
+re-register, and its XID-event health check can come up in a stale state and
+falsely mark every GPU unhealthy. The GPUs themselves are fine (compute and
+`nvidia-smi` still work); kubelet just keeps the last `capacity` while setting
+`allocatable` to the count of *healthy* devices — which is now 0. Already-running
+GPU pods keep their slices; no **new** GPU pod can schedule.
 
-3. **Check node labels**:
-```bash
-kubectl get nodes -o json | jq '.items[].status.allocatable'
-```
-
-### Pods Can't Access GPU
-
-1. **Check resource requests**:
-```bash
-kubectl describe pod <pod-name>
-```
-
-2. **Verify container runtime configuration**:
-```bash
-sudo systemctl status containerd
-```
-
-3. **Check K3s containerd config** at `/var/lib/rancher/k3s/agent/etc/containerd/config.toml`
-
-### Time-Slicing Not Working
-
-1. **Verify ConfigMap**:
-```bash
-kubectl get configmap nvidia-device-plugin-config -n kube-system -o yaml
-```
-
-2. **Check device plugin version**: Ensure you're using a recent version that supports time-slicing
-
-3. **Restart device plugin**:
-```bash
-kubectl rollout restart daemonset nvidia-device-plugin-daemonset -n kube-system
-```
-
-## Resource Management
-
-### Monitoring GPU Usage
-
-Monitor GPU utilization on the host:
+**Fix:** restart the plugin pod on the affected node (non-disruptive to running
+GPU workloads):
 
 ```bash
-# Continuous monitoring
-watch -n 1 nvidia-smi
-
-# One-time check
-nvidia-smi
+kubectl delete pod -n nvidia-device-plugin <nvdp-nvidia-device-plugin-...>
+# allocatable returns to its full count within a few seconds
 ```
 
-From within the cluster:
+### (Historical) MPS `config-manager` sidecar crash-loop
 
-```bash
-kubectl exec -it <pod-name> -- nvidia-smi
-```
+We no longer run MPS, but for the record: under MPS, the
+`mps-control-daemon`'s `config-manager` sidecar (device-plugin 0.19.2) panics
+with `index out of range [0] … findPidToSignal` if it has to *transition* the MPS
+daemon between configs at startup. The workaround was to make the MPS node's
+config the `config.default` so it never transitions. Not relevant under
+time-slicing (no MPS daemon).
 
-### GPU Resource Quotas
+### Pod can't access a GPU
 
-To limit GPU usage per namespace:
-
-```yaml
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: gpu-quota
-  namespace: my-namespace
-spec:
-  hard:
-    requests.nvidia.com/gpu: "4"
-    limits.nvidia.com/gpu: "4"
-```
-
-## Best Practices
-
-1. **Time-Slicing**: Use time-slicing for workloads that don't fully utilize the GPU
-2. **Resource Limits**: Always set GPU resource limits to prevent pods from requesting more than needed
-3. **Monitoring**: Regularly monitor GPU utilization to optimize time-slice configuration
-4. **MIG (Multi-Instance GPU)**: For supported GPUs (A100, H100), consider MIG for better isolation instead of time-slicing
+1. Confirm it requests `nvidia.com/gpu` **and** sets `runtimeClassName: nvidia`.
+2. `kubectl describe pod <pod>` — check it scheduled onto a GPU node with free slices.
+3. Check K3s containerd config at `/var/lib/rancher/k3s/agent/etc/containerd/config.toml`.
 
 ## Related Resources
 
-- [NVIDIA Device Plugin Documentation](https://github.com/NVIDIA/k8s-device-plugin)
-- [NVIDIA Blog: Improving GPU Utilization in Kubernetes](https://developer.nvidia.com/blog/improving-gpu-utilization-in-kubernetes/)
+- [NVIDIA Device Plugin](https://github.com/NVIDIA/k8s-device-plugin)
+- [Time-Slicing / MPS / MIG sharing docs](https://github.com/NVIDIA/k8s-device-plugin?tab=readme-ov-file#shared-access-to-gpus)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 - [JupyterHub GPU Configuration]({{< relref "../services/jupyterhub" >}})
+- [vLLM]({{< relref "../services/vllm" >}})

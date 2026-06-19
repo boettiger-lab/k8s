@@ -110,14 +110,21 @@ singleuser:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
             02-gpu:
               display_name: RL GPU
-              description: CUDA GPU environment, with RL 
+              description: CUDA GPU environment, with RL
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                # Request a real, memory-capped GPU slice (MPS on cirrus).
+                # Without this the pod sees all GPUs unmanaged via the nvidia
+                # runtime, with no VRAM accounting/limit.
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
             03-gpu-spatial:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
                 image: "ghcr.io/rocker-org/ml-spatial:latest"
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
         interface:
           display_name: Interface
           choices:

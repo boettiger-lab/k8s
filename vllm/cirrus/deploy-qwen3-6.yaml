@@ -50,6 +50,7 @@ spec:
         - --trust-remote-code
         - --tensor-parallel-size
         - "1"
+        # cirrus is time-sliced (no VRAM cap), so vLLM gets the full 48GB of its card.
         - --gpu-memory-utilization
         - "0.9"
         - --max-model-len
