@@ -1,0 +1,21 @@
+# openvscode-server "flavor" of the default CPU image.
+#
+# Built as a thin layer ON TOP of the already-published default image
+# (images/Dockerfile -> ghcr.io/boettiger-lab/k8s:latest) rather than a full
+# rebuild, and pushed as the :openvscode tag. That keeps it identical to the
+# default image except for the one variable under test: it adds Gitpod's
+# openvscode-server and points jupyter-vscode-proxy at it via CODE_EXECUTABLE,
+# so the "VS Code" launcher tile spawns openvscode-server instead of code-server.
+# Purpose: check whether openvscode's closer-to-upstream WebSocket/reconnection
+# layer survives iOS WebKit, where code-server's patched layer leaves the
+# terminal, files, and Claude extension dead.
+FROM ghcr.io/boettiger-lab/k8s:latest
+
+USER root
+COPY install-openvscode.sh /tmp/install-openvscode.sh
+RUN bash /tmp/install-openvscode.sh && rm /tmp/install-openvscode.sh
+
+# Make jupyter-vscode-proxy launch openvscode-server instead of code-server.
+ENV CODE_EXECUTABLE=openvscode-server
+
+USER ${NB_USER}
