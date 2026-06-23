@@ -5,5 +5,5 @@ singleuser:
         command:
           - "/bin/bash"
           - "-c"
-          - 'if [[ -n "$XDG_DATA_HOME" ]]; then mkdir -p "$XDG_DATA_HOME"/jupyter/jupyter_ai && wget -q https://github.com/boettiger-lab/k8s/raw/refs/heads/main/jupyterhub/jupyter-ai-config.json -O - | envsubst > "$XDG_DATA_HOME"/jupyter/jupyter_ai/config.json; fi'
+          - 'if [[ -n "$XDG_DATA_HOME" ]]; then mkdir -p "$XDG_DATA_HOME"/jupyter/jupyter_ai && wget -q https://github.com/boettiger-lab/k8s/raw/refs/heads/main/jupyterhub/jupyter-ai-config.json -O - | envsubst > "$XDG_DATA_HOME"/jupyter/jupyter_ai/config.json; fi && mkdir -p "${HOME}/.config/opencode" && wget -q https://github.com/boettiger-lab/k8s/raw/refs/heads/main/jupyterhub/opencode.json -O "${HOME}/.config/opencode/opencode.json"'
 
