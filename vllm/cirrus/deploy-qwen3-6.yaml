@@ -63,6 +63,14 @@ spec:
         - --reasoning-parser
         - qwen3
         - --enforce-eager
+        # The default FlashInfer backend crashes in the prefill kernel for this
+        # model's head_dim 256 on this GPU (BatchPrefillWithPagedKVCache: invalid
+        # argument), killing EngineCore on every request. FLASH_ATTN needs compute
+        # capability >= 8 (this is a Turing RTX 8000, cc 7.5), so Triton is the
+        # stable backend here. Set via --attention-backend; the old
+        # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0.
+        - --attention-backend
+        - TRITON_ATTN
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
