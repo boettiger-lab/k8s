@@ -17,6 +17,22 @@ Deploy vLLM for high-throughput LLM inference with GPU acceleration.
 - Optimized CUDA kernels
 - Support for popular models (Llama, Mistral, GPT, etc.)
 
+## Live deployments
+
+The `vllm/cirrus/` directory holds one manifest per served model. Each model
+gets its own Deployment, Service, and HTTPS Ingress in the `vllm` namespace.
+Current endpoints:
+
+| Model | Host | `model` name | Manifest |
+|-------|------|--------------|----------|
+| Qwen3.6-35B-A3B (AWQ) | `qwen3-cirrus.carlboettiger.info` | `qwen3-6` | `deploy-qwen3-6.yaml` |
+| Gemma 4 | `gemma4-cirrus.carlboettiger.info` | `gemma4` | `deploy-gemma4.yaml` |
+| Whisper (audio) | `whisper-cirrus.carlboettiger.info` | `whisper` | `deploy-whisper.yaml` |
+
+All endpoints are OpenAI-compatible and **require an API key** (see
+[Authentication](#authentication)). They run on the time-sliced GPUs of the
+`cirrus` node (Quadro RTX 8000, Turing).
+
 ## Prerequisites
 
 1. [K3s installed]({{< relref "../infrastructure/k3s" >}})
@@ -30,160 +46,145 @@ The `vllm/` directory contains Kubernetes manifests for deploying vLLM.
 ### Quick Start
 
 ```bash
-cd vllm
+cd vllm/cirrus
 
-# Deploy vLLM
+# Create the namespace + secrets (HF token, API key) and deploy a model
 ./up.sh
+
+# Or apply a single model manifest directly
+kubectl apply -f deploy-qwen3-6.yaml
 
 # Check status
 kubectl get pods -n vllm
 
-# View logs
-kubectl logs -n vllm deployment/vllm
+# View logs (use the deployment name for the model, e.g. qwen3-6)
+kubectl logs -n vllm deployment/qwen3-6 -f
 
-# Access the service
+# List the model endpoints
 kubectl get ingress -n vllm
 ```
 
 ### Configuration Files
 
-- `deployment.yaml` - vLLM deployment with GPU
-- `service.yaml` - Service for cluster access
-- `ingress.yaml` - External HTTPS access
-- `up.sh` - Deploy script
-- `down.sh` - Cleanup script
+Under `vllm/cirrus/`:
+
+- `deploy-<model>.yaml` - per-model Deployment + Service + Ingress (e.g. `deploy-qwen3-6.yaml`)
+- `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets
+- `up.sh` / `down.sh` - deploy / cleanup scripts
 
 ### Deployment Configuration
 
-The deployment is configured to:
-- Request 1 GPU
-- Mount model cache volume
-- Expose OpenAI-compatible API
-- Auto-download models on first run
+Each model manifest:
+- Requests GPU(s) and pins to the `cirrus` node
+- Mounts the shared Hugging Face cache from the host (`/home/cboettig/.cache/huggingface`)
+- Reads the HF token and API key from Kubernetes secrets
+- Exposes the OpenAI-compatible API on port 8000
+- Uses `strategy.type: Recreate` so a redeploy frees the GPUs before the new pod starts
 
-Example `deployment.yaml`:
+See `vllm/cirrus/deploy-qwen3-6.yaml` for the full reference. Key arguments:
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vllm
-  namespace: vllm
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: vllm
-  template:
-    metadata:
-      labels:
-        app: vllm
-    spec:
-      containers:
-      - name: vllm
-        image: vllm/vllm-openai:latest
-        args:
-          - --model
-          - meta-llama/Llama-2-7b-chat-hf
-          - --dtype
-          - float16
-        resources:
-          limits:
-            nvidia.com/gpu: 1
-        ports:
-        - containerPort: 8000
-        volumeMounts:
-        - name: cache
-          mountPath: /root/.cache
-      volumes:
-      - name: cache
-        emptyDir: {}
+args:
+  - --model
+  - cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
+  - --served-model-name
+  - qwen3-6
+  - --max-model-len
+  - "131072"
+  - --enable-auto-tool-choice
+  - --tool-call-parser
+  - qwen3_coder
+  - --reasoning-parser
+  - qwen3
+  - --enforce-eager
+  # cirrus is a Quadro RTX 8000 (Turing, cc 7.5). The default FlashInfer
+  # backend crashes in its prefill kernel for this model's head_dim 256, and
+  # FLASH_ATTN needs compute capability >= 8, so pin Triton. NOTE: the
+  # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0 — use this flag.
+  - --attention-backend
+  - TRITON_ATTN
 ```
 
-## Usage
+## Authentication
 
-### Access the API
-
-Once deployed, vLLM provides an OpenAI-compatible API:
+Every endpoint requires a bearer token. The key is stored in the `vllm-api-key`
+secret (key `api-key`) in the `vllm` namespace and injected into the pod as
+`VLLM_API_KEY`. Retrieve it with:
 
 ```bash
-# Get the ingress URL
-kubectl get ingress -n vllm
-
-# Example: https://vllm.carlboettiger.info
+kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' | base64 -d
 ```
+
+Pass it as `Authorization: Bearer <key>` (curl) or `api_key=...` (OpenAI client).
+Avoid hard-coding it — read it from an environment variable, e.g.
+`export VLLM_API_KEY=$(kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' | base64 -d)`.
+
+## Usage
 
 ### API Examples
 
 Using curl:
 
 ```bash
-curl -X POST https://vllm.carlboettiger.info/v1/completions \
+curl https://qwen3-cirrus.carlboettiger.info/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $VLLM_API_KEY" \
   -d '{
-    "model": "meta-llama/Llama-2-7b-chat-hf",
-    "prompt": "San Francisco is a",
+    "model": "qwen3-6",
+    "messages": [{"role": "user", "content": "San Francisco is a"}],
     "max_tokens": 50,
     "temperature": 0.7
   }'
 ```
 
-Using Python with OpenAI client:
+Using Python with the OpenAI client:
 
 ```python
+import os
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://vllm.carlboettiger.info/v1",
-    api_key="not-needed"  # vLLM doesn't require API key by default
+    base_url="https://qwen3-cirrus.carlboettiger.info/v1",
+    api_key=os.environ["VLLM_API_KEY"],
 )
 
-response = client.completions.create(
-    model="meta-llama/Llama-2-7b-chat-hf",
-    prompt="San Francisco is a",
-    max_tokens=50,
-    temperature=0.7
-)
-
-print(response.choices[0].text)
-```
-
-Chat completion:
-
-```python
 response = client.chat.completions.create(
-    model="meta-llama/Llama-2-7b-chat-hf",
-    messages=[
-        {"role": "user", "content": "What is the capital of France?"}
-    ],
-    max_tokens=100
+    model="qwen3-6",
+    messages=[{"role": "user", "content": "What is the capital of France?"}],
+    max_tokens=100,
 )
 
 print(response.choices[0].message.content)
 ```
 
+> `qwen3-6` is a reasoning model: in streamed responses the chain-of-thought
+> arrives in `delta.reasoning` and the final answer in `delta.content`.
+
 ### Streaming Responses
 
 ```python
 response = client.chat.completions.create(
-    model="meta-llama/Llama-2-7b-chat-hf",
-    messages=[
-        {"role": "user", "content": "Tell me a story"}
-    ],
+    model="qwen3-6",
+    messages=[{"role": "user", "content": "Tell me a story"}],
     max_tokens=200,
-    stream=True
+    stream=True,
 )
 
 for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
+    if not chunk.choices:
+        continue
+    delta = chunk.choices[0].delta
+    text = delta.content or getattr(delta, "reasoning", None)
+    if text:
+        print(text, end="")
 ```
 
 ## Configuration
 
 ### Change Model
 
-Edit `deployment.yaml` to use a different model:
+Copy an existing `deploy-<model>.yaml` and edit its `--model` / `--served-model-name`
+(and host in the Ingress) to serve a different model:
 
 ```yaml
 args:
@@ -259,7 +260,7 @@ resources:
 ### Check Logs
 
 ```bash
-kubectl logs -n vllm deployment/vllm -f
+kubectl logs -n vllm deployment/qwen3-6 -f
 ```
 
 ### GPU Usage
@@ -269,7 +270,7 @@ kubectl logs -n vllm deployment/vllm -f
 nvidia-smi
 
 # Or from the pod
-kubectl exec -n vllm deployment/vllm -- nvidia-smi
+kubectl exec -n vllm deployment/qwen3-6 -- nvidia-smi
 ```
 
 ### Metrics
@@ -277,7 +278,7 @@ kubectl exec -n vllm deployment/vllm -- nvidia-smi
 vLLM exposes metrics at `/metrics`:
 
 ```bash
-curl https://vllm.carlboettiger.info/metrics
+curl https://qwen3-cirrus.carlboettiger.info/metrics
 ```
 
 ## Troubleshooting
@@ -312,7 +313,7 @@ args:
 
 1. **Check internet connectivity**:
 ```bash
-kubectl exec -n vllm deployment/vllm -- ping huggingface.co
+kubectl exec -n vllm deployment/qwen3-6 -- ping huggingface.co
 ```
 
 2. **Use Hugging Face token** for gated models:
@@ -332,19 +333,19 @@ env:
 1. **Check service**:
 ```bash
 kubectl get svc -n vllm
-kubectl describe svc vllm-service -n vllm
+kubectl describe svc vllm-qwen3-6-service -n vllm
 ```
 
 2. **Check ingress**:
 ```bash
 kubectl get ingress -n vllm
-kubectl describe ingress vllm-ingress -n vllm
+kubectl describe ingress vllm-qwen3-6-ingress -n vllm
 ```
 
 3. **Test internally**:
 ```bash
 kubectl run -it --rm test --image=curlimages/curl --restart=Never -- \
-  curl http://vllm-service.vllm.svc.cluster.local:8000/health
+  curl http://vllm-qwen3-6-service.vllm.svc.cluster.local:8000/health
 ```
 
 ## Advanced Configuration
