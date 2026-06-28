@@ -1,0 +1,97 @@
+# Dedicated PostgreSQL for JuiceFS metadata (the file index IS the filesystem —
+# losing it orphans all home data). NOT armada's Postgres. Backed by cirrus/tank.
+#
+# This is a minimal single-instance deployment. BEFORE relying on it for real
+# home data, add durability: scheduled pg_dump and/or WAL archiving (see README).
+#
+# Secret `juicefs-pg` (key: password) must exist first — see credentials.example.yaml.
+#
+# NOTE: not yet applied. Apply with `kubectl apply -f juicefs/postgres.yaml`.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: juicefs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: juicefs-pg-data
+  namespace: juicefs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: openebs-zfs   # cirrus tank
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juicefs-pg
+  namespace: juicefs
+  labels:
+    app: juicefs-pg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: juicefs-pg
+  strategy:
+    type: Recreate          # single node-local PVC; never run two pods on it
+  template:
+    metadata:
+      labels:
+        app: juicefs-pg
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: juicefs
+            - name: POSTGRES_DB
+              value: juicefs
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: juicefs-pg
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: juicefs-pg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: juicefs-pg
+  namespace: juicefs
+  labels:
+    app: juicefs-pg
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  selector:
+    app: juicefs-pg
+  type: ClusterIP
