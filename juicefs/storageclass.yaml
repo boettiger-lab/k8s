@@ -1,0 +1,32 @@
+# JuiceFS dynamic StorageClass for ReadWriteMany, NOT node-pinned home dirs.
+# Additive: openebs-zfs is left untouched and stays the hub-wide default.
+#
+# Verify parameter/option names against the installed juicefs-csi-driver chart
+# version at deploy time (see README) — the CSI driver must be installed first.
+#
+# NOTE: not yet applied. Apply with `kubectl apply -f juicefs/storageclass.yaml`.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: juicefs-sc
+provisioner: csi.juicefs.com
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  # Secret holding metaurl + S3 bucket/keys (see credentials.example.yaml).
+  csi.storage.k8s.io/provisioner-secret-name: juicefs-secret
+  csi.storage.k8s.io/provisioner-secret-namespace: juicefs
+  csi.storage.k8s.io/node-publish-secret-name: juicefs-secret
+  csi.storage.k8s.io/node-publish-secret-namespace: juicefs
+  # One subdir per PVC, mirroring today's pvcNameTemplate model. The PVC's
+  # requested capacity is applied as a per-subdir directory quota.
+  pathPattern: "${.pvc.namespace}-${.pvc.name}"
+mountOptions:
+  # Per-node local read cache lives on each node's own disk (cirrus tank).
+  - cache-dir=/var/jfsCache
+  - cache-size=51200          # 50 GiB local cache ceiling
+  - writeback                 # async upload; trades some durability for speed on
+                              # write-heavy (conda/pip/.git) workloads. Reconsider
+                              # if you'd rather wait for confirmed uploads.

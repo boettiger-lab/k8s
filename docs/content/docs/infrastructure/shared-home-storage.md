@@ -64,12 +64,13 @@ This is **not** a replacement for ZFS:
 
 | Decision | Recommendation | Rationale |
 |---|---|---|
-| Object store | **RustFS** (Apache-2.0, S3-compatible) | Our chosen S3 backend now that MinIO is source-available. JuiceFS treats it as a generic S3 endpoint. |
+| Object store | **RustFS** (Apache-2.0, S3-compatible) | Our chosen S3 backend now that MinIO is source-available. JuiceFS treats it as a generic S3 endpoint. **Decoupled from the MinIO→RustFS migration:** we stand up a *dedicated* RustFS on `cirrus`/`tank` for the `juicefs-homes` bucket **now**, leaving the existing MinIO (`/mnt/nvme2,3` hostPath) fully untouched. Migrating MinIO's existing data to RustFS is a separate, later effort. |
 | Metadata engine | **PostgreSQL** (dedicated; *not* armada's) | The metadata DB *is* the filesystem — losing it orphans the data. Postgres gives ACID durability + trivial `pg_dump` backups. Redis is faster but loss-prone; revisit only if metadata ops bottleneck. |
 | S3 endpoint | **in-cluster** RustFS service, **path-style** | Keeps the data path on the cluster network (fast, no ingress/TLS hop). RustFS is MinIO-compatible → path-style addressing. |
 | Provisioning | **Dynamic** StorageClass, one subdir + **directory quota** per PVC | Mirrors today's `pvcNameTemplate`/quota model. |
 | CSI mode | **mount-pod** mode (default) | Decouples the mount from the app pod; restarting the CSI driver doesn't kill live sessions. |
-| Migration | **Additive + gradual** | Keep ZFS homes until each is migrated and verified; pilot on a throwaway user first. |
+| Migration | **Additive + gradual** | Keep ZFS homes until each is migrated and verified. |
+| Pilot axis | **Named servers**, *not* image/profile | A *named server* already gets its own fresh, separate home today, so "new named server → JuiceFS RWX home" matches existing behavior. The **default** server (everyone's existing populated home) stays on `openebs-zfs` and is never touched. Storage is deliberately **decoupled from image choice** so picking the GPU image for a default server does not hide a user's files. |
 
 ## Prerequisites (new stateful services — durability matters)
 
@@ -107,23 +108,35 @@ Homes will live here, so both backends need real durability:
    directory quota driven by the PVC's requested size. `openebs-zfs` is left
    untouched.
 
-5. **Repoint JupyterHub homes** (`jupyterhub/public-config.yaml`) — the only
-   change to existing config:
+5. **Route named servers to JuiceFS** (`jupyterhub/public-config.yaml`) — the
+   only change to existing config, and it is *additive*: the hub-wide default
+   stays `openebs-zfs`/RWO. A `pre_spawn_hook` switches storage **only for named
+   servers** (non-empty `spawner.name`); the default server is untouched:
    ```yaml
-   singleuser:
-     storage:
-       type: dynamic
-       capacity: 60Gi                 # becomes the JuiceFS directory quota
-       dynamic:
-         storageClass: juicefs-sc     # was: openebs-zfs
-         pvcNameTemplate: claim-{escaped_user_server}
-         storageAccessModes: [ReadWriteMany]   # was ReadWriteOnce
+   hub:
+     extraConfig:
+       10-juicefs-named-servers: |
+         def pre_spawn_hook(spawner):
+             # Named servers get a fresh RWX (node-mobile) home on JuiceFS.
+             # The default server (empty name) keeps openebs-zfs + RWO.
+             if spawner.name:
+                 spawner.storage_class = "juicefs-sc"
+                 spawner.storage_access_modes = ["ReadWriteMany"]
+         c.KubeSpawner.pre_spawn_hook = pre_spawn_hook
    ```
    Deploy with `cd jupyterhub && ./cirrus.sh`.
 
-   *Hybrid option:* instead of flipping the hub-wide default, set
-   `storageClass` per profile via `kubespawner_override` (e.g. a "thelio GPU"
-   profile uses `juicefs-sc` while the default stays `openebs-zfs`).
+   **Why named servers, not a profile/image option:** image choice
+   (`profileList`) is orthogonal to home storage — a user may run the GPU image
+   on their *default* server, and that server must keep its existing files.
+   Keying on `spawner.name` instead means storage never depends on the image.
+
+   **Safety property:** existing named-server PVCs (e.g. `claim-cboettig--test`)
+   are already bound to `openebs-zfs`; a bound PVC's `storageClass` is immutable
+   and kubespawner reuses an existing PVC rather than recreating it. So existing
+   named servers keep their data on ZFS — **only named servers created after
+   this change land on JuiceFS.** The pilot is exercised simply by spawning a
+   *new* named server.
 
 6. **Migrate existing homes** (per user, while their server is stopped): a
    one-shot pod mounts the old `openebs-zfs` PVC and the new JuiceFS PVC and
@@ -131,6 +144,39 @@ Homes will live here, so both backends need real durability:
 
 7. **Cutover & clean up.** Keep the old `openebs-zfs` PVCs until each user is
    verified on JuiceFS; delete them only afterward.
+
+## Sizing & future NVMe pool
+
+- **Size the RustFS data PVC generously up front (1Ti).** It is a thin/sparse
+  ZFS claim, so the number is a quota ceiling, not a reservation, and `tank` has
+  the headroom.
+- **Enable volume expansion.** The live `openebs-zfs` StorageClass has
+  `allowVolumeExpansion: false`, so a PVC can't be grown without recreating it.
+  Flip it to `true` (a mutable SC field; ZFS-LocalPV supports online expansion)
+  so future growth is a one-liner:
+  ```
+  kubectl patch sc openebs-zfs -p '{"allowVolumeExpansion": true}'
+  ```
+
+### When the new NVMe disks arrive
+
+Do **not** add the NVMe as general data vdevs to the SSD `tank`: ZFS stripes
+across all top-level vdevs (balanced by free space) and can't pin data to the
+fast vdev, so you'd get blended, unpredictable performance and couple the pool's
+redundancy across mismatched hardware. (The only sane "mix into one pool"
+patterns are accelerator roles — `special`/`log`/`cache` vdevs — but object
+*data* should live on the NVMe itself.)
+
+Instead, build a **separate dedicated NVMe pool** (with redundancy — e.g. 2×
+mirror vdevs or raidz1 across 4 disks; homes are precious). OpenEBS ZFS-LocalPV
+selects the pool **per-StorageClass** via the `poolname` parameter (the same
+mechanism behind `cirrus`/`tank` vs `thelio`/`openebs-zpool`), so the move is:
+
+1. Create the NVMe zpool, add a new SC (e.g. `openebs-nvme`, `poolname: nvme`).
+2. Stand a fresh RustFS PVC on `openebs-nvme` and `mc mirror` the bucket over.
+3. Cut the RustFS Deployment to the new PVC, **keeping the in-cluster Service
+   name and bucket stable** (`rustfs.rustfs.svc:9000` / `juicefs-homes`) so the
+   JuiceFS backend reference never changes.
 
 ## Validation (prove the friction is gone)
 
