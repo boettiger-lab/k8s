@@ -285,5 +285,15 @@ hub:
           'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
           'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY'),
       })
+    # Route NAMED servers to JuiceFS (RWX, node-mobile homes); the default
+    # server keeps openebs-zfs/RWO untouched. See docs/.../shared-home-storage.md.
+    # Additive pilot: only named servers CREATED after this lands get juicefs-sc;
+    # existing bound PVCs are reused as-is (storageClass is immutable).
+    10-juicefs-named-servers: |
+      def pre_spawn_hook(spawner):
+          if spawner.name:
+              spawner.storage_class = "juicefs-sc"
+              spawner.storage_access_modes = ["ReadWriteMany"]
+      c.KubeSpawner.pre_spawn_hook = pre_spawn_hook
 
 
