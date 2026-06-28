@@ -65,20 +65,29 @@ Cross-node RWX (cirrus↔thelio) verified. The existing MinIO (ns `minio`,
    (The CSI driver can also auto-format on first mount when the secret carries
    `metaurl`/`storage`/`bucket`/keys — explicit format is the safe path.)
 
-5. **Install the JuiceFS CSI driver** (Helm, mount-pod mode is the default):
+5. **Node prerequisite:** raise `fs.inotify.max_user_instances` (default 128 is
+   too low; the CSI plugin crash-loops with `too many open files`). Apply the
+   DaemonSet that sets it to 8192 on every node:
+   ```
+   kubectl apply -f node-inotify.yaml
+   ```
+
+6. **Install the JuiceFS CSI driver** (Helm, mount-pod mode is the default).
+   Pin the chart version we deployed for reproducibility:
    ```
    helm repo add juicefs https://juicedata.github.io/charts/ && helm repo update
-   helm upgrade -i juicefs-csi-driver juicefs/juicefs-csi-driver -n kube-system
+   helm upgrade -i juicefs-csi-driver juicefs/juicefs-csi-driver \
+     -n kube-system --version 0.31.10
    ```
-   Then re-check the parameter/mountOption names in `storageclass.yaml` against
-   the installed chart version before applying it.
+   If you bump the version, re-check the parameter/mountOption names in
+   `storageclass.yaml` against the new chart.
 
-6. **StorageClass.**
+7. **StorageClass.**
    ```
    kubectl apply -f storageclass.yaml
    ```
 
-7. **Route named servers to JuiceFS.** Add to `jupyterhub/public-config.yaml`
+8. **Route named servers to JuiceFS.** Add to `jupyterhub/public-config.yaml`
    under `hub:` (additive — default server stays openebs-zfs/RWO):
    ```yaml
    hub:
