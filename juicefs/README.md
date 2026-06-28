@@ -19,10 +19,21 @@ Tracking issue: #7.
                           RustFS + Postgres PVCs both on cirrus/tank (openebs-zfs)
 ```
 
-## Status: NOT yet deployed
+## Status: DEPLOYED (pilot), 2026-06-28
 
-These manifests are scaffolding. Nothing here has been applied to the cluster.
-The existing MinIO (ns `minio`, `/mnt/nvme2,3`) is **untouched** by all of this.
+Live on `cirrus`: RustFS (`rustfs` ns), PostgreSQL + JuiceFS CSI driver
+`0.31.10`, `juicefs-sc`, and the named-server `pre_spawn_hook` in JupyterHub.
+Cross-node RWX (cirrus↔thelio) verified. The existing MinIO (ns `minio`,
+`/mnt/nvme2,3`) is **untouched**.
+
+### Two gotchas that bit us (don't repeat)
+
+- **RustFS: do NOT set `RUSTFS_SERVER_DOMAINS`** — it forces virtual-host bucket
+  parsing and breaks path-style in-cluster access (`InvalidBucketName`, buckets
+  seem not to persist). Left unset in `rustfs/cirrus.yaml`.
+- **Nodes need `fs.inotify.max_user_instances` raised** (default 128 is too low;
+  the CSI plugin crash-loops with `too many open files`). Set to `8192` on
+  `cirrus`, persisted in `/etc/sysctl.d/99-inotify-juicefs.conf`.
 
 ## Deploy order
 

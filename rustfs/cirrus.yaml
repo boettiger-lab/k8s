@@ -26,10 +26,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: openebs-zfs   # cirrus `tank` (SSD). Thin/sparse: 1Ti is a ceiling.
+  storageClassName: openebs-zfs   # cirrus `tank` (SSD). Thin/sparse: ceiling, not a reservation.
   resources:
     requests:
-      storage: 1Ti
+      storage: 4Ti
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,8 +74,11 @@ spec:
               value: ":9000"
             - name: RUSTFS_CONSOLE_ENABLE
               value: "true"
-            - name: RUSTFS_SERVER_DOMAINS
-              value: "s3.cirrus.carlboettiger.info"
+            # NOTE: RUSTFS_SERVER_DOMAINS intentionally NOT set. Setting it makes
+            # RustFS attempt virtual-hosted-style bucket parsing from the Host
+            # header, which breaks path-style in-cluster access from JuiceFS
+            # (rustfs.rustfs.svc:9000) with InvalidBucketName. JuiceFS + mc both
+            # use path-style, so leave it unset.
             - name: RUSTFS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

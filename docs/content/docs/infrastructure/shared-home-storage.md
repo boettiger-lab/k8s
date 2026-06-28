@@ -1,15 +1,32 @@
 ---
-title: "Shared Home Storage (Proposed)"
+title: "Shared Home Storage"
 weight: 10
 bookToc: true
 ---
 
-# Shared Home Storage for JupyterHub (Proposed)
+# Shared Home Storage for JupyterHub
 
-> **Status: PROPOSED — not yet deployed.** This is a design/plan document.
-> It is purely **additive**: it adds a new StorageClass alongside the existing
-> `openebs-zfs` (ZFS LocalPV). Nothing about the current ZFS storage is removed
-> or changed by adopting this.
+> **Status: DEPLOYED (pilot), 2026-06-28.** Live on `cirrus`: RustFS (`rustfs`
+> ns) + PostgreSQL + JuiceFS CSI driver `0.31.10` (`kube-system`) + the
+> `juicefs-sc` StorageClass. JupyterHub routes **new named servers** to JuiceFS;
+> default servers stay on `openebs-zfs`. Cross-node RWX (cirrus↔thelio) verified.
+> Purely **additive**: `openebs-zfs` (ZFS LocalPV) is unchanged, and the existing
+> MinIO is untouched.
+
+## Operational gotchas (hit during deploy)
+
+- **Do NOT set `RUSTFS_SERVER_DOMAINS`.** With it set, RustFS tries
+  virtual-hosted-style bucket parsing from the `Host` header, which breaks
+  path-style in-cluster access (`rustfs.rustfs.svc:9000`) — both `mc` and
+  JuiceFS fail with `InvalidBucketName`, and buckets appear not to persist.
+  Leave it unset; JuiceFS/`mc` use path-style.
+- **Raise `fs.inotify.max_user_instances` on every node running the CSI
+  driver.** The JuiceFS plugin watches its config via inotify; the kernel
+  default of `128` is exhausted on a busy control-plane node (`cirrus`), and the
+  plugin crash-loops with `fail to load config: too many open files`. Set to
+  `8192` (persisted in `/etc/sysctl.d/99-inotify-juicefs.conf` on `cirrus`).
+- **`juicefs format --storage s3`** works against RustFS once
+  `RUSTFS_SERVER_DOMAINS` is unset (the `minio` driver is not required).
 
 ## Problem
 
