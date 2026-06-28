@@ -67,17 +67,19 @@ the same data dirs (they would collide on MinIO's file locks).
 
 `traefik/helmchartconfig.yaml` is a `HelmChartConfig` that overrides the
 k3s-bundled Traefik chart with `nodeSelector: kubernetes.io/hostname: cirrus`.
+The helm-controller merges it on every reconcile, so the pin survives k3s
+upgrades and reboots.
 
-> **Known issue (2026-06):** Traefik is stuck mid 39→40 chart upgrade — k3s
-> wants chart `40.1.3` but the `traefik-crd` release is still `39.x`, so the
-> 40.x CRD validation fails and the helm upgrade never completes. The running
-> Traefik 39.x is healthy. Because the HelmChartConfig can't apply until that
-> upgrade is unblocked, the live `traefik` Deployment was **also patched
-> directly** with the same nodeSelector as an interim measure (failing helm
-> upgrades don't revert it; a future successful upgrade supplies the identical
-> value). **Follow-up:** unblock the Traefik 39→40 upgrade (sync the
-> `traefik-crd` chart), after which the HelmChartConfig becomes the sole source
-> of truth and the manual patch is redundant.
+> **History (2026-06):** Traefik had been stuck mid 39→40 chart upgrade — k3s
+> wanted chart `40.1.3` but the `traefik-crd` release lagged at `39.x`, so the
+> 40.x chart's CRD validation failed and the `traefik` upgrade never completed
+> (the running 39.x stayed healthy). The stale `helm-install-traefik-crd` job
+> had completed and would not re-run. Fix: delete `helm-install-traefik-crd`
+> (helm-controller recreates it and upgrades the CRD chart to 40.x first), then
+> delete the stuck `helm-install-traefik` job. Traefik is now `40.1.3`
+> (app v3.7.1) and the HelmChartConfig nodeSelector applies cleanly. This
+> delete-the-stale-job trick is the general remedy for a wedged k3s HelmChart
+> reconcile.
 
 ### CoreDNS
 
