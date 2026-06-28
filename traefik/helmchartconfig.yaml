@@ -1,0 +1,24 @@
+# Pin the k3s-bundled Traefik ingress controller to cirrus.
+#
+# k3s installs Traefik via a managed HelmChart ("traefik" in kube-system).
+# A HelmChartConfig with the SAME name/namespace lets us override its values
+# without forking the chart; k3s's helm-controller merges this in.
+#
+# WHY pin to cirrus: Traefik is the TLS-terminating hop for the S3 endpoint
+# (minio.carlboettiger.info). MinIO and the JupyterHub user pods live on cirrus,
+# so Traefik must be on cirrus too — otherwise S3 traffic crosses the 1Gb wire
+# (user pod -> Traefik on thelio -> MinIO on cirrus = two VXLAN hops, ~0.94Gb/s
+# cap). With everything co-located on cirrus the path stays on-node (~3Gb/s).
+#
+# Without this pin, Traefik only stays on cirrus because thelio is cordoned;
+# it would drift back to thelio the moment thelio is uncordoned. This makes the
+# placement an explicit, durable invariant. See docs/.../node-placement.md.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    nodeSelector:
+      kubernetes.io/hostname: cirrus
