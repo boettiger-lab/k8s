@@ -26,8 +26,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Theme requires Hugo >= 0.146.0 (extended). Use a recent stable version.
-      HUGO_VERSION: 0.146.0
+      # hugo-book theme requires Hugo >= 0.158.0 (extended); older versions fail
+      # the build with "can't evaluate field Name in type *langs.Language".
+      HUGO_VERSION: 0.158.0
     steps:
       - name: Install Hugo CLI
         run: |
