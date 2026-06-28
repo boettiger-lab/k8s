@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# Resilient curl wrapper: retries transient network errors / GitHub API
+# rate-limits (HTTP 403/429/5xx) so the image build doesn't flake in CI.
+curl_retry() { curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL "$@"; }
+
 # --------------------------------------------------------------------------
 # Architecture detection
 # --------------------------------------------------------------------------
@@ -29,10 +33,10 @@ echo "==> Detected architecture: ${ARCH}"
 # --------------------------------------------------------------------------
 echo "==> Installing kubectl..."
 
-KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+KUBECTL_VERSION="$(curl_retry https://dl.k8s.io/release/stable.txt)"
 echo "    Latest stable version: ${KUBECTL_VERSION}"
 
-curl -fsSL \
+curl_retry \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
     -o /tmp/kubectl
 
@@ -49,14 +53,17 @@ echo "    kubectl ${KUBECTL_VERSION} installed to /usr/local/bin/kubectl"
 # --------------------------------------------------------------------------
 echo "==> Installing kubelogin (kubectl-oidc_login plugin)..."
 
+# Resolve the latest tag via the github.com redirect (NOT the api.github.com
+# REST endpoint, which is rate-limited to 60 req/hr for anonymous CI builds and
+# was intermittently 403'ing the amd64 build).
 KUBELOGIN_VERSION="$(
-    curl -fsSL https://api.github.com/repos/int128/kubelogin/releases/latest \
-    | grep '"tag_name"' \
-    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/'
+    curl_retry -o /dev/null -w '%{url_effective}' \
+        https://github.com/int128/kubelogin/releases/latest \
+    | sed 's#.*/tag/##'
 )"
 echo "    Latest version: ${KUBELOGIN_VERSION}"
 
-curl -fsSL \
+curl_retry \
     "https://github.com/int128/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin_linux_${ARCH}.zip" \
     -o /tmp/kubelogin.zip
 
