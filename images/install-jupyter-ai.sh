@@ -30,7 +30,13 @@ npm cache clean --force
 # `geoagent:*` JupyterLab commands so agents can drive the map from chat. It is
 # installed from git and builds its frontend via jlpm, which is why Node must
 # be installed above this step.
-/opt/venv/bin/pip install --no-cache-dir \
+#
+# Run pip as ${NB_USER} (not root): /opt/venv is owned by the notebook user, as
+# are all extensions the base image installs. Installing as root would leave
+# these site-packages and their labextensions root-owned, so a user couldn't
+# modify or `jupyter labextension develop` them in a running session. runuser
+# keeps PATH (node + /opt/venv/bin) while setting HOME to the user's own.
+runuser -u "${NB_USER}" -- /opt/venv/bin/pip install --no-cache-dir \
   jupyter-sidekick \
   "jupyter-geoagent @ git+https://github.com/boettiger-lab/jupyter-geoagent.git@main"
 
