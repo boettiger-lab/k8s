@@ -1,0 +1,152 @@
+# NVIDIA Nemotron-3-Super-NVFP4 — vLLM recipe, matched EXACTLY to NVIDIA's
+# DGX Spark Deployment Guide (the vLLM path):
+#   github.com/NVIDIA-NeMo/nemotron/.../Nemotron-3-Super/SparkDeploymentGuide
+#
+# UNTESTED on nimbus as of 2026-07-02 — this is the guide's config translated
+# from `docker run` to a k8s Deployment, kept ready for a future comparison of
+# NVIDIA's vLLM-MTP path vs the TRT-LLM path (deploy-nemotron-trtllm.yaml).
+# Our TESTED baseline is deploy-nemotron.yaml (Marlin, no MTP, prefix caching on,
+# lab image) — do NOT confuse the two.
+#
+# Every arg/env below is verbatim from the guide EXCEPT k8s-translation items,
+# marked "[k8s]":
+#   [k8s] VLLM_API_KEY  — guide's docker example has NO auth; we add it because
+#         our Service is an external LoadBalancer. Remove to match the guide 1:1.
+#   [k8s] reasoning-parser-plugin path — guide mounts to /app; we mount the nimbus
+#         dir at /reasoning-parser (same super_v3_reasoning_parser.py file).
+#   [k8s] served-model-name is the guide's "nemotron-3-super" (clients that use
+#         "nemotron" must reconcile).
+# CAVEAT: the guide's image `vllm/vllm-openai:cu130-nightly` is the one with a
+# reported "MTP CUDA illegal-memory-access" forum thread — verify at deploy time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron
+  namespace: default
+  labels:
+    k8s-app: vllm-nimbus-nemotron
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-nemotron
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-nemotron
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:cu130-nightly
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_NVFP4_GEMM_BACKEND
+          value: "marlin"
+        - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "1"
+        - name: VLLM_FLASHINFER_ALLREDUCE_BACKEND
+          value: "trtllm"
+        - name: VLLM_USE_FLASHINFER_MOE_FP4
+          value: "0"
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        - name: VLLM_API_KEY          # [k8s] not in guide; auth for external LB
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        # vllm/vllm-openai ENTRYPOINT is the server; pass flags as args (no command).
+        args:
+        - --model
+        - nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+        - --served-model-name
+        - nemotron-3-super
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --async-scheduling
+        - --dtype
+        - auto
+        - --kv-cache-dtype
+        - fp8
+        - --tensor-parallel-size
+        - "1"
+        - --pipeline-parallel-size
+        - "1"
+        - --data-parallel-size
+        - "1"
+        - --trust-remote-code
+        - --gpu-memory-utilization
+        - "0.90"
+        - --enable-chunked-prefill
+        - --max-num-seqs
+        - "4"
+        - --max-model-len
+        - "1000000"
+        - --moe-backend
+        - marlin
+        - --mamba_ssm_cache_dtype
+        - float32
+        - --quantization
+        - fp4
+        - --speculative_config
+        - '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+        - --reasoning-parser-plugin
+        - /reasoning-parser/super_v3_reasoning_parser.py   # [k8s] guide: /app/...
+        - --reasoning-parser
+        - super_v3
+        - --enable-auto-tool-choice
+        - --tool-call-parser
+        - qwen3_coder
+        volumeMounts:
+        - name: reasoning-parser
+          mountPath: /reasoning-parser
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        readinessProbe:            # [k8s] generous; 1M-context + MTP startup is slow
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 80
+        resources:
+          requests:
+            cpu: 4
+            memory: 110Gi           # reflects --gpu-memory-utilization 0.90 of 128 GB
+            nvidia.com/gpu: 7
+          limits:
+            cpu: 4
+            memory: 110Gi
+            nvidia.com/gpu: 7
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: reasoning-parser
+        hostPath:
+          path: /home/cboettig/Documents/github/boettiger-lab/k8s/vllm/nimbus
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
