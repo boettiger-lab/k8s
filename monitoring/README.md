@@ -15,3 +15,10 @@ Feeds GPU power and vLLM token metrics to `nimbus-carbon-api`
     curl -s 'http://localhost:9090/api/v1/query?query=up' | python3 -m json.tool
 
 Prometheus URL in-cluster: `http://prometheus-server.monitoring.svc.cluster.local`
+
+## Metrics
+
+- `DCGM_FI_DEV_POWER_USAGE` — GPU power draw in watts (from dcgm-exporter).
+  Note: on GB10's unified-memory architecture, `DCGM_FI_DEV_FB_FREE` /
+  `DCGM_FI_DEV_FB_USED` and memory-clock fields report `N/A` — expected,
+  not a bug.

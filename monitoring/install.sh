@@ -11,3 +11,9 @@ helm upgrade -i prometheus prometheus-community/prometheus \
   --version 29.14.0 \
   --wait \
   --values prometheus-values.yaml
+
+helm upgrade -i dcgm-exporter gpu-helm-charts/dcgm-exporter \
+  --namespace monitoring \
+  --version 4.8.2 \
+  --wait \
+  --values dcgm-exporter-values.yaml
