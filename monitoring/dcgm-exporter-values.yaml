@@ -1,0 +1,16 @@
+# dcgm-exporter on nimbus's single GB10. Must NOT request nvidia.com/gpu —
+# that resource is time-sliced 8-way for model-serving pods
+# (see ../nvidia/nvidia-device-plugin-config.yaml). GPU access instead
+# comes from runtimeClassName, same mechanism deploy-qwen.yaml uses.
+runtimeClassName: nvidia
+
+# No prometheus-operator CRDs installed in this cluster — ServiceMonitor
+# would fail to apply.
+serviceMonitor:
+  enabled: false
+
+# Picked up by Prometheus's built-in kubernetes-pods scrape job
+# (enabled by default in the prometheus-community/prometheus chart).
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9400"
