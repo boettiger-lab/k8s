@@ -22,3 +22,8 @@ Prometheus URL in-cluster: `http://prometheus-server.monitoring.svc.cluster.loca
   Note: on GB10's unified-memory architecture, `DCGM_FI_DEV_FB_FREE` /
   `DCGM_FI_DEV_FB_USED` and memory-clock fields report `N/A` — expected,
   not a bug.
+
+## Carbon dashboard
+
+Consumed by [nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api),
+live at <https://carbon-nimbus.carlboettiger.info>.
