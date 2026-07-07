@@ -106,6 +106,13 @@ metadata:
   namespace: vllm
   labels:
     k8s-app: vllm-cirrus-qwen3-6
+  annotations:
+    # Scraped by the monitoring stack's Prometheus (kubernetes-service-endpoints
+    # job) for the carbon/perf dashboard at carbon-cirrus.carlboettiger.info.
+    # vLLM's /metrics is unauthenticated. See ../../monitoring/.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
   ports:
