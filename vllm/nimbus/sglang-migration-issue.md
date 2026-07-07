@@ -90,6 +90,8 @@ Deployed NVIDIA's Spark recipe: `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc9`, 
 | Qwen3.6-35B-A3B Marlin (**current default**) | NGC vLLM 26.05.post1 | **106 tok/s** | ~5–11k tok/s | MTP works great (3B active); tool-calls valid; deploy-qwen.yaml |
 | Qwen3.6 native FP4 (flashinfer_cutlass) | NGC vLLM 26.05.post1 | — (rejected) | — | oracle rejects the group-16-NVFP4+FP8-scale quant scheme |
 
+Qwen-specific status, upstream source, and the tool-call-parser bug (#43713) now tracked separately in `qwen-deployment-notes.md`.
+
 **Open upstream issues we're tracking:**
 - [FlashInfer #2776](https://github.com/flashinfer-ai/flashinfer/issues/2776) — NVFP4 MoE crash on GB10/SM121 (the core "native NVFP4 on vLLM" blocker). **Open.**
 - [vLLM #43906](https://github.com/vllm-project/vllm/issues/43906) — fast FP4/FP8 MoE gates on `family(100)`, excluding SM_12x → Marlin fallback. **Open.**

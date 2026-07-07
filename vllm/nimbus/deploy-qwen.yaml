@@ -47,6 +47,12 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
+        # DEBUG-level logging on top of --enable-log-requests/--enable-log-outputs
+        # (below) makes vLLM log actual prompt/output text, not just request
+        # metadata. Temporary: added 2026-07-06 to debug reports of inconsistent
+        # tool-call/reasoning behavior. Drop once root-caused.
+        - name: VLLM_LOGGING_LEVEL
+          value: DEBUG
         # Belt-and-suspenders with --moe-backend marlin: the FlashInfer FP4 MoE path
         # crashes NVFP4 MoE on GB10/SM121 (FlashInfer #2776, cudaErrorIllegalAddress).
         # This checkpoint's mlp.experts are W4A16_NVFP4, so that path MUST be avoided.
@@ -89,14 +95,33 @@ spec:
         - '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
         - --reasoning-parser
         - qwen3
+        # Patched qwen3_xml tool-call parser — fixes vLLM #43713 (multiple
+        # <function> blocks in one <tool_call> corrupt the emitted JSON).
+        # See qwen-deployment-notes.md / qwen36_tool_call_parser.py.
+        - --tool-parser-plugin
+        - /tool-parser/qwen36_tool_call_parser.py
         - --tool-call-parser
-        - qwen3_xml
+        - qwen3_xml_patched
         - --enable-auto-tool-choice
+        - --enable-log-requests
+        - --enable-log-outputs
+        - --max-log-len
+        - "4000"
+        # Checkpoint's own generation_config.json defaults to temperature=1.0,
+        # top_p=0.95, top_k=20 -- causes wide variance in reasoning length and
+        # tool-call vs direct-answer decisions on borderline prompts (root-caused
+        # 2026-07-06, see qwen-deployment-notes.md). Force temperature=0 so
+        # behavior is deterministic regardless of whether the client overrides it.
+        - --override-generation-config
+        - '{"temperature": 0.0}'
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
         - name: hf-cache
           mountPath: /root/.cache/huggingface
+        - name: tool-parser
+          mountPath: /tool-parser
+          readOnly: true
         # Readiness only (no liveness): if it hangs at backend selection (the known
         # Spark bug) the pod stays NotReady for debugging instead of crash-looping.
         # Generous window: weights are local but MTP + graph capture take minutes.
@@ -128,4 +153,8 @@ spec:
       - name: hf-cache
         hostPath:
           path: /home/cboettig/.cache/huggingface
+          type: Directory
+      - name: tool-parser
+        hostPath:
+          path: /home/cboettig/Documents/github/boettiger-lab/k8s/vllm/nimbus
           type: Directory
