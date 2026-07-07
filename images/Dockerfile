@@ -26,6 +26,15 @@ RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
+# The installers above run as root with HOME=/home/${NB_USER}, so the claude
+# installer, npm, and jlpm/yarn scatter config + caches through the home dir as
+# root. Most damaging: ~/.claude.json lands root-owned mode 0600, so claude
+# fails with EACCES for the notebook user. Delete the pure build caches (~76 MB
+# of ~/.npm + ~/.yarn) and then hand every remaining root-created file in the
+# home dir (~/.claude, ~/.claude.json, ~/.cache/claude, ...) back to ${NB_USER}.
+RUN rm -rf "${HOME}/.npm" "${HOME}/.yarn" "${HOME}/.wget-hsts" && \
+    chown -R "${NB_USER}:${NB_USER}" "${HOME}"
+
 USER ${NB_USER}
 
 RUN install2.r rsvg nimble jqr av
