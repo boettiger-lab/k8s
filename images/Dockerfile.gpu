@@ -25,3 +25,19 @@ RUN /opt/venv/bin/pip install \
     huggingface_sb3 \
     stable-baselines3 \
     sb3-contrib
+
+# Same root-in-home cleanup as the CPU image (images/Dockerfile). Every step
+# above runs as root with HOME=/home/${NB_USER}, so the claude installer, npm,
+# jlpm/yarn and pip scatter root-owned config + caches through the home dir —
+# most damagingly ~/.claude.json (mode 0600), which makes claude fail with
+# EACCES for the notebook user. Drop the build caches (~/.npm, ~/.yarn,
+# ~/.cache/pip) and the cuda base image's leftover install_llms.sh helper, then
+# hand the home dir back to ${NB_USER}.
+RUN rm -rf "${HOME}/.npm" "${HOME}/.yarn" "${HOME}/.wget-hsts" "${HOME}/.cache/pip" && \
+    rm -f "${HOME}/install_llms.sh" && \
+    chown -R "${NB_USER}:${NB_USER}" "${HOME}"
+
+# Restore the notebook user as the default. The cuda base image defaults to
+# USER jovyan, but the `USER root` above otherwise leaks into the runtime,
+# leaving the published GPU image running as root (unlike the CPU image).
+USER ${NB_USER}
