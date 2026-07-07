@@ -1,0 +1,44 @@
+name: openvscode Image
+on:
+  workflow_dispatch: null
+  schedule:
+    # Weekly, like the default CPU image, so this flavor tracks :latest.
+    - cron: '0 0 * * 0'
+  push:
+    # Trigger on the files this flavor consumes. It layers on the published
+    # :latest image, so it does NOT depend on the base Dockerfile / install-*.sh
+    # here — only on its own Dockerfile, install script, and this workflow.
+    paths:
+      - 'images/Dockerfile.openvscode'
+      - 'images/install-openvscode.sh'
+      - '.github/workflows/docker-openvscode-image.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: cleanup disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h
+      - uses: actions/checkout@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        if: github.repository == 'boettiger-lab/k8s'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+      - name: Build and push
+        if: github.repository == 'boettiger-lab/k8s'
+        uses: docker/build-push-action@v6
+        with:
+          context: images/
+          file: images/Dockerfile.openvscode
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/boettiger-lab/k8s:openvscode

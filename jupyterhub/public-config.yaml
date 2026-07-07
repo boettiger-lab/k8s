@@ -110,14 +110,21 @@ singleuser:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
             02-gpu:
               display_name: RL GPU
-              description: CUDA GPU environment, with RL 
+              description: CUDA GPU environment, with RL
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                # Request a real, memory-capped GPU slice (MPS on cirrus).
+                # Without this the pod sees all GPUs unmanaged via the nvidia
+                # runtime, with no VRAM accounting/limit.
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
             03-gpu-spatial:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
                 image: "ghcr.io/rocker-org/ml-spatial:latest"
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
         interface:
           display_name: Interface
           choices:
@@ -142,14 +149,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 8G
                 mem_limit: 8G
-                cpu_limit: 12
               default: true
             mem_16:
               display_name: 16 GB RAM
               kubespawner_override:
                 mem_guarantee: 16G
                 mem_limit: 16G
-                cpu_limit: 12
             mem_32:
               display_name: 32 GB RAM
               kubespawner_override:
@@ -228,6 +233,18 @@ hub:
         AWS_VIRTUAL_HOSTING: "FALSE"
         GOOSE_PROVIDER: "github_copilot"
         OPENAI_BASE_URL: "https://ellm.nrp-nautilus.io/v1"
+        # CPU math-library thread defaults. BLAS/OpenMP/PyTorch otherwise spawn one
+        # thread per visible host core (128) PER PROCESS, so launching many workers
+        # (a sweep, multiprocessing, sklearn n_jobs=-1) oversubscribes and thrashes
+        # (context-switch + cache churn) — slow and antisocial on this shared node.
+        # Default to 1 so threads == number of processes you launch: the common
+        # "one worker per core" pattern is then automatically safe and can still
+        # fill all 128 cores. Override per-job for a heavy SINGLE-process BLAS job
+        # (e.g. `export OMP_NUM_THREADS=16` or `torch.set_num_threads(16)`).
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        MKL_NUM_THREADS: "1"
+        NUMEXPR_NUM_THREADS: "1"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
@@ -268,5 +285,15 @@ hub:
           'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
           'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY'),
       })
+    # Route NAMED servers to JuiceFS (RWX, node-mobile homes); the default
+    # server keeps openebs-zfs/RWO untouched. See docs/.../shared-home-storage.md.
+    # Additive pilot: only named servers CREATED after this lands get juicefs-sc;
+    # existing bound PVCs are reused as-is (storageClass is immutable).
+    10-juicefs-named-servers: |
+      def pre_spawn_hook(spawner):
+          if spawner.name:
+              spawner.storage_class = "juicefs-sc"
+              spawner.storage_access_modes = ["ReadWriteMany"]
+      c.KubeSpawner.pre_spawn_hook = pre_spawn_hook
 
 

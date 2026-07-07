@@ -30,6 +30,10 @@ npm cache clean --force
 # `geoagent:*` JupyterLab commands so agents can drive the map from chat. It is
 # installed from git and builds its frontend via jlpm, which is why Node must
 # be installed above this step.
+#
+# Installed as root (this script runs as root for the apt/npm steps above, and
+# jupyter-geoagent's jlpm source build is finicky about running under a dropped
+# user). Ownership is fixed up afterward — see the chown below.
 /opt/venv/bin/pip install --no-cache-dir \
   jupyter-sidekick \
   "jupyter-geoagent @ git+https://github.com/boettiger-lab/jupyter-geoagent.git@main"
@@ -47,3 +51,13 @@ for ext in "jupyter-sidekick" "@geojupyter/jupyter-geoagent"; do
     || { echo "ERROR: ${ext} labextension artifact missing at ${LABEXT_DIR}/${ext}" >&2; \
          ls -la "${LABEXT_DIR}" 2>&1 || true; exit 1; }
 done
+
+# pip ran as root, so its packages and labextensions are root-owned — unlike
+# /opt/venv and every base-image extension, which the notebook user owns. Hand
+# the freshly installed bits back to ${NB_USER} so they can be modified or
+# `jupyter labextension develop`-ed in a running session.
+chown -R "${NB_USER}:${NB_USER}" \
+  "${LABEXT_DIR}/jupyter-sidekick" \
+  "${LABEXT_DIR}/@geojupyter" \
+  /opt/venv/lib/python*/site-packages/jupyter_sidekick* \
+  /opt/venv/lib/python*/site-packages/jupyter_geoagent*

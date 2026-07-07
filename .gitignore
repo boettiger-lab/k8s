@@ -49,3 +49,5 @@ hugo_extended_*.tar.gz
 # Local git worktrees
 /.worktrees/
 
+# Local-only secret material (import to Bitwarden, never commit)
+/secrets/

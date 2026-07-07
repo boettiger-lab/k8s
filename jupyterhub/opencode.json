@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "nrp": {
+      "name": "NRP",
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "https://ellm.nrp-nautilus.io/v1",
+      "env": ["OPENAI_API_KEY"],
+      "models": {
+        "qwen3": {
+          "id": "qwen3",
+          "name": "Qwen3",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 32768, "output": 8192 },
+          "cost": { "input": 0, "output": 0 }
+        },
+        "kimi": {
+          "id": "kimi",
+          "name": "Kimi",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 128000, "output": 8192 },
+          "cost": { "input": 0, "output": 0 }
+        },
+        "minimax-m2": {
+          "id": "minimax-m2",
+          "name": "MiniMax M2",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 32768, "output": 8192 },
+          "cost": { "input": 0, "output": 0 }
+        },
+        "gpt-oss": {
+          "id": "gpt-oss",
+          "name": "GPT OSS",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 32768, "output": 8192 },
+          "cost": { "input": 0, "output": 0 }
+        },
+        "glm-5": {
+          "id": "glm-5",
+          "name": "GLM-5",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 32768, "output": 8192 },
+          "cost": { "input": 0, "output": 0 }
+        }
+      }
+    }
+  },
+  "model": "nrp/qwen3"
+}

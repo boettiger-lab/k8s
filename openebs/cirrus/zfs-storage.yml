@@ -1,0 +1,16 @@
+# StorageClass for the active cluster (cirrus control-plane + thelio worker).
+# Backed by the pre-existing native ZFS pool `tank` present on both nodes.
+# This matches the live cluster; `kubectl get sc openebs-zfs -o yaml` should agree.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-zfs
+parameters:
+  recordsize: "128k"
+  compression: "lz4"
+  dedup: "off"
+  fstype: "zfs"
+  poolname: "tank"
+provisioner: zfs.csi.openebs.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate

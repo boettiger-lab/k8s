@@ -1,28 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: qwen3-6
+  name: gemma4
   namespace: vllm
   labels:
-    k8s-app: vllm-cirrus-qwen3-6
+    k8s-app: vllm-cirrus-gemma4
 spec:
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
-      k8s-app: vllm-cirrus-qwen3-6
+      k8s-app: vllm-cirrus-gemma4
   template:
     metadata:
       labels:
-        k8s-app: vllm-cirrus-qwen3-6
+        k8s-app: vllm-cirrus-gemma4
     spec:
       runtimeClassName: nvidia
       nodeSelector:
         kubernetes.io/hostname: cirrus
+      imagePullSecrets:
+      - name: ghcr-pull-secret
       containers:
       - name: vllm
-        image: vllm/vllm-openai:latest
+        image: ghcr.io/boettiger-lab/vllm-gemma4-audio:amd64
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -42,35 +42,23 @@ spec:
           value: "4"
         args:
         - --model
-        - cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
+        - google/gemma-4-E2B-it
         - --served-model-name
-        - qwen3-6
+        - gemma4
         - --dtype
         - auto
         - --trust-remote-code
         - --tensor-parallel-size
         - "1"
-        # cirrus is time-sliced (no VRAM cap), so vLLM gets the full 48GB of its card.
         - --gpu-memory-utilization
-        - "0.9"
+        - "0.5"
         - --max-model-len
-        - "131072"
+        - "65536"
         - --limit-mm-per-prompt
-        - '{"image": 0, "audio": 0, "video": 0}'
+        - '{"audio": 1, "image": 4}'
         - --enable-auto-tool-choice
         - --tool-call-parser
-        - qwen3_coder
-        - --reasoning-parser
-        - qwen3
-        - --enforce-eager
-        # The default FlashInfer backend crashes in the prefill kernel for this
-        # model's head_dim 256 on this GPU (BatchPrefillWithPagedKVCache: invalid
-        # argument), killing EngineCore on every request. FLASH_ATTN needs compute
-        # capability >= 8 (this is a Turing RTX 8000, cc 7.5), so Triton is the
-        # stable backend here. Set via --attention-backend; the old
-        # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0.
-        - --attention-backend
-        - TRITON_ATTN
+        - gemma4
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
@@ -79,11 +67,11 @@ spec:
         resources:
           requests:
             cpu: 4
-            memory: 16Gi
+            memory: 10Gi
             nvidia.com/gpu: 2
           limits:
             cpu: 4
-            memory: 16Gi
+            memory: 10Gi
             nvidia.com/gpu: 2
         securityContext:
           capabilities:
@@ -102,10 +90,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm-qwen3-6-service
+  name: vllm-gemma4-service
   namespace: vllm
   labels:
-    k8s-app: vllm-cirrus-qwen3-6
+    k8s-app: vllm-cirrus-gemma4
 spec:
   type: ClusterIP
   ports:
@@ -114,33 +102,45 @@ spec:
       protocol: TCP
       name: http
   selector:
-    k8s-app: vllm-cirrus-qwen3-6
+    k8s-app: vllm-cirrus-gemma4
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: vllm-long-timeout
+  namespace: vllm
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 600s
+    readIdleTimeout: 600s
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vllm-qwen3-6-ingress
+  name: vllm-gemma4-ingress
   namespace: vllm
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
     traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
   labels:
-    app: vllm-cirrus-qwen3-6
+    app: vllm-cirrus-gemma4
 spec:
   ingressClassName: traefik
   rules:
-  - host: qwen3-cirrus.carlboettiger.info
+  - host: gemma4-cirrus.carlboettiger.info
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: vllm-qwen3-6-service
+            name: vllm-gemma4-service
             port:
               number: 8000
   tls:
   - hosts:
-    - qwen3-cirrus.carlboettiger.info
-    secretName: vllm-qwen3-tls
+    - gemma4-cirrus.carlboettiger.info
+    secretName: vllm-gemma4-tls

@@ -7,7 +7,11 @@ metadata:
 spec:
   channel: https://update.k3s.io/v1-release/channels/stable
   concurrency: 1
-  cordon: true
+  # cordon must stay false: cirrus is the control-plane AND the data/compute node
+  # (MinIO + JupyterHub + Traefik live here). Cordoning it during a k3s upgrade
+  # evicts CoreDNS/Traefik onto thelio and has left cirrus stuck SchedulingDisabled,
+  # which forces MinIO<->JupyterHub traffic across the 1Gb wire. Never re-enable.
+  cordon: false
   nodeSelector:
     matchExpressions:
     - key: node-role.kubernetes.io/control-plane
@@ -27,7 +31,7 @@ metadata:
 spec:
   channel: https://update.k3s.io/v1-release/channels/stable
   concurrency: 1
-  cordon: true
+  cordon: false
   nodeSelector:
     matchExpressions:
     - key: node-role.kubernetes.io/control-plane

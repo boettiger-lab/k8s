@@ -67,6 +67,17 @@ These scripts:
 2. Update Helm repositories.
 3. Deploy using the appropriate config files.
 
+### Short-URL Redirect (Cirrus)
+
+JupyterHub is served at `jupyterhub.cirrus.carlboettiger.info`. The short URL
+`cirrus.carlboettiger.info` permanently (301) redirects to it via a standalone
+Traefik ingress + middleware (not part of the Helm chart, so the OAuth callback
+URL stays unchanged). Apply it once after deploying:
+
+```bash
+kubectl apply -n jupyter -f cirrus-redirect.yaml
+```
+
 ## Configuration
 
 ### Secrets Management
@@ -96,6 +107,36 @@ User pods automatically receive environment variables for MinIO access (via `Kub
 - `AWS_S3_ENDPOINT: "minio.carlboettiger.info"`
 - `AWS_HTTPS: "true"`
 - `AWS_VIRTUAL_HOSTING: "FALSE"`
+
+#### CPU thread defaults (BLAS / OpenMP / PyTorch)
+
+User pods set `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, and
+`NUMEXPR_NUM_THREADS` to **`1`**. Numeric libraries otherwise spawn one thread per
+*visible host core* (128) **per process** — so launching many workers (a grid
+search, RL sweep, `multiprocessing`/`joblib`, or `sklearn` with `n_jobs=-1`) would
+oversubscribe the CPU and thrash: high load, low useful throughput, and it degrades
+the shared node for everyone. With the default of `1`, **total threads = the number
+of processes you launch**, so the common "one worker per core" pattern is automatically
+safe and can still fill all 128 cores. There is **no CPU limit** on pods — these
+defaults exist only to stop accidental thread-thrashing, not to restrict you.
+
+**To parallelize: launch more processes** (each stays single-threaded) — that's the
+efficient path and it scales cleanly to the full node.
+
+**To lean on parallel BLAS instead** — i.e. one big *single-process* linear-algebra /
+scikit-learn / PyTorch-CPU job that should use many cores — raise it for that job:
+
+```bash
+# shell, before launching python:
+export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16
+```
+```python
+# or inside a notebook (PyTorch), before the heavy work:
+import torch; torch.set_num_threads(16)
+```
+
+(Don't do both at once — many processes *and* high per-process threads is exactly the
+oversubscription this default prevents.)
 
 ### ARM64 Compatibility
 
