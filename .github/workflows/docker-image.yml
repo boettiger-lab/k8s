@@ -11,6 +11,7 @@ on:
     # schedule or a manual dispatch did.
     paths:
       - 'images/Dockerfile'
+      - 'images/config'
       - 'images/install-kubectl-tools.sh'
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
