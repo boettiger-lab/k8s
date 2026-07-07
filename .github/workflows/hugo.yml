@@ -39,7 +39,7 @@ jobs:
         run: sudo snap install dart-sass
         
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
           fetch-depth: 0
@@ -54,7 +54,7 @@ jobs:
           
       - name: Setup Pages
         id: pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
         
       - name: Install Node.js dependencies
         run: cd docs && [[ -f package-lock.json || -f npm-shrinkwrap.json ]] && npm ci || true
@@ -71,7 +71,7 @@ jobs:
             --baseURL "${{ steps.pages.outputs.base_url }}/"
             
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./docs/public
 
@@ -84,4 +84,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
