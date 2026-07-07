@@ -50,9 +50,9 @@ spec:
         - --trust-remote-code
         - --tensor-parallel-size
         - "1"
-        # cirrus is time-sliced (no VRAM cap), so vLLM gets the full 48GB of its card.
+        # cirrus is time-sliced (no VRAM cap); give vLLM essentially the whole 48GB card.
         - --gpu-memory-utilization
-        - "0.9"
+        - "0.95"
         - --max-model-len
         - "131072"
         - --limit-mm-per-prompt
@@ -62,7 +62,6 @@ spec:
         - qwen3_coder
         - --reasoning-parser
         - qwen3
-        - --enforce-eager
         # The default FlashInfer backend crashes in the prefill kernel for this
         # model's head_dim 256 on this GPU (BatchPrefillWithPagedKVCache: invalid
         # argument), killing EngineCore on every request. FLASH_ATTN needs compute
@@ -71,6 +70,28 @@ spec:
         # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0.
         - --attention-backend
         - TRITON_ATTN
+        # --- PERF (2026-07-07): ~8x single-stream decode (17.6 -> ~140 tok/s). ---
+        # We used to run --enforce-eager, which disabled CUDA graphs and was the
+        # dominant bottleneck (~5x). It was a workaround for two issues now handled
+        # directly: (1) the head_dim-256 attention crash above -> TRITON_ATTN; and
+        # (2) CUDA graph capture on this hybrid Mamba+attention MoE needs
+        # max_num_seqs <= available Mamba cache blocks, else engine init aborts with
+        # "max_num_seqs exceeds available Mamba cache blocks". Cap it and CUDA graphs
+        # work: 17.6 -> 86.9 tok/s just from re-enabling them.
+        - --max-num-seqs
+        - "64"
+        # MTP speculative decoding: this AWQ checkpoint ships the mtp.* weights, so
+        # it works on Turing too (86.9 -> ~140 tok/s). Triton MoE for the draft layers.
+        - --speculative-config
+        - '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+        # Headroom for the extra draft-token slots (silences the max_num_scheduled_tokens warning).
+        - --max-num-batched-tokens
+        - "8192"
+        - --enable-prefix-caching
+        # Match vllm/nimbus/deploy-qwen.yaml: force greedy by default (the checkpoint's
+        # generation_config defaults to temperature=1.0). Clients may still override.
+        - --override-generation-config
+        - '{"temperature": 0.0}'
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
