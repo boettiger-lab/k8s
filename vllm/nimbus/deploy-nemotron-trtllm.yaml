@@ -1,0 +1,168 @@
+# TensorRT-LLM deployment of Nemotron-3-Super-NVFP4 on nimbus (DGX Spark / GB10).
+# Translated from NVIDIA's official Spark recipe:
+#   github.com/NVIDIA-NeMo/nemotron/.../Nemotron-3-Super/SparkDeploymentGuide
+# This is the ONLY path that runs NATIVE FP4 MoE (CUTLASS) on GB10 — vLLM's
+# oracle rejects native FP4 for this checkpoint's quant scheme, so vLLM falls
+# back to Marlin. TRT-LLM also runs native 3-layer MTP speculative decoding.
+#
+# Deltas from the upstream recipe (test-tuned):
+#  - --port 8000 (recipe uses 8123)
+#  - --max_seq_len 262144 (recipe: 1048576/1M) — cap KV cache on the 128 GB unified
+#    pool for a test; free_gpu_memory_fraction 0.9 * 1M context would over-commit
+#  - trtllm-serve has no built-in api-key gate like vLLM, so this uses a DISTINCT
+#    label (k8s-app: trtllm-nemotron) + a dedicated ClusterIP Service. It is NOT
+#    selected by the external LoadBalancer (vllm-nimbus-service selects
+#    k8s-app: vllm-nimbus-nemotron). Benchmark via `kubectl port-forward`; nothing
+#    unauthenticated is exposed externally.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trtllm-nemotron-config
+  namespace: default
+data:
+  extra-llm-api-config.yml: |
+    kv_cache_config:
+      dtype: fp8
+      enable_block_reuse: false
+      free_gpu_memory_fraction: 0.9
+      mamba_ssm_cache_dtype: float16
+      mamba_ssm_stochastic_rounding: true
+      mamba_ssm_philox_rounds: 5
+    moe_config:
+      backend: CUTLASS
+    cuda_graph_config:
+      enable_padding: true
+      max_batch_size: 8
+    enable_attention_dp: false
+    enable_chunked_prefill: true
+    stream_interval: 1
+    print_iter_log: true
+    speculative_config:
+      decoding_type: MTP
+      num_nextn_predict_layers: 3
+      allow_advanced_sampling: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron-trtllm
+  namespace: default
+  labels:
+    k8s-app: trtllm-nemotron
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: trtllm-nemotron
+  template:
+    metadata:
+      labels:
+        k8s-app: trtllm-nemotron
+    spec:
+      runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ngc-pull
+      containers:
+      - name: trtllm
+        image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc9
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: TLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "1"
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        - name: HF_HOME
+          value: /root/.cache/huggingface
+        - name: OMP_NUM_THREADS
+          value: "4"
+        # Run through NVIDIA's entrypoint (sets LD_LIBRARY_PATH for /usr/local/
+        # tensorrt/lib etc.); overriding command directly broke `import tensorrt`
+        # with "libnvonnxparser.so.10: cannot open shared object file".
+        command: ["/opt/nvidia/nvidia_entrypoint.sh"]
+        args:
+        - trtllm-serve
+        - nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --max_batch_size
+        - "8"
+        - --tp_size
+        - "1"
+        - --ep_size
+        - "1"
+        - --max_num_tokens
+        - "8192"
+        - --trust_remote_code
+        - --reasoning_parser
+        - nano-v3
+        - --tool_parser
+        - qwen3_coder
+        - --extra_llm_api_options
+        - /config/extra-llm-api-config.yml
+        - --max_seq_len
+        - "262144"
+        volumeMounts:
+        - name: trtllm-config
+          mountPath: /config
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 80
+        resources:
+          requests:
+            cpu: 4
+            memory: 100Gi
+            nvidia.com/gpu: 7
+          limits:
+            cpu: 4
+            memory: 100Gi
+            nvidia.com/gpu: 7
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: trtllm-config
+        configMap:
+          name: trtllm-nemotron-config
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trtllm-nemotron-svc
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    k8s-app: trtllm-nemotron
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http

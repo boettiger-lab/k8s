@@ -7,9 +7,11 @@ metadata:
     k8s-app: vllm-nimbus-nemotron
 spec:
   replicas: 1
-  # Recreate (not RollingUpdate): the nimbus node has only 7 GPUs, all held by
-  # the running pod, so a surge-first rollout pins the new pod in Pending
-  # forever. Tear down old before creating new.
+  # Recreate (not RollingUpdate): nimbus is a single DGX Spark (one GB10 GPU)
+  # exposed via NVIDIA time-slicing as 8 nvidia.com/gpu replicas. This pod
+  # requests 7 of the 8 slices, so a surge-first rollout can't place the new
+  # pod (only 1 slice free) and pins it in Pending forever. Tear down old
+  # before creating new.
   strategy:
     type: Recreate
   selector:
@@ -30,7 +32,12 @@ spec:
         # Requires NGC pull secret — see README for setup.
         # Alternative if NGC auth is unavailable:
         #   scitrera/dgx-spark-sglang:0.5.8-t4
-        image: nvcr.io/nvidia/sglang:26.04-py3
+        #
+        # 26.06 = SGLang 0.5.12.post1, FlashInfer 0.6.12 (carries PCG dynamo fix
+        # #3081), CUDA 13.3.0. First NGC tag with FlashInfer >=0.6.12, so we can
+        # finally drop --disable-piecewise-cuda-graph (see args below). 26.05
+        # shipped FlashInfer 0.6.10 (no #3081) and would re-trigger the crash.
+        image: nvcr.io/nvidia/sglang:26.06-py3
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
@@ -49,20 +56,25 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
-        # Pre-warm the FP4 SM120 quantization kernel BEFORE sglang.launch_server
-        # starts torch.compile / piecewise-cuda-graph capture. FlashInfer's
-        # gen_fp4_quantization_sm120f_module shells out to `nvcc --version`,
-        # whose `threading.Lock()` cannot be traced by torch.dynamo — so the
-        # first FP4 call inside a captured graph crashes the worker. Building
-        # the module eagerly here populates ~/.cache/flashinfer so the in-graph
-        # call hits a cached `.so` and never invokes the JIT path.
-        # See SGLang 26.02 release-notes known issue (Nemotron Nano on Spark/Thor):
-        # "the user will need to install the flashinfer-jit-cache before running."
+        # Pre-warm the FP4 SM120 quantization kernel BEFORE sglang.launch_server.
+        # On FlashInfer <0.6.12 this was a *crash workaround*: PCG capture traced
+        # fp4_quantize under torch.dynamo, which shelled out to `nvcc --version`
+        # (threading.Lock, untraceable) and aborted the worker. FlashInfer 0.6.12
+        # (#3081) registers fp4_quantize as a torch.compile-compatible custom op,
+        # so that crash is fixed at the source. On 26.06 the prewarm is now only
+        # a startup-latency optimization — it populates ~/.cache/flashinfer so the
+        # first in-graph FP4 call hits a cached `.so` instead of JIT-compiling.
+        #
+        # Informational: log the FlashInfer version. PCG is disabled below, so
+        # this is no longer load-bearing — but the version matters if anyone
+        # re-tests PCG (needs >=0.6.12 for the #3081 dynamo fix; note even 0.6.12
+        # still hits the BF16 cublas capture crash, see the PCG flag comment).
         command: ["bash", "-c"]
         args:
         - |
           set -euo pipefail
-          echo "[prewarm] flashinfer=$(python3 -c 'import flashinfer; print(flashinfer.__version__)')"
+          FI_VER=$(python3 -c 'import flashinfer; print(flashinfer.__version__)')
+          echo "[prewarm] flashinfer=$FI_VER"
           pip install --no-cache-dir --quiet flashinfer-jit-cache 2>&1 | tail -5 \
             || echo "[prewarm] flashinfer-jit-cache install failed (non-fatal)"
           python3 - <<'PY'
@@ -106,12 +118,18 @@ spec:
         - no_buffer
         - --max-running-requests
         - "10"
-        # Disable piecewise CUDA graph: SGLang's PCG path traces forward() under
-        # torch.dynamo, and FlashInfer's fp4_quantize calls
-        # is_cuda_version_at_least() which shells out to `nvcc --version` on
-        # every call (to construct build flags). Dynamo refuses to trace
-        # subprocess.Popen/threading.Lock and aborts. Disabling PCG keeps
-        # forward() in eager Python so the subprocess call works fine.
+        # Disable piecewise CUDA graph — still REQUIRED on 26.06 (2026-07-02 test).
+        # We re-enabled PCG on 26.06/FlashInfer 0.6.12 to test recovery of the
+        # prefill win. Result: FlashInfer 0.6.12 (#3081) DID fix the original
+        # torch.dynamo `allocate_lock` crash (gone from logs) — but PCG capture
+        # now fails at a *different* point: a BF16 cublasGemmEx (CUDA_R_16BF)
+        # inside moe_forward_piecewise_cuda_graph_impl returns
+        # CUBLAS_STATUS_INTERNAL_ERROR on SM121 (crashes at the 8192-token
+        # bucket). This matches FlashInfer #3170's open "no BF16 backend for
+        # SM121" item. Full (non-piecewise) CUDA-graph capture for bs
+        # {1,2,4,8,10} succeeds; only the piecewise path fails. SGLang's own
+        # error message says to add this flag. So PCG stays off; we lose the
+        # prefill win (same as 26.04) but the model serves.
         - --disable-piecewise-cuda-graph
         volumeMounts:
         - name: dshm

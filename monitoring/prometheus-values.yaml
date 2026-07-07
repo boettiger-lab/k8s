@@ -1,0 +1,18 @@
+# Minimal Prometheus install for nimbus: just prometheus-server.
+# No Alertmanager, kube-state-metrics, node-exporter, or Pushgateway —
+# this cluster only needs Prometheus as a metrics store for dcgm-exporter
+# and vLLM's built-in /metrics endpoint.
+alertmanager:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+
+server:
+  retention: "15d"
+  persistentVolume:
+    storageClass: openebs-zfs
+    size: 5Gi
