@@ -6,7 +6,9 @@ metadata:
   labels:
     k8s-app: vllm-cirrus-gemma4
 spec:
-  replicas: 1
+  # Kept scaled to 0: only qwen3-6 is live on cirrus right now. Bump to 1 to bring
+  # gemma4 back (shares the single RTX 8000 with qwen3-6, so mind VRAM if you do).
+  replicas: 0
   selector:
     matchLabels:
       k8s-app: vllm-cirrus-gemma4
@@ -123,7 +125,10 @@ metadata:
   namespace: vllm
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
     traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
   labels:
     app: vllm-cirrus-gemma4

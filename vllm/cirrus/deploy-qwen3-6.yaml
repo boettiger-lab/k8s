@@ -151,7 +151,10 @@ metadata:
   namespace: vllm
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
     traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
   labels:
     app: vllm-cirrus-qwen3-6
