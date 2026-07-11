@@ -177,6 +177,12 @@ Homes will live here, so both backends need real durability:
 
 ### When the new NVMe disks arrive
 
+> **Status (2026-07-11):** purchase **deferred** pending the 2026 NAND price
+> spike (NVMe hit ~$800/4 TB). Planned build is **4× 8 TB TLC** as a **separate
+> dedicated NVMe zpool** on `cirrus`, mounted via two dual-M.2 cards in the
+> board's two x8 PCIe slots (the x16 slots hold the GPUs). The steps below are
+> unchanged; they execute once the drives are in hand.
+
 Do **not** add the NVMe as general data vdevs to the SSD `tank`: ZFS stripes
 across all top-level vdevs (balanced by free space) and can't pin data to the
 fast vdev, so you'd get blended, unpredictable performance and couple the pool's
