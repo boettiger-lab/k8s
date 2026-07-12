@@ -22,9 +22,12 @@ helm upgrade -i dcgm-exporter gpu-helm-charts/dcgm-exporter \
 # smartctl_exporter — per-drive SMART metrics (privileged DaemonSet).
 kubectl apply -f smartctl-exporter.yaml
 
-# Drive-health dashboard (as-code; the Grafana sidecar auto-loads the
-# labelled ConfigMap, so applying it before/after Grafana both work).
-kubectl apply -f grafana-dashboard-smart.yaml
+# Dashboards (as-code; the Grafana sidecar auto-loads labelled ConfigMaps, so
+# applying before/after Grafana both work). Tuned to this cluster's metric
+# labels so they show data (community dashboards 1860/12239 do not — wrong job).
+kubectl apply -f grafana-dashboard-smart.yaml \
+              -f grafana-dashboard-node.yaml \
+              -f grafana-dashboard-gpu.yaml
 
 # Grafana admin credentials — created once, out of git, with a random password
 # (the chart's default is public/insecure and this is on a public ingress).

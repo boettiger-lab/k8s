@@ -1,0 +1,84 @@
+# Node host-health dashboard (as-code), auto-loaded by the Grafana sidecar.
+# Tuned to THIS cluster's labels: node-exporter is scraped by the
+# `kubernetes-service-endpoints` job (not the `node-exporter` job the community
+# dashboard 1860 assumes — which is why 1860 shows No Data here). Datasource uid
+# "prometheus" matches grafana-values.yaml. thelio only appears when it's Ready.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-node
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hosts"
+data:
+  node.json: |
+    {
+      "uid": "node-host-health",
+      "title": "Node Host Health",
+      "tags": ["node", "host"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [] },
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "id": 1, "type": "timeseries", "title": "CPU busy (%)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [ { "refId": "A", "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{instance}}" } ],
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 2, "type": "timeseries", "title": "Memory used (%)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [ { "refId": "A", "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100", "legendFormat": "{{instance}}" } ],
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 92 } ] } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 3, "type": "timeseries", "title": "Load average",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            { "refId": "A", "expr": "node_load1", "legendFormat": "{{instance}} 1m" },
+            { "refId": "B", "expr": "node_load5", "legendFormat": "{{instance}} 5m" },
+            { "refId": "C", "expr": "node_load15", "legendFormat": "{{instance}} 15m" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } }
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "Filesystem used (%) — real mounts",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [ { "refId": "A", "expr": "100 - (node_filesystem_avail_bytes{fstype=~\"ext4|xfs|zfs|btrfs\"} / node_filesystem_size_bytes{fstype=~\"ext4|xfs|zfs|btrfs\"} * 100)", "legendFormat": "{{instance}} {{mountpoint}}" } ],
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 90 } ] } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 5, "type": "stat", "title": "Root filesystem free",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+          "targets": [ { "refId": "A", "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"}", "legendFormat": "{{instance}} /" } ],
+          "fieldConfig": { "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 50000000000 }, { "color": "green", "value": 200000000000 } ] } }, "overrides": [] },
+          "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 6, "type": "timeseries", "title": "Network throughput (per NIC, excl. lo)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            { "refId": "A", "expr": "rate(node_network_receive_bytes_total{device!~\"lo|veth.*|cali.*|cilium.*|lxc.*|cni.*|flannel.*|docker.*|br-.*|tunl.*|dummy.*|kube.*\"}[5m])", "legendFormat": "{{instance}} {{device}} rx" },
+            { "refId": "B", "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|cali.*|cilium.*|lxc.*|cni.*|flannel.*|docker.*|br-.*|tunl.*|dummy.*|kube.*\"}[5m])", "legendFormat": "{{instance}} {{device}} tx" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } }
+        }
+      ]
+    }

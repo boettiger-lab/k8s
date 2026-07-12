@@ -60,20 +60,21 @@ the chart's insecure default — this is a public ingress). Retrieve it:
 - **Datasource** (Prometheus, uid `prometheus`) is provisioned as code in
   `grafana-values.yaml`.
 - **Dashboards as code:** any ConfigMap in `monitoring` labelled
-  `grafana_dashboard: "1"` is auto-loaded by the sidecar. `Drive Health (SMART)`
-  ships in `grafana-dashboard-smart.yaml`.
-- **Node dashboard:** import **Node Exporter Full** (gnetId `1860`) via the UI
-  (persists on the PVC); node-exporter runs on `:9101`.
-- **GPU dashboard:** import **NVIDIA DCGM** (gnetId `12239`); dcgm-exporter
-  already feeds Prometheus.
+  `grafana_dashboard: "1"` is auto-loaded by the sidecar. Three ship here, all
+  **tuned to this cluster's metric labels so they show data** — the community
+  dashboards 1860 (node) / 12239 (DCGM) assume different `job` labels and render
+  No Data:
+  - `grafana-dashboard-smart.yaml` — **Drive Health (SMART)**: NVMe wear %, temp,
+    spare, errors, SATA attributes.
+  - `grafana-dashboard-node.yaml` — **Node Host Health**: CPU, memory, load,
+    filesystem, physical-NIC network.
+  - `grafana-dashboard-gpu.yaml` — **GPU (DCGM)**: per-GPU util, power, temp,
+    framebuffer (aggregated `by (gpu, Hostname)` to collapse pod attribution).
+  - Default time range is `now-6h` (exporters are young; widen for long-term
+    wear trending). Add more by dropping another labelled ConfigMap.
 
-> **node-exporter on :9101 (not 9100).** armada-pulsar's own node-exporter runs
-> `hostNetwork:true` and owns host `:9100` on both nodes; a second one on 9100
-> goes Pending and fails `helm --wait`. Ours sits on 9101 — so there are two
-> node-exporters per host until armada's broken monitoring bundle is retired, at
-> which point ours can move back to 9100. (Prometheus scrapes ours via the
-> service endpoint on 9101; it also picks up armada's 9100, hence duplicate
-> `node_*` series distinguished by `instance`.)
+node-exporter runs on the standard `:9100`. (It was briefly on `:9101` to dodge
+armada-pulsar's node-exporter; armada was torn down 2026-07-11, freeing 9100.)
 
 ## Drive health (SMART)
 
