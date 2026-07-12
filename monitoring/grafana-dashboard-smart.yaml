@@ -1,0 +1,125 @@
+# Drive health dashboard (as-code) for Grafana, auto-loaded by the sidecar
+# (label grafana_dashboard: "1"). Uses smartctl_exporter metrics. Panels:
+# overall SMART status, NVMe endurance used %, temperature, NVMe available
+# spare vs threshold, and error counters (NVMe media errors + SATA
+# reallocated/pending sectors). Datasource uid "prometheus" matches
+# grafana-values.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-smart
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
+data:
+  smart.json: |
+    {
+      "uid": "smart-drive-health",
+      "title": "Drive Health (SMART)",
+      "tags": ["hardware", "smart", "storage"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-30d", "to": "now" },
+      "templating": { "list": [] },
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "SMART overall status (1 = PASS)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+          "targets": [
+            { "refId": "A", "expr": "smartctl_device_smart_status", "legendFormat": "{{device}} {{model_name}}" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "FAIL", "color": "red" }, "1": { "text": "PASS", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+            },
+            "overrides": []
+          },
+          "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "NVMe endurance used (%)",
+          "description": "Percentage of rated write endurance consumed. 100% = rated end-of-life (not sudden failure).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            { "refId": "A", "expr": "smartctl_device_percentage_used", "legendFormat": "{{device}} {{model_name}}" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "custom": { "drawStyle": "line", "fillOpacity": 10 },
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 90 } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Temperature (°C)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            { "refId": "A", "expr": "smartctl_device_temperature{temperature_type=\"current\"}", "legendFormat": "{{device}} {{model_name}}" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "custom": { "drawStyle": "line", "fillOpacity": 10 },
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 55 }, { "color": "red", "value": 65 } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "NVMe available spare (%) — alert if it nears threshold",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "targets": [
+            { "refId": "A", "expr": "smartctl_device_available_spare", "legendFormat": "{{device}} spare" },
+            { "refId": "B", "expr": "smartctl_device_available_spare_threshold", "legendFormat": "{{device}} threshold" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "percent", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 0 } },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Errors — NVMe media errors + SATA reallocated/pending sectors",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "targets": [
+            { "refId": "A", "expr": "smartctl_device_media_errors", "legendFormat": "{{device}} media errors" },
+            { "refId": "B", "expr": "smartctl_device_attribute{attribute_name=~\"Reallocated_Sector_Ct|Current_Pending_Sector\", attribute_value_type=\"raw\"}", "legendFormat": "{{device}} {{attribute_name}}" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "fillOpacity": 10 },
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } }
+        }
+      ]
+    }

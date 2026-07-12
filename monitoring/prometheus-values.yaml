@@ -1,13 +1,15 @@
-# Minimal Prometheus install for nimbus: just prometheus-server.
-# No Alertmanager, kube-state-metrics, node-exporter, or Pushgateway —
-# this cluster only needs Prometheus as a metrics store for dcgm-exporter
-# and vLLM's built-in /metrics endpoint.
+# Prometheus metrics store for dcgm-exporter, vLLM /metrics, smartctl-exporter,
+# and (host CPU/mem/disk/net) node-exporter.
+# Alertmanager, kube-state-metrics, Pushgateway stay off — not needed yet.
 alertmanager:
   enabled: false
 kube-state-metrics:
   enabled: false
+# node-exporter: ENABLED 2026-07-11 so Grafana can show node health/status
+# (Node Exporter Full, dashboard 1860). Was off when the stack only fed the
+# carbon dashboard. Flip back to false to revert to the minimal footprint.
 prometheus-node-exporter:
-  enabled: false
+  enabled: true
 prometheus-pushgateway:
   enabled: false
 

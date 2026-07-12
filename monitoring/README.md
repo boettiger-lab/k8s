@@ -1,9 +1,10 @@
 # monitoring
 
-Minimal Prometheus + dcgm-exporter stack that feeds GPU power and vLLM token
-metrics to a carbon/performance dashboard. The same charts + values apply to
-each cluster (they are cluster-agnostic); the carbon-api on top is configured
-per node.
+Prometheus-based stack. Originally just dcgm-exporter + vLLM `/metrics` feeding a
+carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
+(per-drive SMART), `node-exporter` (host CPU/mem/disk/net), and **Grafana** for
+drive-health/node/GPU dashboards. The charts + values are cluster-agnostic; the
+carbon-api on top is configured per node.
 
 - **nimbus** (single GB10): `nimbus-carbon-api` (see
   `boettiger-lab/nimbus-carbon-api` and
@@ -46,6 +47,42 @@ Prometheus URL in-cluster: `http://prometheus-server.monitoring.svc.cluster.loca
   Note: on GB10's unified-memory architecture, `DCGM_FI_DEV_FB_FREE` /
   `DCGM_FI_DEV_FB_USED` and memory-clock fields report `N/A` — expected,
   not a bug.
+
+## Grafana (drive health / node / GPU)
+
+Live at <https://grafana-cirrus.carlboettiger.info> (Traefik ingress + LE cert,
+external-dns). Login required (anonymous off). Admin creds live in the
+`grafana-admin` Secret, created by `install.sh` with a **random** password (not
+the chart's insecure default — this is a public ingress). Retrieve it:
+
+    kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+
+- **Datasource** (Prometheus, uid `prometheus`) is provisioned as code in
+  `grafana-values.yaml`.
+- **Dashboards as code:** any ConfigMap in `monitoring` labelled
+  `grafana_dashboard: "1"` is auto-loaded by the sidecar. `Drive Health (SMART)`
+  ships in `grafana-dashboard-smart.yaml`.
+- **Node / GPU dashboards:** import via the UI (they persist on the PVC) —
+  **Node Exporter Full** (gnetId `1860`) for host CPU/mem/disk, **NVIDIA DCGM**
+  (gnetId `12239`) for GPU. To keep them as-code instead, export the JSON and add
+  a labelled ConfigMap like the SMART one.
+
+## Drive health (SMART)
+
+`smartctl-exporter.yaml` — a **privileged** DaemonSet that runs `smartctl` on
+every node and exposes SMART metrics on `:9633` (scraped via pod annotations,
+same as dcgm-exporter). Complements host `smartd`: smartd alerts on *failures*,
+these metrics *trend the slow endurance climb* smartd can't see (e.g. cirrus root
+QLC ~70% used). Useful queries:
+
+- `smartctl_device_percentage_used` — NVMe endurance used (%).
+- `smartctl_device_available_spare` vs `_available_spare_threshold` — NVMe spare.
+- `smartctl_device_temperature{temperature_type="current"}` — temp (°C).
+- `smartctl_device_media_errors`, `smartctl_device_smart_status` (1 = PASS).
+
+`smartctl-exporter` needs `privileged: true` for raw device access — a deliberate
+tradeoff for a control-plane DaemonSet. `node-exporter` is enabled in
+`prometheus-values.yaml` (flip to `false` to revert to the minimal footprint).
 
 ## Carbon dashboard
 
