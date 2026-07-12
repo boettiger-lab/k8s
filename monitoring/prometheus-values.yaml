@@ -4,17 +4,11 @@ alertmanager:
   enabled: false
 kube-state-metrics:
   enabled: false
-# node-exporter: ON, but on :9101 (not the default :9100). The existing
-# armada-pulsar-prometheus-node-exporter runs hostNetwork:true and owns host
-# :9100 on cirrus + thelio; a second exporter on 9100 goes Pending and fails
-# `helm --wait` ("client rate limiter ... context deadline exceeded"). 9101
-# sidesteps the collision. Tradeoff: two node-exporters per host until armada's
-# broken monitoring bundle is retired, at which point ours can move back to 9100.
+# node-exporter: ON, on the standard :9100. (Was briefly on :9101 to avoid the
+# armada-pulsar node-exporter that owned :9100; armada was torn down 2026-07-11,
+# so :9100 is free again and ours uses the default.)
 prometheus-node-exporter:
   enabled: true
-  service:
-    port: 9101
-    targetPort: 9101
 prometheus-pushgateway:
   enabled: false
 

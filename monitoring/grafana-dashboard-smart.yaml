@@ -22,7 +22,7 @@ data:
       "timezone": "browser",
       "schemaVersion": 39,
       "refresh": "1m",
-      "time": { "from": "now-30d", "to": "now" },
+      "time": { "from": "now-6h", "to": "now" },
       "templating": { "list": [] },
       "annotations": { "list": [] },
       "panels": [

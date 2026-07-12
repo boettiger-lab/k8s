@@ -1,5 +1,18 @@
 # Armada Batch Scheduler
 
+> **STATUS: TORN DOWN 2026-07-11 (recipe kept for redeploy).** Armada was never
+> successfully running on this cluster — armada *core* (server/scheduler/executor/
+> lookout) was never deployed; only the dependencies were installed, and Pulsar
+> itself was broken (bookie/broker crashlooping, and a `helm uninstall` had hung
+> on a bitnami-image cleanup hook, leaving the release stuck `uninstalling`).
+> Likely broke when `thelio` joined the cluster and took over scheduling
+> unsuccessfully, then got cordoned. We removed it all: `helm uninstall`
+> pulsar/postgresql/redis, deleted dex, the VictoriaMetrics CRs/CRDs (their
+> operator's finalizers had to be stripped by hand), and the `armada`/`armada-jobs`
+> namespaces. **To redeploy cleanly later:** `cd armada/ && bash install.sh`
+> (pulsar-values.yaml already has monitoring + autoRecovery disabled). Root-cause
+> the Pulsar bookie/broker crashloop as part of that effort.
+
 [Armada](https://armadaproject.io/) is a CNCF sandbox project for high-throughput batch job scheduling across Kubernetes clusters. It provides fair-share queuing, gang scheduling, and a web UI (Lookout) for job monitoring.
 
 ## Architecture
