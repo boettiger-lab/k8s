@@ -43,7 +43,9 @@ id_ed25519_sk
 # Hugo local artifacts
 hugo_extended_*.tar.gz
 
-# Local-only ops/maintenance journal (drive serials, host topology, security posture)
+# Guard: ops/maintenance journals live in the separate PRIVATE boettiger-lab/cluster-ops
+# repo, NOT here (this repo is public config only). This rule stays as a safety net so
+# ops content (drive serials, host topology, security posture) can never be committed here.
 /ops/
 
 # Local git worktrees
