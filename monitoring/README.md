@@ -2,9 +2,9 @@
 
 Prometheus-based stack. Originally just dcgm-exporter + vLLM `/metrics` feeding a
 carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
-(per-drive SMART), `node-exporter` (host CPU/mem/disk/net), and **Grafana** for
-drive-health/node/GPU dashboards. The charts + values are cluster-agnostic; the
-carbon-api on top is configured per node.
+(per-drive SMART) and **Grafana** for drive-health + GPU dashboards. (node-exporter
+stays off — hostPort 9100 conflict with armada's; see below.) The charts + values
+are cluster-agnostic; the carbon-api on top is configured per node.
 
 - **nimbus** (single GB10): `nimbus-carbon-api` (see
   `boettiger-lab/nimbus-carbon-api` and
@@ -62,10 +62,13 @@ the chart's insecure default — this is a public ingress). Retrieve it:
 - **Dashboards as code:** any ConfigMap in `monitoring` labelled
   `grafana_dashboard: "1"` is auto-loaded by the sidecar. `Drive Health (SMART)`
   ships in `grafana-dashboard-smart.yaml`.
-- **Node / GPU dashboards:** import via the UI (they persist on the PVC) —
-  **Node Exporter Full** (gnetId `1860`) for host CPU/mem/disk, **NVIDIA DCGM**
-  (gnetId `12239`) for GPU. To keep them as-code instead, export the JSON and add
-  a labelled ConfigMap like the SMART one.
+- **GPU dashboard:** import **NVIDIA DCGM** (gnetId `12239`) via the UI (persists
+  on the PVC); dcgm-exporter already feeds Prometheus.
+- **Node host-metrics: not wired up yet.** node-exporter is disabled here because
+  armada-pulsar's node-exporter already owns hostPort 9100 on both nodes (see
+  `prometheus-values.yaml`). Until that's resolved (retire armada's / alternate
+  port / scrape armada's), **Node Exporter Full (1860) will be empty** — don't
+  import it expecting data.
 
 ## Drive health (SMART)
 
@@ -81,8 +84,7 @@ QLC ~70% used). Useful queries:
 - `smartctl_device_media_errors`, `smartctl_device_smart_status` (1 = PASS).
 
 `smartctl-exporter` needs `privileged: true` for raw device access — a deliberate
-tradeoff for a control-plane DaemonSet. `node-exporter` is enabled in
-`prometheus-values.yaml` (flip to `false` to revert to the minimal footprint).
+tradeoff for a control-plane DaemonSet.
 
 ## Carbon dashboard
 

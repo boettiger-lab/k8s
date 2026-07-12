@@ -1,15 +1,18 @@
-# Prometheus metrics store for dcgm-exporter, vLLM /metrics, smartctl-exporter,
-# and (host CPU/mem/disk/net) node-exporter.
+# Prometheus metrics store for dcgm-exporter, vLLM /metrics, and smartctl-exporter.
 # Alertmanager, kube-state-metrics, Pushgateway stay off — not needed yet.
 alertmanager:
   enabled: false
 kube-state-metrics:
   enabled: false
-# node-exporter: ENABLED 2026-07-11 so Grafana can show node health/status
-# (Node Exporter Full, dashboard 1860). Was off when the stack only fed the
-# carbon dashboard. Flip back to false to revert to the minimal footprint.
+# node-exporter: OFF. Enabling it here collides with the existing
+# armada-pulsar-prometheus-node-exporter DaemonSet, which already binds hostPort
+# 9100 on cirrus + thelio → our pods go Pending and `helm --wait` times out
+# ("client rate limiter ... context deadline exceeded"). Node host-metrics is a
+# follow-up: either retire the armada exporter and reclaim 9100, run ours on an
+# alternate port, or scrape armada's. SMART (smartctl-exporter) + GPU (dcgm) do
+# not need this.
 prometheus-node-exporter:
-  enabled: true
+  enabled: false
 prometheus-pushgateway:
   enabled: false
 
