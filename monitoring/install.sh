@@ -25,7 +25,8 @@ kubectl apply -f smartctl-exporter.yaml
 # Dashboards (as-code; the Grafana sidecar auto-loads labelled ConfigMaps, so
 # applying before/after Grafana both work). Tuned to this cluster's metric
 # labels so they show data (community dashboards 1860/12239 do not — wrong job).
-kubectl apply -f grafana-dashboard-smart.yaml \
+kubectl apply -f grafana-dashboard-cluster.yaml \
+              -f grafana-dashboard-smart.yaml \
               -f grafana-dashboard-node.yaml \
               -f grafana-dashboard-gpu.yaml
 

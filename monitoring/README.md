@@ -64,6 +64,9 @@ the chart's insecure default — this is a public ingress). Retrieve it:
   **tuned to this cluster's metric labels so they show data** — the community
   dashboards 1860 (node) / 12239 (DCGM) assume different `job` labels and render
   No Data:
+  - `grafana-dashboard-cluster.yaml` — **Cluster Nodes**: per-node UP/DOWN via
+    `up{job="kubernetes-nodes"}` (stays red when a node is unreachable, unlike
+    node-exporter metrics that just vanish) + up/down history.
   - `grafana-dashboard-smart.yaml` — **Drive Health (SMART)**: NVMe wear %, temp,
     spare, errors, SATA attributes.
   - `grafana-dashboard-node.yaml` — **Node Host Health**: CPU, memory, load,
