@@ -4,15 +4,17 @@ alertmanager:
   enabled: false
 kube-state-metrics:
   enabled: false
-# node-exporter: OFF. Enabling it here collides with the existing
-# armada-pulsar-prometheus-node-exporter DaemonSet, which already binds hostPort
-# 9100 on cirrus + thelio → our pods go Pending and `helm --wait` times out
-# ("client rate limiter ... context deadline exceeded"). Node host-metrics is a
-# follow-up: either retire the armada exporter and reclaim 9100, run ours on an
-# alternate port, or scrape armada's. SMART (smartctl-exporter) + GPU (dcgm) do
-# not need this.
+# node-exporter: ON, but on :9101 (not the default :9100). The existing
+# armada-pulsar-prometheus-node-exporter runs hostNetwork:true and owns host
+# :9100 on cirrus + thelio; a second exporter on 9100 goes Pending and fails
+# `helm --wait` ("client rate limiter ... context deadline exceeded"). 9101
+# sidesteps the collision. Tradeoff: two node-exporters per host until armada's
+# broken monitoring bundle is retired, at which point ours can move back to 9100.
 prometheus-node-exporter:
-  enabled: false
+  enabled: true
+  service:
+    port: 9101
+    targetPort: 9101
 prometheus-pushgateway:
   enabled: false
 

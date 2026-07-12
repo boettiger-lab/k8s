@@ -2,9 +2,9 @@
 
 Prometheus-based stack. Originally just dcgm-exporter + vLLM `/metrics` feeding a
 carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
-(per-drive SMART) and **Grafana** for drive-health + GPU dashboards. (node-exporter
-stays off — hostPort 9100 conflict with armada's; see below.) The charts + values
-are cluster-agnostic; the carbon-api on top is configured per node.
+(per-drive SMART), `node-exporter` (host CPU/mem/disk, on `:9101` to dodge
+armada's `:9100`), and **Grafana** for drive-health / node / GPU dashboards. The
+charts + values are cluster-agnostic; the carbon-api on top is configured per node.
 
 - **nimbus** (single GB10): `nimbus-carbon-api` (see
   `boettiger-lab/nimbus-carbon-api` and
@@ -62,13 +62,18 @@ the chart's insecure default — this is a public ingress). Retrieve it:
 - **Dashboards as code:** any ConfigMap in `monitoring` labelled
   `grafana_dashboard: "1"` is auto-loaded by the sidecar. `Drive Health (SMART)`
   ships in `grafana-dashboard-smart.yaml`.
-- **GPU dashboard:** import **NVIDIA DCGM** (gnetId `12239`) via the UI (persists
-  on the PVC); dcgm-exporter already feeds Prometheus.
-- **Node host-metrics: not wired up yet.** node-exporter is disabled here because
-  armada-pulsar's node-exporter already owns hostPort 9100 on both nodes (see
-  `prometheus-values.yaml`). Until that's resolved (retire armada's / alternate
-  port / scrape armada's), **Node Exporter Full (1860) will be empty** — don't
-  import it expecting data.
+- **Node dashboard:** import **Node Exporter Full** (gnetId `1860`) via the UI
+  (persists on the PVC); node-exporter runs on `:9101`.
+- **GPU dashboard:** import **NVIDIA DCGM** (gnetId `12239`); dcgm-exporter
+  already feeds Prometheus.
+
+> **node-exporter on :9101 (not 9100).** armada-pulsar's own node-exporter runs
+> `hostNetwork:true` and owns host `:9100` on both nodes; a second one on 9100
+> goes Pending and fails `helm --wait`. Ours sits on 9101 — so there are two
+> node-exporters per host until armada's broken monitoring bundle is retired, at
+> which point ours can move back to 9100. (Prometheus scrapes ours via the
+> service endpoint on 9101; it also picks up armada's 9100, hence duplicate
+> `node_*` series distinguished by `instance`.)
 
 ## Drive health (SMART)
 
