@@ -47,12 +47,14 @@ spec:
               key: api-key
         - name: OMP_NUM_THREADS
           value: "4"
-        # DEBUG-level logging on top of --enable-log-requests/--enable-log-outputs
-        # (below) makes vLLM log actual prompt/output text, not just request
-        # metadata. Temporary: added 2026-07-06 to debug reports of inconsistent
-        # tool-call/reasoning behavior. Drop once root-caused.
+        # Was DEBUG (added 2026-07-06 to chase inconsistent tool-call/reasoning
+        # behavior, see qwen-deployment-notes.md) — that bug is root-caused
+        # (upstream vLLM #43713) and not recurring, and DEBUG volume was drowning
+        # `kubectl logs` (only ~1min of history retrievable). Back to INFO.
+        # --enable-log-requests/--enable-log-outputs (below) still give per-request
+        # prompt/output visibility without the per-token op-priority spam.
         - name: VLLM_LOGGING_LEVEL
-          value: DEBUG
+          value: INFO
         # Belt-and-suspenders with --moe-backend marlin: the FlashInfer FP4 MoE path
         # crashes NVFP4 MoE on GB10/SM121 (FlashInfer #2776, cudaErrorIllegalAddress).
         # This checkpoint's mlp.experts are W4A16_NVFP4, so that path MUST be avoided.
