@@ -1,0 +1,78 @@
+# NOTE: assumes cert-manager (letsencrypt-production ClusterIssuer) and
+# external-dns (Cloudflare, carlboettiger.info zone) are configured on cirrus.
+# external-dns provisions the A record from spec.rules.host; cert-manager mints
+# the TLS cert into titiler-tls. See ../../{traefik,cert-manager,external-dns}.
+#
+# On NRP the CORS policy and timeouts are HAProxy ingress annotations
+# (boettiger-lab/nautilus/titiler/ingress.yaml); Traefik expresses the same
+# behaviour as first-class CRDs referenced from the ingress.
+---
+# CORS — mirrors the NRP cors-* annotations. Range must be allowed: browsers
+# reading COGs through titiler issue ranged GETs.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: titiler-cors
+  namespace: titiler
+spec:
+  headers:
+    accessControlAllowMethods:
+      - GET
+      - POST
+      - OPTIONS
+    accessControlAllowHeaders:
+      - DNT
+      - User-Agent
+      - X-Requested-With
+      - If-Modified-Since
+      - Cache-Control
+      - Content-Type
+      - Range
+    accessControlAllowOriginList:
+      - "*"
+    # Tiles are stable, so preflights cache for an hour.
+    accessControlMaxAge: 3600
+    addVaryHeader: true
+---
+# Traefik equivalent of NRP's timeout-server: 300s. A cold COG on a large
+# overview can take a while to assemble the first tile.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: titiler-long-timeout
+  namespace: titiler
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    idleConnTimeout: 300s
+    readIdleTimeout: 300s
+    responseHeaderTimeout: 300s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: titiler
+  namespace: titiler
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    # <namespace>-<name>@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: titiler-titiler-cors@kubernetescrd
+    traefik.ingress.kubernetes.io/service.servertransport: titiler-titiler-long-timeout@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: titiler.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: titiler
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - titiler.carlboettiger.info
+    secretName: titiler-tls

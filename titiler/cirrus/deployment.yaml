@@ -1,0 +1,100 @@
+# TiTiler (dynamic COG tile server) on the local k3s cluster (cirrus).
+#
+# Derived from the NRP recipe in boettiger-lab/nautilus/titiler/deployment.yaml,
+# scaled down for the shared cirrus node. NRP runs 3 replicas at 6 CPU / 24Gi
+# requested (12 / 40Gi limit); cirrus's 128 CPU / ~251Gi is shared with vllm,
+# duckdb-mcp, gpu-mcp and JupyterHub, and memory *requests* on the node are
+# already ~84% committed — so requests here are deliberately tiny and the
+# generous headroom lives in the limits instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: titiler
+  namespace: titiler
+  labels:
+    k8s-app: titiler
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      k8s-app: titiler
+  template:
+    metadata:
+      labels:
+        k8s-app: titiler
+    spec:
+      # Pin to cirrus: thelio is NotReady/SchedulingDisabled, and MinIO (the
+      # source of most COGs) plus Traefik both live on cirrus.
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+      - name: titiler
+        image: ghcr.io/developmentseed/titiler:0.24.2
+        imagePullPolicy: Always
+        command: ["uvicorn"]
+        args: [
+          "titiler.application.main:app",
+          "--host", "0.0.0.0",
+          "--port", "8000",
+          "--workers", "2"
+        ]
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 4
+            memory: 8Gi
+        env:
+        - name: CPL_TMPDIR
+          value: "/tmp"
+        # 512 MB per worker (vs 2000 on NRP): 2 workers x 512Mi of GDAL block
+        # cache has to fit well inside the 8Gi limit alongside Python itself.
+        - name: GDAL_CACHEMAX
+          value: "512" # 512 mb
+        - name: VSI_CACHE
+          value: "TRUE"
+        - name: VSI_CACHE_SIZE
+          value: "50000000" # 50 MB (per file-handle)
+        - name: GDAL_DISABLE_READDIR_ON_OPEN
+          value: "EMPTY_DIR"
+        - name: GDAL_HTTP_MERGE_CONSECUTIVE_RANGES
+          value: "YES"
+        - name: PYTHONWARNINGS
+          value: "ignore"
+        # Must match --workers above; uvicorn reads WEB_CONCURRENCY too and a
+        # mismatch silently changes the process count the memory limit was sized for.
+        - name: WEB_CONCURRENCY
+          value: "2"
+        # Trust Traefik's X-Forwarded-Proto. uvicorn honours proxy headers only
+        # from --forwarded-allow-ips, which defaults to 127.0.0.1 — so without
+        # this, headers from the Traefik pod IP are ignored and titiler
+        # advertises its own URLs as http:// in tilejson.json, which a browser
+        # on an https page blocks as mixed content. Safe to wildcard: the
+        # service is ClusterIP and only reachable via Traefik.
+        - name: FORWARDED_ALLOW_IPS
+          value: "*"
+        - name: GDAL_HTTP_MAX_RETRY
+          value: "3"
+        - name: GDAL_HTTP_RETRY_DELAY
+          value: "1"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
