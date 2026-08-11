@@ -9,11 +9,81 @@ kube-state-metrics:
 # so :9100 is free again and ours uses the default.)
 prometheus-node-exporter:
   enabled: true
+  # CARDINALITY GUARD. Without these the filesystem collector reports every
+  # kubelet pod-volume bind mount and every containerd sandbox /shm — 325k
+  # distinct `mountpoint` values on cirrus alone (230k under
+  # /var/lib/kubelet/pods, 95k under /run/k3s/containerd), each × ~8
+  # node_filesystem_* metrics, and every one of them churns to a brand-new
+  # series when a pod restarts. Millions of head series on its own.
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s/containerd/.+|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+|var/lib/rancher/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
 prometheus-pushgateway:
   enabled: false
 
 server:
   retention: "15d"
+  # Second brake: never let the TSDB fill the volume. A full /data stops
+  # compaction, which pins everything in the head — that is how RAM ran away.
+  retentionSize: "40GB"
   persistentVolume:
     storageClass: openebs-zfs
-    size: 5Gi
+    size: 100Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      memory: 8Gi
+
+# ---------------------------------------------------------------------------
+# Scrape jobs. The chart exposes its defaults as a map keyed by job name, so
+# these entries patch/disable individual jobs rather than restating the list.
+#
+# The stock kubernetes-nodes / kubernetes-nodes-cadvisor jobs do
+# `labelmap __meta_kubernetes_node_label_(.+)`, which stamps all 127 node
+# labels — including 88 NFD feature.node.kubernetes.io/* labels — onto every
+# series from those jobs. Prometheus reported 0.5–1.3 GB of label memory *per
+# NFD label*. Both jobs below set an explicit `node` label instead.
+# ---------------------------------------------------------------------------
+scrapeConfigs:
+  # Nothing in this cluster sets the prometheus.io/scrape_slow annotation, and
+  # there is no blackbox-exporter behind kubernetes-services. All had 0 targets.
+  kubernetes-pods-slow:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  kubernetes-services:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+
+  kubernetes-nodes:
+    relabel_configs:
+      - action: replace
+        source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+
+  # cAdvisor raw output is ~2M series here (container_tasks_state,
+  # container_memory_failures_total, and a per-cgroup `id`/`name` label pair for
+  # every systemd slice on the box). No dashboard in this repo reads container_*,
+  # so keep a small allowlist for ad-hoc per-pod queries and drop the rest.
+  kubernetes-nodes-cadvisor:
+    relabel_configs:
+      - action: replace
+        source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+    metric_relabel_configs:
+      - action: keep
+        regex: container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss|network_(receive|transmit)_bytes_total|fs_(reads|writes)_bytes_total)
+        source_labels: [__name__]
+      # Node-level cgroups (systemd slices, kubepods roots) carry no container
+      # label and are not worth a series each.
+      - action: drop
+        regex: ""
+        source_labels: [container]
+      # `id` (cgroup path) and `name` (runtime container name) are the two
+      # highest-cardinality labels cAdvisor emits — ~193k and ~74k distinct
+      # values — and both are redundant with namespace/pod/container.
+      - action: labeldrop
+        regex: (id|name)
