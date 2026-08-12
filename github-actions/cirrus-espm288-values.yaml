@@ -1,73 +1,48 @@
 githubConfigUrl: "https://github.com/espm-288"
+# Consolidated onto the single github-runner-token secret — see the note in
+# cirrus-espm157-values.yaml.
 githubConfigSecret: github-runner-token
 maxRunners: 2
 runnerGroup: "default"
 
-## Container mode is an object that provides out-of-box configuration
-## for dind and kubernetes mode. Template will be modified as documented under the
-## template object.
-##
-## If any customization is required for dind or kubernetes mode, containerMode should remain
-## empty, and configuration should be applied to the template.
-#containerMode:
-#  type: "dind"  ## type can be set to dind or kubernetes
-## template is the PodSpec for each runner Pod
-## For reference: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#PodSpec
+# containerMode: kubernetes — replaces the previous privileged docker:dind
+# template, which gave any student workflow a path to root on cirrus (the
+# cluster's only node and its control plane).
+#
+# TRADE-OFF: kubernetes mode sets ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true, so
+# every job here MUST declare `container:`, and `options:` is unsupported.
+# Lowest-risk of the three sets to convert: no espm-288 template repo references
+# this runner, and it ran zero self-hosted jobs in the three months to
+# 2026-08-12. See cirrus-espm-hook-template.yaml for resource/user settings.
+containerMode:
+  type: "kubernetes"
+  kubernetesModeWorkVolumeClaim:
+    # MUST be RWX — runner pod and job pod both mount _work.
+    accessModes: ["ReadWriteMany"]
+    storageClassName: "juicefs-sc"
+    resources:
+      requests:
+        storage: 20Gi
+
 template:
-  ## template.spec will be modified if you change the container mode
-  ## with containerMode.type=dind, we will populate the template.spec with following pod spec
-     spec:
-       initContainers:
-       - name: init-dind-externals
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-         volumeMounts:
-           - name: dind-externals
-             mountPath: /home/runner/tmpDir
-       containers:
-       - name: runner
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["/home/runner/run.sh"]
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "5Gi"
-         env:
-           - name: DOCKER_HOST
-             value: unix:///var/run/docker.sock
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-       - name: dind
-         image: docker:dind
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "5Gi"
-         args:
-           - dockerd
-           - --host=unix:///var/run/docker.sock
-           - --group=$(DOCKER_GROUP_GID)
-         env:
-           - name: DOCKER_GROUP_GID
-             value: "123"
-         securityContext:
-           privileged: true
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-           - name: dind-externals
-             mountPath: /home/runner/externals
-       volumes:
-       - name: work
-         emptyDir: {}
-       - name: dind-sock
-         emptyDir: {}
-       - name: dind-externals
-         emptyDir: {}
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+            value: /home/runner/pod-templates/default.yaml
+        volumeMounts:
+          - name: pod-templates
+            mountPath: /home/runner/pod-templates
+            readOnly: true
+        resources:
+          requests:
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+    volumes:
+      - name: pod-templates
+        configMap:
+          name: espm-hook-template

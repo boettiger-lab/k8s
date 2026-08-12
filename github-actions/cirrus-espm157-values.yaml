@@ -1,73 +1,58 @@
 githubConfigUrl: "https://github.com/espm-157"
+# Consolidated onto the single github-runner-token secret. Live state had
+# drifted to a chart-generated arc-runner-espm157-gha-rs-github-secret while
+# this file still said github-runner-token, so a helm upgrade from here would
+# have silently repointed it. All sets now share one secret: one thing to
+# rotate, and no chance of a stale copy going unnoticed the next time the PAT
+# expires (which is what caused the 2026-07-19 outage).
 githubConfigSecret: github-runner-token
 maxRunners: 2
 runnerGroup: "default"
 
-## Container mode is an object that provides out-of-box configuration
-## for dind and kubernetes mode. Template will be modified as documented under the
-## template object.
-##
-## If any customization is required for dind or kubernetes mode, containerMode should remain
-## empty, and configuration should be applied to the template.
-#containerMode:
-#  type: "dind"  ## type can be set to dind or kubernetes
-## template is the PodSpec for each runner Pod
-## For reference: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#PodSpec
+# containerMode: kubernetes — replaces the previous privileged docker:dind
+# template. Under dind, any student workflow landing on this runner could drive
+# a privileged Docker socket and become root on cirrus, which is the cluster's
+# only node and its control plane. That is a particularly bad property for a
+# runner that executes coursework from student-owned repositories.
+#
+# TRADE-OFF, read before reusing: kubernetes mode sets
+# ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true, so every job on this runner MUST
+# declare `container:`. Existing student repos that just do
+# `runs-on: arc-runner-espm157` with no container will fail here. That is
+# accepted: the course templates are being updated so new repos comply, and
+# older repos are not active. `options:` is also unsupported — see
+# cirrus-espm-hook-template.yaml, which is where resource/user settings live.
+containerMode:
+  type: "kubernetes"
+  kubernetesModeWorkVolumeClaim:
+    # MUST be RWX — runner pod and job pod both mount _work.
+    accessModes: ["ReadWriteMany"]
+    storageClassName: "juicefs-sc"
+    resources:
+      requests:
+        storage: 20Gi
+
 template:
-  ## template.spec will be modified if you change the container mode
-  ## with containerMode.type=dind, we will populate the template.spec with following pod spec
-     spec:
-       initContainers:
-       - name: init-dind-externals
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-         volumeMounts:
-           - name: dind-externals
-             mountPath: /home/runner/tmpDir
-       containers:
-       - name: runner
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["/home/runner/run.sh"]
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "5Gi"
-         env:
-           - name: DOCKER_HOST
-             value: unix:///var/run/docker.sock
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-       - name: dind
-         image: docker:dind
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "5Gi"
-         args:
-           - dockerd
-           - --host=unix:///var/run/docker.sock
-           - --group=$(DOCKER_GROUP_GID)
-         env:
-           - name: DOCKER_GROUP_GID
-             value: "123"
-         securityContext:
-           privileged: true
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-           - name: dind-externals
-             mountPath: /home/runner/externals
-       volumes:
-       - name: work
-         emptyDir: {}
-       - name: dind-sock
-         emptyDir: {}
-       - name: dind-externals
-         emptyDir: {}
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+            value: /home/runner/pod-templates/default.yaml
+        volumeMounts:
+          - name: pod-templates
+            mountPath: /home/runner/pod-templates
+            readOnly: true
+        resources:
+          requests:
+            memory: 512Mi
+          limits:
+            # Orchestration only; the student code runs in the job pod, capped
+            # separately in the hook template.
+            memory: 2Gi
+    volumes:
+      - name: pod-templates
+        configMap:
+          name: espm-hook-template
