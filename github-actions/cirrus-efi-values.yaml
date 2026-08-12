@@ -1,6 +1,6 @@
 githubConfigUrl: "https://github.com/eco4cast"
 githubConfigSecret: github-runner-token
-# 2, not 1: this scale set now serves BOTH eco4cast/usgsrc4cast-ci and
+# 2, not 1: this scale set serves BOTH eco4cast/usgsrc4cast-ci and
 # eco4cast/neon4cast-ci, after the redundant arc-runner-eco4cast set was
 # consolidated into it. Those two repos both fire a job at 23:00 UTC
 # (usgsrc4cast drivers_stage1 and neon4cast drivers_stage3), which used to run
@@ -9,71 +9,55 @@ githubConfigSecret: github-runner-token
 maxRunners: 2
 runnerGroup: "default"
 
-## Container mode is an object that provides out-of-box configuration
-## for dind and kubernetes mode. Template will be modified as documented under the
-## template object.
-##
-## If any customization is required for dind or kubernetes mode, containerMode should remain
-## empty, and configuration should be applied to the template.
-#containerMode:
-#  type: "dind"  ## type can be set to dind or kubernetes
-## template is the PodSpec for each runner Pod
-## For reference: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#PodSpec
+# containerMode: kubernetes — job containers run as sibling PODS, created by
+# actions/runner-container-hooks, instead of by a Docker daemon inside the runner.
+#
+# This replaces the previous hand-written dind template, which ran
+# `docker:dind` with securityContext.privileged: true and shared /var/run with
+# the runner container. That gave every workflow job a privileged Docker socket,
+# i.e. a straight path to root on cirrus — which since thelio was decommissioned
+# is the cluster's only node and its control plane. Removing dind closes that.
+#
+# Constraints this imposes on the workflows (all five current jobs comply):
+#   - every job on this runner MUST specify `container:` (jobs without one fail)
+#   - `options:` is NOT supported — see cirrus-efi-hook-template.yaml, which is
+#     where the old --memory/--user settings moved to
+#   - no docker CLI in steps, and no building container actions from a Dockerfile
+# ref https://github.com/actions/runner-container-hooks/blob/main/packages/k8s/README.md
+containerMode:
+  type: "kubernetes"
+  kubernetesModeWorkVolumeClaim:
+    # MUST be RWX: the runner pod and each job pod both mount _work.
+    # juicefs-sc is the only RWX class here — openebs-zfs is node-local RWO.
+    accessModes: ["ReadWriteMany"]
+    storageClassName: "juicefs-sc"
+    resources:
+      requests:
+        storage: 100Gi
+
 template:
-  ## template.spec will be modified if you change the container mode
-  ## with containerMode.type=dind, we will populate the template.spec with following pod spec
-     spec:
-       initContainers:
-       - name: init-dind-externals
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-         volumeMounts:
-           - name: dind-externals
-             mountPath: /home/runner/tmpDir
-       containers:
-       - name: runner
-         image: ghcr.io/actions/actions-runner:latest
-         command: ["/home/runner/run.sh"]
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "40Gi"
-         env:
-           - name: DOCKER_HOST
-             value: unix:///var/run/docker.sock
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-       - name: dind
-         image: docker:dind
-         resources: 
-           requests:
-             memory: "1Gi"
-           limits:
-             memory: "40Gi"
-         args:
-           - dockerd
-           - --host=unix:///var/run/docker.sock
-           - --group=$(DOCKER_GROUP_GID)
-         env:
-           - name: DOCKER_GROUP_GID
-             value: "123"
-         securityContext:
-           privileged: true
-         volumeMounts:
-           - name: work
-             mountPath: /home/runner/_work
-           - name: dind-sock
-             mountPath: /var/run
-           - name: dind-externals
-             mountPath: /home/runner/externals
-       volumes:
-       - name: work
-         emptyDir: {}
-       - name: dind-sock
-         emptyDir: {}
-       - name: dind-externals
-         emptyDir: {}
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          # Points the hooks at the merged job-pod spec (the ConfigMap).
+          - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+            value: /home/runner/pod-templates/default.yaml
+        volumeMounts:
+          - name: pod-templates
+            mountPath: /home/runner/pod-templates
+            readOnly: true
+        resources:
+          requests:
+            memory: 1Gi
+          limits:
+            # The runner container only orchestrates now — the heavy R work
+            # happens in the job pod, which is capped separately in the hook
+            # template. It no longer needs the old 40Gi ceiling.
+            memory: 4Gi
+    volumes:
+      - name: pod-templates
+        configMap:
+          name: efi-cirrus-hook-template
