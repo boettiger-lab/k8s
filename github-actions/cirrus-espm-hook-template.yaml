@@ -1,0 +1,45 @@
+# Hook pod template shared by the espm-157 and espm-288 runner scale sets
+# (containerMode: kubernetes). See cirrus-efi-hook-template.yaml for the full
+# explanation of how these extensions work; the short version is that `$job`
+# (CONTAINER_EXTENSION_PREFIX "$" + JOB_CONTAINER_NAME "job") targets the
+# workflow's job container, and resources/securityContext are overwritten while
+# name/image are protected.
+#
+# One ConfigMap serves both sets: they are in the same namespace and want the
+# same policy. Student coursework is far lighter than the eco4cast forecast
+# jobs, hence the smaller ceiling than efi-cirrus's 45Gi.
+#
+# Deliberately no `capabilities: drop: [ALL]` — that revokes CAP_DAC_OVERRIDE,
+# and a uid-0 job container then cannot write to _work/_temp (owned by the
+# runner's uid 1001). It fails every job at the first action with EACCES.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: espm-hook-template
+  namespace: arc-runners
+data:
+  default.yaml: |
+    apiVersion: v1
+    kind: PodTemplate
+    metadata:
+      name: espm-job-pod
+    spec:
+      # The kube-mode ServiceAccount holds secrets get/list in arc-runners,
+      # which is where the GitHub PAT lives. Workflow steps run in THIS pod, so
+      # refuse the token projection — this matters more here than for eco4cast,
+      # because these runners execute student-authored code.
+      automountServiceAccountToken: false
+      containers:
+        - name: $job
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 250m
+            limits:
+              # Caps a runaway student job. Two concurrent runners per set,
+              # three sets, so the worst case stays well inside cirrus's RAM.
+              memory: 8Gi
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            privileged: false
