@@ -1,6 +1,12 @@
 githubConfigUrl: "https://github.com/eco4cast"
 githubConfigSecret: github-runner-token
-maxRunners: 1
+# 2, not 1: this scale set now serves BOTH eco4cast/usgsrc4cast-ci and
+# eco4cast/neon4cast-ci, after the redundant arc-runner-eco4cast set was
+# consolidated into it. Those two repos both fire a job at 23:00 UTC
+# (usgsrc4cast drivers_stage1 and neon4cast drivers_stage3), which used to run
+# concurrently on two separate scale sets. maxRunners: 2 keeps that concurrency
+# identical — do not drop it back to 1 or the 23:00 jobs will serialize.
+maxRunners: 2
 runnerGroup: "default"
 
 ## Container mode is an object that provides out-of-box configuration
