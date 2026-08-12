@@ -1,0 +1,62 @@
+# Hook pod template for the efi-cirrus runner scale set (containerMode: kubernetes).
+#
+# Under kubernetes mode, each workflow `container:` runs as its own pod, created
+# by actions/runner-container-hooks rather than by a Docker daemon. This file is
+# the hook's "extension": it is merged into the generated job pod, and is where
+# the settings that used to live in the workflows' `options:` field now live.
+#
+# `$job` is not a placeholder we invented — the hooks target the job container by
+# the literal name CONTAINER_EXTENSION_PREFIX ("$") + JOB_CONTAINER_NAME ("job").
+# The merge protects `name` and `image` (a template cannot swap the workflow's
+# image) but OVERWRITES `resources` and `securityContext`, which is precisely
+# what we want here.
+#
+# Replaces, for every job on this scale set:
+#   options: --memory 45g   ->  resources.limits.memory (neon4cast-ci)
+#   options: --memory 40g   ->  resources.limits.memory (usgsrc4cast-ci)
+#   options: --user root    ->  securityContext.runAsUser: 0  (scoring.yaml)
+#
+# NOTE this template is per-scale-set, not per-workflow, so the old 45g/40g split
+# collapses to a single ceiling. 45Gi is used (the higher of the two) to match
+# the limit the neon4cast-ci README calls out as important. This is a stricter
+# guarantee than the old Docker flag: `--memory` was invisible to the scheduler,
+# whereas a pod limit is both enforced by the kubelet and accounted for when
+# placing the pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: efi-cirrus-hook-template
+  namespace: arc-runners
+data:
+  default.yaml: |
+    apiVersion: v1
+    kind: PodTemplate
+    metadata:
+      name: efi-cirrus-job-pod
+    spec:
+      # The kube-mode ServiceAccount the chart generates holds
+      # secrets: [get, list, create, delete] in arc-runners — the namespace that
+      # also holds github-runner-token (the PAT). Workflow steps execute in THIS
+      # pod, so denying the token projection here stops a job from using that
+      # RBAC to read the PAT via the API server. The runner container keeps its
+      # token; it is the one that legitimately needs to create job pods.
+      automountServiceAccountToken: false
+      containers:
+        - name: $job
+          resources:
+            requests:
+              # Keep the request small so two runners can always be scheduled;
+              # the limit is the real guard against a runaway R process.
+              memory: 2Gi
+              cpu: 500m
+            limits:
+              memory: 45Gi
+          securityContext:
+            # rocker images expect root; scoring.yaml used `options: --user root`
+            # explicitly. Allowed under PodSecurity "baseline" (only "restricted"
+            # forbids running as root), which is the level this namespace uses.
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
