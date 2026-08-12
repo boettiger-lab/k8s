@@ -31,6 +31,20 @@ data:
       automountServiceAccountToken: false
       containers:
         - name: $job
+          env:
+            # rocker/ml bakes HOME=/home/jovyan into the image, but we run the
+            # job as uid 1001 (see securityContext below), which cannot read
+            # jovyan's home — git then dies with
+            #   EACCES: permission denied, stat '/home/jovyan/.gitconfig'
+            # Pod env overrides image env, so point HOME somewhere the job user
+            # can actually write. Needed for any image whose default user is not
+            # 1001, which is most of them.
+            #
+            # /tmp specifically: it always exists and is world-writable (1777).
+            # A path under /__w would also be writable but would have to be
+            # created first, and nothing creates HOME for you.
+            - name: HOME
+              value: /tmp
           resources:
             requests:
               memory: 1Gi
@@ -40,6 +54,15 @@ data:
               # three sets, so the worst case stays well inside cirrus's RAM.
               memory: 8Gi
           securityContext:
-            runAsUser: 0
+            # 1001, NOT 0. The workspace (_work, mounted at /__w) is created by
+            # the runner container, which runs as `runner` = uid 1001, so the job
+            # container must be 1001 to write to it. rocker/ml defaults to
+            # `jovyan` (uid 1000) and therefore fails every job at the first
+            # action with:
+            #   EACCES: permission denied, open '/__w/_temp/_runner_file_commands/...'
+            # Root (runAsUser: 0) also fixes that, but by bypassing permissions
+            # rather than matching them — unnecessary here, since nothing in the
+            # coursework needs root and rocker images ship passwordless sudo.
+            runAsUser: 1001
             allowPrivilegeEscalation: false
             privileged: false
