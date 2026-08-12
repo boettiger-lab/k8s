@@ -56,7 +56,14 @@ data:
             # explicitly. Allowed under PodSecurity "baseline" (only "restricted"
             # forbids running as root), which is the level this namespace uses.
             runAsUser: 0
+            # privileged:false is the setting that actually matters — it is what
+            # removes the dind escape path to the node.
             allowPrivilegeEscalation: false
             privileged: false
-            capabilities:
-              drop: ["ALL"]
+            # Deliberately NOT `capabilities: drop: [ALL]`. The runner container
+            # runs as uid 1001 and creates _work/_temp owned by 1001; the job
+            # container is uid 0 and relies on CAP_DAC_OVERRIDE to write there.
+            # Dropping ALL revokes it, and every job dies at the first action with
+            #   EACCES: permission denied, open '/__w/_temp/_runner_file_commands/...'
+            # (confirmed by testing). The default capability set is what the old
+            # `--user root` dind container had anyway, and it excludes CAP_SYS_ADMIN.
