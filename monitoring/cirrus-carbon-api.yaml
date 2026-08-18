@@ -9,7 +9,8 @@
 #     (the API/dashboard flag this via power_is_node_total=true).
 #
 # Requires the monitoring stack (Prometheus + dcgm-exporter) from ./install.sh
-# and the prometheus.io/scrape annotations on vllm-qwen3-6-service.
+# and the prometheus.io/scrape annotations on the shared vllm-service
+# (vllm/cirrus/endpoint.yaml), which follows whichever model is live.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

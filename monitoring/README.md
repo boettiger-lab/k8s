@@ -22,7 +22,7 @@ charts + values are cluster-agnostic; the carbon-api on top is configured per no
     kubectl apply -f cirrus-carbon-api.yaml # cirrus only: the dashboard
 
 The cirrus dashboard also needs the `prometheus.io/scrape` annotations on
-`vllm-qwen3-6-service` (see `../vllm/cirrus/deploy-qwen3-6.yaml`) so Prometheus
+`vllm-service` (see `../vllm/cirrus/endpoint.yaml`) so Prometheus
 scrapes vLLM's `/metrics`.
 
 ## Shared-GPU power attribution (cirrus)

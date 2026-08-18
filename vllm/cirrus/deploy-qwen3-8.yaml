@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-8
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-qwen3-8
+spec:
+  replicas: 1
+  # GPU deployments must use Recreate: a rolling update would deadlock waiting
+  # for GPU capacity the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-cirrus-qwen3-8
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-cirrus-qwen3-8
+        # Selected by the shared vllm-service (see endpoint.yaml): whichever
+        # model is scaled up owns https://vllm-cirrus.carlboettiger.info
+        vllm-endpoint: cirrus
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vllm-huggingface-token
+              key: token
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        args:
+        # Qwen3.8-27B is a *dense* 27B: BF16 weights are 55.6GB, which does not
+        # fit one 48GB RTX 8000, and TP=2 is not usable here (the two cards are
+        # exposed as 16 time-sliced replicas, so a 2-GPU request usually lands
+        # twice on the same physical card). So: 4-bit.
+        #
+        # Checkpoint choice: this is AutoAWQ format (quant_method "awq", version
+        # "gemm"), the same kernel path already proven on this Turing box by
+        # the retired qwen3-6 deployment. The popular cyankiwi/Qwen3.8-27B-AWQ-INT4 is compressed-tensors
+        # WNA16 instead -- nominally cc>=7.5 in current vLLM, but unproven here.
+        # It also ships the mtp.* weights, so MTP speculative decoding works.
+        - --model
+        - shawnw3i/Qwen3.8-27B-AWQ-MTP
+        - --served-model-name
+        - qwen3-8
+        - --dtype
+        - auto
+        - --trust-remote-code
+        - --tensor-parallel-size
+        - "1"
+        # cirrus is time-sliced (no VRAM cap); give vLLM essentially the whole 48GB card.
+        - --gpu-memory-utilization
+        - "0.95"
+        # KV is 64KiB/token here (16 full-attention layers x 4 KV heads x head_dim
+        # 256 x2 x fp16) = ~8.6GB per full-length sequence, so 131k is the sane
+        # ceiling on 48GB even though the config allows 262k.
+        - --max-model-len
+        - "131072"
+        # First pass: text only. The checkpoint is a native VLM and the vision
+        # tower is small (~1.1GB fp16), so this can be revisited once the text
+        # path is proven stable.
+        - --limit-mm-per-prompt
+        - '{"image": 0, "audio": 0, "video": 0}'
+        # Both qwen3_coder and qwen3_xml now alias the same engine-backed
+        # Qwen3EngineToolParser (structural_tag_model "qwen_3_coder") upstream;
+        # the old Python StreamingXMLToolCallParser -- and with it the #43713
+        # multi-<function> state bug that nimbus patches around via
+        # qwen3_xml_patched -- is gone. Use the built-in, no --tool-parser-plugin.
+        - --enable-auto-tool-choice
+        - --tool-call-parser
+        - qwen3_coder
+        - --reasoning-parser
+        - qwen3
+        # Same head_dim 256 as the retired qwen3-6: the default FlashInfer backend crashes in
+        # the prefill kernel (BatchPrefillWithPagedKVCache: invalid argument), and
+        # FLASH_ATTN needs compute capability >= 8 (this is a Turing RTX 8000,
+        # cc 7.5). Triton is the stable backend here.
+        - --attention-backend
+        - TRITON_ATTN
+        # Hybrid GDN model (48 linear-attention layers + full attention every 4th).
+        # CUDA graph capture requires max_num_seqs <= available Mamba cache blocks,
+        # and this model's recurrent state is ~150MB/seq (48 v-heads x 128 x 128
+        # fp32 x 48 layers) -- far bigger than Qwen3.6-35B-A3B's, so start conservative.
+        - --max-num-seqs
+        - "16"
+        # MTP speculative decoding: this checkpoint ships the mtp.* weights.
+        - --speculative-config
+        - '{"method":"mtp","num_speculative_tokens":3}'
+        - --max-num-batched-tokens
+        - "8192"
+        - --enable-prefix-caching
+        # The checkpoint's generation_config defaults to temperature=1.0; force
+        # greedy by default (clients may still override), as on nimbus.
+        - --override-generation-config
+        - '{"temperature": 0.0}'
+        # With a shared endpoint, the Service must not route to an engine that
+        # is still loading (weights + graph capture can take ~6 min cold, ~2 min
+        # warm), otherwise a model switch serves 502s. Readiness only, no
+        # liveness: a wedged engine stays up for debugging instead of
+        # crash-looping. /health needs no auth.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 60
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        - name: vllm-cache
+          mountPath: /root/.cache/vllm
+        resources:
+          requests:
+            cpu: 4
+            memory: 16Gi
+            nvidia.com/gpu: 2
+          limits:
+            cpu: 4
+            memory: 16Gi
+            nvidia.com/gpu: 2
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: vllm-cache
+        # torch.compile / AOT artifacts. Without this on the host, every pod
+        # restart recompiles from scratch (~80s) since /root/.cache/vllm would
+        # otherwise live in the container's ephemeral layer.
+        hostPath:
+          path: /home/cboettig/.cache/vllm
+          type: DirectoryOrCreate
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
