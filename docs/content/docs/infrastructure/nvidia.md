@@ -57,7 +57,7 @@ The device plugin supports three sharing modes:
 > ignores the per-resource `devices:` and `rename:` fields for `mps` sharing
 > (logged: *"Customizing the 'devices' field in sharing.mps.resources is not yet
 > supported … Ignoring"*). So MPS caps **all** GPUs on the node uniformly, and a
-> large model like qwen3-6 (needs ~a whole 48 GB card) then no longer fits. A
+> large model like qwen3-8 (needs ~a whole 48 GB card) then no longer fits. A
 > per-GPU MPS split would require hiding one GPU from the plugin via
 > `NVIDIA_VISIBLE_DEVICES` (no Helm lever → a second release + post-upgrade
 > patch) and running the LLM unmanaged. Not worth it; time-slicing is simpler and

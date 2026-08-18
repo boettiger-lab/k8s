@@ -19,15 +19,33 @@ Deploy vLLM for high-throughput LLM inference with GPU acceleration.
 
 ## Live deployments
 
-The `vllm/cirrus/` directory holds one manifest per served model. Each model
-gets its own Deployment, Service, and HTTPS Ingress in the `vllm` namespace.
-Current endpoints:
+cirrus serves **one** LLM at a time, always at the same address:
 
-| Model | Host | `model` name | Manifest |
-|-------|------|--------------|----------|
-| Qwen3.6-35B-A3B (AWQ) | `qwen3-cirrus.carlboettiger.info` | `qwen3-6` | `deploy-qwen3-6.yaml` |
-| Gemma 4 | `gemma4-cirrus.carlboettiger.info` | `gemma4` | `deploy-gemma4.yaml` |
-| Whisper (audio) | `whisper-cirrus.carlboettiger.info` | `whisper` | `deploy-whisper.yaml` |
+> **`https://vllm-cirrus.carlboettiger.info`**
+
+The URL names the machine, not the model — mirroring
+`vllm-nimbus.carlboettiger.info`. Ask the endpoint which model is loaded rather
+than encoding it in a hostname:
+
+```bash
+curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
+  https://vllm-cirrus.carlboettiger.info/v1/models | jq '.data[].id'
+```
+
+The `vllm/cirrus/` directory holds one manifest per model, plus `endpoint.yaml`
+with the shared Service, Ingress, and certificate. Every model Deployment
+carries the pod label `vllm-endpoint: cirrus`, which the shared Service selects
+— so switching models is just scaling one down and the next up. No new Ingress,
+DNS record, or certificate is involved.
+
+| Model | `model` name | Manifest | State |
+|-------|--------------|----------|-------|
+| Qwen3.8-27B (AWQ INT4, MTP) | `qwen3-8` | `deploy-qwen3-8.yaml` | **live** |
+| Gemma 4 | `gemma4` | `deploy-gemma4.yaml` | scaled to 0 |
+
+Whisper (audio transcription) is a separate, non-vLLM server on its own host,
+`whisper-cirrus.carlboettiger.info` (`deploy-whisper.yaml`); it is not part of
+the single-LLM slot and can run alongside it.
 
 All endpoints are OpenAI-compatible and **require an API key** (see
 [Authentication](#authentication)). They run on the time-sliced GPUs of the
@@ -52,13 +70,13 @@ cd vllm/cirrus
 ./up.sh
 
 # Or apply a single model manifest directly
-kubectl apply -f deploy-qwen3-6.yaml
+kubectl apply -f deploy-qwen3-8.yaml
 
 # Check status
 kubectl get pods -n vllm
 
-# View logs (use the deployment name for the model, e.g. qwen3-6)
-kubectl logs -n vllm deployment/qwen3-6 -f
+# View logs (use the deployment name for the model, e.g. qwen3-8)
+kubectl logs -n vllm deployment/qwen3-8 -f
 
 # List the model endpoints
 kubectl get ingress -n vllm
@@ -68,7 +86,8 @@ kubectl get ingress -n vllm
 
 Under `vllm/cirrus/`:
 
-- `deploy-<model>.yaml` - per-model Deployment + Service + Ingress (e.g. `deploy-qwen3-6.yaml`)
+- `endpoint.yaml` - the shared Service, Ingress, and cert for `vllm-cirrus.carlboettiger.info`
+- `deploy-<model>.yaml` - a Deployment only, labelled `vllm-endpoint: cirrus` (e.g. `deploy-qwen3-8.yaml`)
 - `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets
 - `up.sh` / `down.sh` - deploy / cleanup scripts
 
@@ -81,28 +100,34 @@ Each model manifest:
 - Exposes the OpenAI-compatible API on port 8000
 - Uses `strategy.type: Recreate` so a redeploy frees the GPUs before the new pod starts
 
-See `vllm/cirrus/deploy-qwen3-6.yaml` for the full reference. Key arguments:
+See `vllm/cirrus/deploy-qwen3-8.yaml` for the full reference. Key arguments:
 
 ```yaml
 args:
   - --model
-  - cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit
+  - shawnw3i/Qwen3.8-27B-AWQ-MTP
   - --served-model-name
-  - qwen3-6
+  - qwen3-8
   - --max-model-len
   - "131072"
   - --enable-auto-tool-choice
   - --tool-call-parser
-  - qwen3_coder
+  - qwen3_coder          # qwen3_xml is an alias for the same engine parser
   - --reasoning-parser
   - qwen3
-  - --enforce-eager
   # cirrus is a Quadro RTX 8000 (Turing, cc 7.5). The default FlashInfer
   # backend crashes in its prefill kernel for this model's head_dim 256, and
   # FLASH_ATTN needs compute capability >= 8, so pin Triton. NOTE: the
-  # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0 — use this flag.
+  # VLLM_ATTENTION_BACKEND env var was removed in vLLM 0.23.0 - use this flag.
   - --attention-backend
   - TRITON_ATTN
+  # Hybrid GDN model: recurrent state is ~150MB/sequence, and CUDA graph
+  # capture needs max_num_seqs <= available Mamba cache blocks.
+  - --max-num-seqs
+  - "16"
+  # The checkpoint ships mtp.* weights, so speculative decoding works here.
+  - --speculative-config
+  - '{"method":"mtp","num_speculative_tokens":3}'
 ```
 
 ## Authentication
@@ -126,11 +151,11 @@ Avoid hard-coding it — read it from an environment variable, e.g.
 Using curl:
 
 ```bash
-curl https://qwen3-cirrus.carlboettiger.info/v1/chat/completions \
+curl https://vllm-cirrus.carlboettiger.info/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $VLLM_API_KEY" \
   -d '{
-    "model": "qwen3-6",
+    "model": "qwen3-8",
     "messages": [{"role": "user", "content": "San Francisco is a"}],
     "max_tokens": 50,
     "temperature": 0.7
@@ -144,12 +169,12 @@ import os
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://qwen3-cirrus.carlboettiger.info/v1",
+    base_url="https://vllm-cirrus.carlboettiger.info/v1",
     api_key=os.environ["VLLM_API_KEY"],
 )
 
 response = client.chat.completions.create(
-    model="qwen3-6",
+    model="qwen3-8",
     messages=[{"role": "user", "content": "What is the capital of France?"}],
     max_tokens=100,
 )
@@ -157,14 +182,14 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-> `qwen3-6` is a reasoning model: in streamed responses the chain-of-thought
+> `qwen3-8` is a reasoning model: in streamed responses the chain-of-thought
 > arrives in `delta.reasoning` and the final answer in `delta.content`.
 
 ### Streaming Responses
 
 ```python
 response = client.chat.completions.create(
-    model="qwen3-6",
+    model="qwen3-8",
     messages=[{"role": "user", "content": "Tell me a story"}],
     max_tokens=200,
     stream=True,
@@ -260,7 +285,7 @@ resources:
 ### Check Logs
 
 ```bash
-kubectl logs -n vllm deployment/qwen3-6 -f
+kubectl logs -n vllm deployment/qwen3-8 -f
 ```
 
 ### GPU Usage
@@ -270,7 +295,7 @@ kubectl logs -n vllm deployment/qwen3-6 -f
 nvidia-smi
 
 # Or from the pod
-kubectl exec -n vllm deployment/qwen3-6 -- nvidia-smi
+kubectl exec -n vllm deployment/qwen3-8 -- nvidia-smi
 ```
 
 ### Metrics
@@ -278,7 +303,7 @@ kubectl exec -n vllm deployment/qwen3-6 -- nvidia-smi
 vLLM exposes metrics at `/metrics`:
 
 ```bash
-curl https://qwen3-cirrus.carlboettiger.info/metrics
+curl https://vllm-cirrus.carlboettiger.info/metrics
 ```
 
 ## Troubleshooting
@@ -313,7 +338,7 @@ args:
 
 1. **Check internet connectivity**:
 ```bash
-kubectl exec -n vllm deployment/qwen3-6 -- ping huggingface.co
+kubectl exec -n vllm deployment/qwen3-8 -- ping huggingface.co
 ```
 
 2. **Use Hugging Face token** for gated models:
@@ -333,19 +358,19 @@ env:
 1. **Check service**:
 ```bash
 kubectl get svc -n vllm
-kubectl describe svc vllm-qwen3-6-service -n vllm
+kubectl describe svc vllm-service -n vllm
 ```
 
 2. **Check ingress**:
 ```bash
 kubectl get ingress -n vllm
-kubectl describe ingress vllm-qwen3-6-ingress -n vllm
+kubectl describe ingress vllm-ingress -n vllm
 ```
 
 3. **Test internally**:
 ```bash
 kubectl run -it --rm test --image=curlimages/curl --restart=Never -- \
-  curl http://vllm-qwen3-6-service.vllm.svc.cluster.local:8000/health
+  curl http://vllm-service.vllm.svc.cluster.local:8000/health
 ```
 
 ## Advanced Configuration

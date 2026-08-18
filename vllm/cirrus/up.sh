@@ -1,15 +1,21 @@
 #!/bin/bash
+# Bring up the vllm namespace, the shared endpoint, and ONE model.
+#
+# cirrus serves a single model at a time behind https://vllm-cirrus.carlboettiger.info
+# (see endpoint.yaml). Pass a model manifest to pick which one; defaults to the
+# current model.
+set -euo pipefail
 
-# Create the vllm namespace if it doesn't exist
+MODEL_MANIFEST="${1:-deploy-qwen3-8.yaml}"
+
 kubectl create namespace vllm --dry-run=client -o yaml | kubectl apply -f -
 
-# Create secrets in the vllm namespace
-./secrets.sh -n vllm
+# HF token + API key
+../secrets.sh -n vllm
 
-# Deploy resources in the vllm namespace
-kubectl apply -f service.yaml -n vllm
-kubectl apply -f ingress.yaml -n vllm
-kubectl apply -f deployment.yaml -n vllm
+kubectl apply -f endpoint.yaml
+kubectl apply -f "$MODEL_MANIFEST"
 
-# Show status
 kubectl get pods -n vllm
+echo
+echo "Endpoint: https://vllm-cirrus.carlboettiger.info/v1/models"

@@ -1,16 +1,14 @@
-
 #!/bin/bash
+# Tear down the model(s) but KEEP the shared endpoint (Service/Ingress/cert), so
+# the next model reuses the same URL, DNS record, and certificate.
+# Pass --all to remove the endpoint too.
+set -euo pipefail
 
-# Delete resources from the vllm namespace
-kubectl delete deployment vllm-deployment -n vllm
-kubectl delete svc vllm-svc -n vllm
-kubectl delete ingress vllm-ingress -n vllm
+kubectl delete deployment -n vllm qwen3-8 gemma4 --ignore-not-found
 
-# Optionally delete secrets (uncomment if you want to remove secrets too)
-# kubectl delete secret vllm-huggingface-token -n vllm
-# kubectl delete secret vllm-api-key -n vllm
-
-# Optionally delete the entire namespace (uncomment if you want to remove the namespace)
-# kubectl delete namespace vllm
-
-echo "vLLM resources deleted from vllm namespace"
+if [[ "${1:-}" == "--all" ]]; then
+  kubectl delete -f endpoint.yaml --ignore-not-found
+  echo "Endpoint removed too (DNS record and cert will need re-issuing on next up)."
+else
+  echo "Endpoint kept: https://vllm-cirrus.carlboettiger.info"
+fi

@@ -6,8 +6,8 @@ metadata:
   labels:
     k8s-app: vllm-cirrus-gemma4
 spec:
-  # Kept scaled to 0: only qwen3-6 is live on cirrus right now. Bump to 1 to bring
-  # gemma4 back (shares the single RTX 8000 with qwen3-6, so mind VRAM if you do).
+  # Kept scaled to 0: only one model serves cirrus at a time (currently qwen3-8).
+  # Scale the live model to 0 before bumping this to 1 -- they share one card.
   replicas: 0
   selector:
     matchLabels:
@@ -16,6 +16,9 @@ spec:
     metadata:
       labels:
         k8s-app: vllm-cirrus-gemma4
+        # Selected by the shared vllm-service (see endpoint.yaml): whichever
+        # model is scaled up owns https://vllm-cirrus.carlboettiger.info
+        vllm-endpoint: cirrus
     spec:
       runtimeClassName: nvidia
       nodeSelector:
@@ -61,11 +64,26 @@ spec:
         - --enable-auto-tool-choice
         - --tool-call-parser
         - gemma4
+        # With a shared endpoint, the Service must not route to an engine that
+        # is still loading (weights + graph capture can take ~6 min cold, ~2 min
+        # warm), otherwise a model switch serves 502s. Readiness only, no
+        # liveness: a wedged engine stays up for debugging instead of
+        # crash-looping. /health needs no auth.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 60
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
         - name: hf-cache
           mountPath: /root/.cache/huggingface
+        - name: vllm-cache
+          mountPath: /root/.cache/vllm
         resources:
           requests:
             cpu: 4
@@ -84,68 +102,14 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 1Gi
+      - name: vllm-cache
+        # torch.compile / AOT artifacts. Without this on the host, every pod
+        # restart recompiles from scratch (~80s) since /root/.cache/vllm would
+        # otherwise live in the container's ephemeral layer.
+        hostPath:
+          path: /home/cboettig/.cache/vllm
+          type: DirectoryOrCreate
       - name: hf-cache
         hostPath:
           path: /home/cboettig/.cache/huggingface
           type: Directory
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: vllm-gemma4-service
-  namespace: vllm
-  labels:
-    k8s-app: vllm-cirrus-gemma4
-spec:
-  type: ClusterIP
-  ports:
-    - port: 8000
-      targetPort: http
-      protocol: TCP
-      name: http
-  selector:
-    k8s-app: vllm-cirrus-gemma4
----
-apiVersion: traefik.io/v1alpha1
-kind: ServersTransport
-metadata:
-  name: vllm-long-timeout
-  namespace: vllm
-spec:
-  forwardingTimeouts:
-    dialTimeout: 30s
-    responseHeaderTimeout: 600s
-    idleConnTimeout: 600s
-    readIdleTimeout: 600s
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: vllm-gemma4-ingress
-  namespace: vllm
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
-    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
-    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
-  labels:
-    app: vllm-cirrus-gemma4
-spec:
-  ingressClassName: traefik
-  rules:
-  - host: gemma4-cirrus.carlboettiger.info
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: vllm-gemma4-service
-            port:
-              number: 8000
-  tls:
-  - hosts:
-    - gemma4-cirrus.carlboettiger.info
-    secretName: vllm-gemma4-tls
