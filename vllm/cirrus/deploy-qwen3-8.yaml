@@ -47,9 +47,49 @@ spec:
           value: "4"
         args:
         # Qwen3.8-27B is a *dense* 27B: BF16 weights are 55.6GB, which does not
-        # fit one 48GB RTX 8000, and TP=2 is not usable here (the two cards are
-        # exposed as 16 time-sliced replicas, so a 2-GPU request usually lands
-        # twice on the same physical card). So: 4-bit.
+        # fit one 48GB RTX 8000, so: 4-bit.
+        #
+        # TP=2 was measured end-to-end on 2026-08-18 and is a NET LOSS here.
+        # Keep TP=1. Two things the old note in this file got wrong, and one
+        # real reason not to do it:
+        #
+        # 1. "A 2-GPU request usually lands twice on the same physical card"
+        #    is false. With nvidia.com/gpu: 2 the pod's NVIDIA_VISIBLE_DEVICES
+        #    holds two DISTINCT physical UUIDs, nvidia-smi -L shows both, and
+        #    vLLM brings up world_size=2 rank 0/1. Head counts all divide by 2
+        #    (24 q / 4 kv / 48 GDN v / 16 GDN k).
+        # 2. "No usable TP=2" is also false. Plain TP=2 wedges forever right
+        #    after "vLLM is using nccl==2.30.7" (both GPUs spinning at
+        #    100%/~125W, readiness never true). Adding NCCL_P2P_DISABLE=1 plus
+        #    --disable-custom-all-reduce clears it and the engine comes up:
+        #    weights shard to 11.5GB/card, KV cache 913,842 tokens (vs 350,745),
+        #    concurrency 6.97x (vs 2.68x), prefill 1.5x @7k / 1.88x @28k.
+        #    (It also needs cpu 8 / memory 32Gi / dshm 4Gi for the second
+        #    worker; the values below are sized for TP=1.)
+        # 3. The reason not to: that NCCL workaround routes every all-reduce
+        #    through host shared memory, and DECODE pays two all-reduces per
+        #    layer x 64 layers *per token* while prefill (compute-bound) barely
+        #    notices. Measured decode fell to ~8-10 tok/s from TP=1's ~50. On
+        #    the geo-agent ca-30x30 regression slice decode is 82% of wall
+        #    time, so TP=2 lost badly overall (2.18h for 10 questions) and one
+        #    question blew past the client's 900s per-call budget and failed
+        #    where TP=1 finishes.
+        #
+        # Still open: only --disable-custom-all-reduce may be needed. Both
+        # variables were changed at once, so it is unknown whether P2P itself
+        # throttles the all-reduce. If P2P works, TP=2 could win on both axes.
+        # Test it in a scratch Deployment WITHOUT the vllm-endpoint label -- a
+        # hang there is harmless, whereas on this Deployment readiness never
+        # goes true, the shared Service drops its only backend, and clients get
+        # 503s (that mistake cost ~12 min of downtime).
+        #
+        # Cost of staying at TP=1: GPU 1 idles at 300MHz/25W while GPU 0 pegs
+        # 100%/250W through every prefill. Accepted, because decode is what the
+        # agentic workload is actually bound by.
+        #
+        # Prefill is NOT the thing to tune next: with --enable-prefix-caching
+        # below, the geo-agent slice hit 84.9% prefix-cache reuse (942,400 of
+        # 1,109,583 blocks), leaving prefill at 18% of wall time.
         #
         # Checkpoint choice: this is AutoAWQ format (quant_method "awq", version
         # "gemm"), the same kernel path already proven on this Turing box by
