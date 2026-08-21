@@ -59,6 +59,7 @@ The cluster is built on:
 | [`github-actions/`](github-actions/) | Self-hosted GitHub Actions runners (per-repo values) |
 | [`armada/`](armada/) | Armada batch/job scheduler |
 | [`codecarbon/`](codecarbon/) | Carbon-tracking utility |
+| [`openshell/`](openshell/) | Sandboxed AI-agent runtime (**planned**, not yet deployed) |
 
 ### Supporting
 
