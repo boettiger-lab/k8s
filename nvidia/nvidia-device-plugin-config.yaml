@@ -3,9 +3,31 @@ runtimeClassName: nvidia
 gfd:
   enabled: true
 
+# Per-node config, selected by the `nvidia.com/device-plugin.config` node label.
+#
+#   cirrus (2x RTX 8000, 48GB) -> label "timeslice": time-slicing, 8 replicas/GPU
+#       => 16 nvidia.com/gpu "slices" total. Time-slicing does NOT partition VRAM:
+#          a slice is just a bookkeeping slot that caps how many pods share a GPU.
+#          Every pod sees the FULL 48GB of whatever physical GPU it lands on.
+#          - LLM serving (vLLM/qwen3-6) claims slice(s) and uses the whole card.
+#          - Light GPU notebooks / RL work claim 1 slice each.
+#          A pod may claim MULTIPLE slices (failRequestsGreaterThanOne is left at
+#          its default false) -- e.g. an LLM can claim several to crowd notebooks
+#          off its GPU, since the count is just a co-tenancy cap, not a memory cap.
+#   thelio (RTX 2080, 8GB)     -> label "no-sharing": 1 whole GPU per pod.
+#
+# NOTE: no MPS here, so there is no per-slice VRAM cap and no MPS control daemon
+# (and thus none of the MPS config-manager sidecar trouble). If hard VRAM caps are
+# ever needed, MPS is the only option but it cannot be limited to a single GPU
+# (the plugin ignores `devices`/`rename` for mps), so it would slice all GPUs.
+#
+# Apply labels:
+#   kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
+#   kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 config:
+  default: "timeslice"
   map:
-    config: |
+    timeslice: |
       version: v1
       flags:
         migStrategy: "none"
@@ -15,14 +37,18 @@ config:
           passDeviceSpecs: false
           deviceListStrategy: "envvar"
           deviceIDStrategy: "uuid"
-        gfd:
-          oneshot: false
-          noTimestamp: false
-          outputFile: /etc/kubernetes/node-feature-discovery/features.d/gfd
-          sleepInterval: 60s
       sharing:
         timeSlicing:
           resources:
             - name: nvidia.com/gpu
               replicas: 8
-
+    no-sharing: |
+      version: v1
+      flags:
+        migStrategy: "none"
+        failOnInitError: true
+        nvidiaDriverRoot: "/"
+        plugin:
+          passDeviceSpecs: false
+          deviceListStrategy: "envvar"
+          deviceIDStrategy: "uuid"

@@ -12,6 +12,10 @@
 # of enable-external-access.sh and allows hairpin connections for JupyterHub pods
 # to access external services like minio.carlboettiger.info and other cluster services.
 #
+# Reference existing docker-registry secret for private images
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
 ingress:
   enabled: true
   annotations:
@@ -22,17 +26,27 @@ ingress:
     - jupyterhub.cirrus.carlboettiger.info
     secretName: jupyter-cirrus-tls
   hosts: 
-  - "jupyterhub.cirrus.carlboettiger.info"  
+  - "jupyterhub.cirrus.carlboettiger.info"
+proxy:
+  service:
+    type: ClusterIP
 cull:
   enabled: false
 singleuser:
+  allowPrivilegeEscalation: true
   image:
     pullPolicy: Always
   storage:
-    capacity: 60Gi
+    type: dynamic
+    extraLabels: {}
+    capacity: 100Gi
+    homeMountPath: /home/jovyan
+    dynamic:
+      storageClass:  openebs-zfs
+      pvcNameTemplate: claim-{escaped_user_server}
+      volumeNameTemplate: volume-{escaped_user_server}
+      storageAccessModes: [ReadWriteOnce]
     extraVolumeMounts:
-      - name: "volume-{user_server}"
-        mountPath: /home/rstudio
       - name: shm-volume
         mountPath: /dev/shm
     extraVolumes:
@@ -47,7 +61,7 @@ singleuser:
       # Keep DNS resolution working
       dnsPortsPrivateIPs: true
       dnsPortsKubeSystemNamespace: true
-      # Allow internet access (excluding private ranges) - enables hairpin connections
+      # Allow internet access (excluding private ranges) - enables 'hairpin' connections
       nonPrivateIPs: true
     egress:
       # Specific access to your external IP (minio.carlboettiger.info at 128.32.85.8)
@@ -88,26 +102,45 @@ singleuser:
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
-              working_dir: /home/rstudio
           choices:
             01-cpu:
-              display_name: CPU 
-              description: General purpose python + R (with RStudio) environment 
+              display_name: Default CPU environment
+              description: General purpose python/R environment 
               kubespawner_override:
                 image:  "ghcr.io/boettiger-lab/k8s:latest"
-                working_dir: /home/rstudio
             02-gpu:
-              display_name: RL
-              description: CUDA GPU environment, with RL 
+              display_name: RL GPU
+              description: CUDA GPU environment, with RL
               kubespawner_override:
                 image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
-                working_dir: /home/rstudio
+                # Request a real, memory-capped GPU slice (MPS on cirrus).
+                # Without this the pod sees all GPUs unmanaged via the nvidia
+                # runtime, with no VRAM accounting/limit.
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
             03-gpu-spatial:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
-                image: "ghcr.io/rocker-org/cuda-spatial:latest"
+                image: "ghcr.io/rocker-org/ml-spatial:latest"
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
+        interface:
+          display_name: Interface
+          choices:
+            lab:
+              display_name: JupyterLab
+              default: true
+              kubespawner_override:
+                default_url: /lab
+            vscode:
+              display_name: VS Code
+              kubespawner_override:
                 default_url: /vscode
+            rstudio:
+              display_name: RStudio
+              kubespawner_override:
+                default_url: /rstudio
         resource_allocation:
           display_name: Resource Allocation
           choices:
@@ -116,14 +149,12 @@ singleuser:
               kubespawner_override:
                 mem_guarantee: 8G
                 mem_limit: 8G
-                cpu_limit: 12
               default: true
             mem_16:
               display_name: 16 GB RAM
               kubespawner_override:
                 mem_guarantee: 16G
                 mem_limit: 16G
-                cpu_limit: 12
             mem_32:
               display_name: 32 GB RAM
               kubespawner_override:
@@ -142,6 +173,54 @@ singleuser:
 
 hub:
   allowNamedServers: true
+  # Inject OAuth credentials and other secrets from K8s secret into environment
+  # extraEnv uses dict format where key is env var name, value is valueFrom spec
+  extraEnv:
+    GITHUB_CLIENT_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_ID
+    GITHUB_CLIENT_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_SECRET
+    MINIO_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: MINIO_KEY
+    MINIO_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: MINIO_SECRET
+    AWS_ACCESS_KEY_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: AWS_SECRET_ACCESS_KEY
+    GHCR_USERNAME:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: GHCR_USERNAME
+    GHCR_PASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: GHCR_PASSWORD
+    OPENAI_API_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-secrets
+          key: OPENAI_API_KEY
   config:
     # Shared settings. we don't need nvidia to be default
     KubeSpawner:
@@ -150,9 +229,22 @@ hub:
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
         GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
         AWS_S3_ENDPOINT: "minio.carlboettiger.info"
-        AWS_PUBLIC_ENDPOINT: "$AWS_S3_ENDPOINT"
         AWS_HTTPS: "true"
         AWS_VIRTUAL_HOSTING: "FALSE"
+        GOOSE_PROVIDER: "github_copilot"
+        OPENAI_BASE_URL: "https://ellm.nrp-nautilus.io/v1"
+        # CPU math-library thread defaults. BLAS/OpenMP/PyTorch otherwise spawn one
+        # thread per visible host core (128) PER PROCESS, so launching many workers
+        # (a sweep, multiprocessing, sklearn n_jobs=-1) oversubscribes and thrashes
+        # (context-switch + cache churn) — slow and antisocial on this shared node.
+        # Default to 1 so threads == number of processes you launch: the common
+        # "one worker per core" pattern is then automatically safe and can still
+        # fill all 128 cores. Override per-job for a heavy SINGLE-process BLAS job
+        # (e.g. `export OMP_NUM_THREADS=16` or `torch.set_num_threads(16)`).
+        OMP_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
+        MKL_NUM_THREADS: "1"
+        NUMEXPR_NUM_THREADS: "1"
       extra_pod_config:
         runtimeClassName: "nvidia"
     Authenticator:
@@ -178,5 +270,30 @@ hub:
     enable-fancy-profiles: |
       from jupyterhub_fancy_profiles import setup_ui
       setup_ui(c)
+    # Read OAuth credentials from environment variables (set via extraEnv from K8s secret)
+    configure-oauth-from-env: |
+      import os
+      c.GitHubOAuthenticator.client_id = os.environ.get('GITHUB_CLIENT_ID')
+      c.GitHubOAuthenticator.client_secret = os.environ.get('GITHUB_CLIENT_SECRET')
+    # Pass secrets to singleuser pods via environment variables
+    configure-singleuser-secrets: |
+      import os
+      c.KubeSpawner.environment.update({
+          'MINIO_KEY': os.environ.get('MINIO_KEY'),
+          'MINIO_SECRET': os.environ.get('MINIO_SECRET'),
+          'AWS_ACCESS_KEY_ID': os.environ.get('AWS_ACCESS_KEY_ID'),
+          'AWS_SECRET_ACCESS_KEY': os.environ.get('AWS_SECRET_ACCESS_KEY'),
+          'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY'),
+      })
+    # Route NAMED servers to JuiceFS (RWX, node-mobile homes); the default
+    # server keeps openebs-zfs/RWO untouched. See docs/.../shared-home-storage.md.
+    # Additive pilot: only named servers CREATED after this lands get juicefs-sc;
+    # existing bound PVCs are reused as-is (storageClass is immutable).
+    10-juicefs-named-servers: |
+      def pre_spawn_hook(spawner):
+          if spawner.name:
+              spawner.storage_class = "juicefs-sc"
+              spawner.storage_access_modes = ["ReadWriteMany"]
+      c.KubeSpawner.pre_spawn_hook = pre_spawn_hook
 
 

@@ -1,0 +1,57 @@
+# smartctl_exporter — per-drive SMART metrics (NVMe wear %, spare, temperature,
+# media/uncorrected errors, SATA reallocated sectors, self-test status) for every
+# node. Runs as a privileged DaemonSet so smartctl can open the raw block devices;
+# privileged containers see the host's /dev, so no explicit device mounts are
+# needed. Scraped by the existing Prometheus via the kubernetes-pods job (pod
+# annotations below) — same pattern as dcgm-exporter. No ServiceMonitor (no
+# prometheus-operator CRDs in this cluster).
+#
+# Why: smartd (on the host) only alerts on *failures*; it cannot trend the slow
+# endurance climb (e.g. cirrus root QLC at ~70% used). These metrics do.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: smartctl-exporter
+  namespace: monitoring
+  labels:
+    app: smartctl-exporter
+spec:
+  selector:
+    matchLabels:
+      app: smartctl-exporter
+  template:
+    metadata:
+      labels:
+        app: smartctl-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9633"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Cover control-plane (cirrus) and any future tainted nodes; workers untainted.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: smartctl-exporter
+          image: quay.io/prometheuscommunity/smartctl-exporter:v0.13.0
+          args:
+            - --web.listen-address=:9633
+            - --smartctl.interval=120s   # re-poll SMART every 2 min (SMART is slow-moving)
+          ports:
+            - name: metrics
+              containerPort: 9633
+          securityContext:
+            privileged: true             # required: raw device access for smartctl
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "48Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"

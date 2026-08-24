@@ -1,0 +1,105 @@
+# OpenShell gateway — cirrus cluster. DRAFT, not yet applied. See ../README.md
+#
+#   helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+#     --version 0.0.109 -n openshell -f values.yaml
+#
+# Verified against k3s v1.36.3 on 2026-08-20. Prerequisites: agent-sandbox v0.5.6,
+# Dex at dex.carlboettiger.info, a GatewayClass, and a tainted role=sandbox worker.
+
+workload:
+  kind: statefulset          # SQLite + per-pod PVC. Switch to deployment +
+                             # server.externalDbSecret if we ever want HA replicas.
+replicaCount: 1
+
+# The gateway pod is low-privilege and belongs on the control plane, alongside
+# its database and cert-manager. Sandboxes go elsewhere (see guardrails.yaml).
+nodeSelector:
+  kubernetes.io/hostname: cirrus
+
+server:
+  # --- isolation ---
+  enableUserNamespaces: true   # GA on 1.36. Container UID 0 -> unprivileged host UID,
+                               # capabilities become namespaced. Unconditional here: no
+                               # sandbox requests a GPU, so the unverified NVIDIA
+                               # device-plugin + userns interaction never arises.
+  appArmorProfile: Unconfined  # chart default; RuntimeDefault blocks the supervisor's
+                               # network-namespace mount setup on AppArmor nodes.
+  # Each sandbox in its own guest kernel. Uncomment once kata-deploy is working on k3s
+  # (needs a containerd config-v3.toml.tmpl, and KVM on the sandbox node).
+  # defaultRuntimeClassName: kata-containers
+
+  # --- blast radius ---
+  sandboxNamespace: openshell-sandboxes
+  workspaceStorageClass: openebs-zfs   # ZFS enforces the size; local-path does NOT
+  workspaceDefaultStorageSize: 10Gi
+
+  # --- auth (phase 2) ---
+  # Without an issuer, EVERY authenticated caller is a Platform Admin and bypasses
+  # workspace membership. Never deploy this multi-user without OIDC.
+  # NB: Dex is NOT currently deployed anywhere; ../armada/dex.yaml is unverified config,
+  # not a running service. These values are aspirational until phase 2 is done.
+  oidc:
+    issuer: https://dex.carlboettiger.info
+    audience: openshell-cli
+    rolesClaim: groups                 # Dex GitHub connector emits "org:team"
+    adminRole: boettiger-lab:admins    # both roles must be set, or both empty
+    userRole: espm-157:students
+
+  # --- multi-tenancy ---
+  drivers:
+    kubernetes:
+      workspaceMode: managed   # namespace per workspace; "shared" puts everyone together
+
+  telemetryEnabled: false
+  policyValidationFailureMode: fail_closed
+  grpcRateLimit:
+    requests: 200
+    windowSeconds: 60
+
+  # TLS terminates at the ingress proxy, so the gateway speaks plaintext h2c behind it
+  # and client identity comes from the OIDC bearer token, not a client certificate.
+  disableTls: true
+
+# combined = full OpenShell enforcement (network + filesystem + process), at the cost of
+# SYS_ADMIN/NET_ADMIN/SYS_PTRACE/SYSLOG on the agent container. Acceptable *only* on the
+# dedicated sandbox worker. sidecar = non-root agent container, no added caps, but loses
+# filesystem/process controls and the supervisor privilege drop.
+supervisor:
+  topology: combined
+  sideloadMethod: ""          # auto -> image-volume on 1.36
+
+certManager:
+  enabled: true               # cert-manager owns and rotates the internal TLS secrets
+  serverDnsNames:
+    - openshell
+    - openshell.openshell.svc
+    - openshell.openshell.svc.cluster.local
+    - openshell.cirrus.carlboettiger.info
+    - localhost
+
+# Phase 4. className depends on which option we pick: "traefik" (Traefik's Gateway
+# provider) or "eg" (Envoy Gateway). Leave disabled until a GatewayClass exists.
+grpcRoute:
+  enabled: false
+  gateway:
+    create: false
+    className: traefik
+  hostnames:
+    - openshell.cirrus.carlboettiger.info
+
+service:
+  type: ClusterIP
+
+networkPolicy:
+  enabled: true   # NB: this only restricts SSH (2222) INGRESS to sandbox pods.
+                  # The egress fence students cannot widen is in guardrails.yaml.
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits:   {cpu: "2",  memory: 2Gi}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities: {drop: ["ALL"]}

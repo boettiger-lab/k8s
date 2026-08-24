@@ -1,0 +1,85 @@
+# The ONE public endpoint for whatever model cirrus is serving.
+#
+# cirrus hosts a single vLLM model at a time (the box has 2x RTX 8000 and a
+# 27-35B model wants essentially a whole card), so the endpoint is a fixed
+# property of the machine, not of the model: https://vllm-cirrus.carlboettiger.info
+# -- matching vllm-nimbus.carlboettiger.info. The model identifies itself via
+# --served-model-name / GET /v1/models; it never appears in the URL. That way
+# switching models needs no new Ingress, no new DNS record, and no new cert.
+#
+# How the switch works: every model Deployment in this directory carries the pod
+# label `vllm-endpoint: cirrus`, which is what the Service below selects. Scale
+# the old model to 0, scale the new one to 1, and the endpoint follows -- nothing
+# here changes. (Two models running at once would split traffic between them, so
+# don't; scale one down first. GPU memory enforces this anyway.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus
+  annotations:
+    # Scraped by the monitoring stack's Prometheus (kubernetes-service-endpoints
+    # job) for the carbon/perf dashboard at carbon-cirrus.carlboettiger.info.
+    # vLLM's /metrics is unauthenticated. See ../../monitoring/. Keeping the
+    # annotations here (not on a per-model Service) means metrics survive a
+    # model switch, and nothing double-scrapes the same pod.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    vllm-endpoint: cirrus
+---
+# Long timeouts for inference (a big prefill can exceed Traefik's defaults).
+# Lives here rather than in a model manifest because every model needs it.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: vllm-long-timeout
+  namespace: vllm
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 600s
+    readIdleTimeout: 600s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-cirrus
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - vllm-cirrus.carlboettiger.info
+    secretName: vllm-cirrus-tls

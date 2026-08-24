@@ -1,0 +1,51 @@
+# Node tuning for the JuiceFS CSI driver.
+#
+# The JuiceFS CSI plugin watches its config via inotify. The kernel default
+# fs.inotify.max_user_instances=128 is exhausted on a busy control-plane node
+# (cirrus), so the plugin crash-loops with "fail to load config: too many open
+# files". This DaemonSet raises it to 8192 on EVERY node (live + persisted),
+# and re-applies on reboot/reschedule. tolerations: Exists so it also covers
+# cordoned (thelio) and future tainted GPU nodes (DGX Spark).
+#
+# Apply: kubectl apply -f juicefs/node-inotify.yaml
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-inotify-tuning
+  namespace: kube-system
+  labels:
+    app: node-inotify-tuning
+spec:
+  selector:
+    matchLabels:
+      app: node-inotify-tuning
+  template:
+    metadata:
+      labels:
+        app: node-inotify-tuning
+    spec:
+      hostPID: true
+      # Run on all nodes, including cordoned/tainted ones.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: sysctl
+          image: alpine:3.20
+          securityContext:
+            privileged: true
+          # Enter the host namespaces (pid 1) to set + persist the host sysctl,
+          # then idle (DaemonSets require a long-running container).
+          command: ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "sh", "-c"]
+          args:
+            - |
+              sysctl -w fs.inotify.max_user_instances=8192
+              printf 'fs.inotify.max_user_instances=8192\n' > /etc/sysctl.d/99-inotify-juicefs.conf
+              echo "node $(hostname): fs.inotify.max_user_instances=$(sysctl -n fs.inotify.max_user_instances)"
+              sleep infinity
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi

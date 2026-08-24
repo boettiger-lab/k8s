@@ -1,11 +1,43 @@
 FROM ghcr.io/rocker-org/cuda
 
-# Config will be populated by env vars and moved to HOME via start script: (hub-dependent)
-COPY continue/config.json /opt/share/continue/config.json
-COPY continue/config.ts /opt/share/continue/config.ts
+USER root
 
-COPY rl-env.yml rl-env.yml
-RUN conda update -n base -c conda-forge conda && \
-    conda env update --file rl-env.yml
+# Claude Code CLI + the jupyter-sidekick ACP assistant stack, matching the CPU
+# image (images/Dockerfile). install-claude.sh drops the `claude` binary on
+# PATH; install-jupyter-ai.sh adds Node 22, the claude-agent-acp ACP agent, and
+# the jupyter-sidekick + jupyter-geoagent JupyterLab extensions. This replaces
+# the previous Continue.dev config that lived here.
+COPY install-claude.sh /tmp/install-claude.sh
+RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
 
+COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
+RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
+RUN /opt/venv/bin/pip install \
+    huggingface_hub \
+    nox \
+    nvitop \
+    plotnine \
+    PyYaml \
+    pytest \
+    scikit-optimize \
+    "ray[rllib,tune]" \
+    huggingface_sb3 \
+    stable-baselines3 \
+    sb3-contrib
+
+# Same root-in-home cleanup as the CPU image (images/Dockerfile). Every step
+# above runs as root with HOME=/home/${NB_USER}, so the claude installer, npm,
+# jlpm/yarn and pip scatter root-owned config + caches through the home dir —
+# most damagingly ~/.claude.json (mode 0600), which makes claude fail with
+# EACCES for the notebook user. Drop the build caches (~/.npm, ~/.yarn,
+# ~/.cache/pip) and the cuda base image's leftover install_llms.sh helper, then
+# hand the home dir back to ${NB_USER}.
+RUN rm -rf "${HOME}/.npm" "${HOME}/.yarn" "${HOME}/.wget-hsts" "${HOME}/.cache/pip" && \
+    rm -f "${HOME}/install_llms.sh" && \
+    chown -R "${NB_USER}:${NB_USER}" "${HOME}"
+
+# Restore the notebook user as the default. The cuda base image defaults to
+# USER jovyan, but the `USER root` above otherwise leaks into the runtime,
+# leaving the published GPU image running as root (unlike the CPU image).
+USER ${NB_USER}

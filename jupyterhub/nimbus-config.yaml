@@ -1,0 +1,181 @@
+# This file can update the JupyterHub Helm chart's default configuration values.
+#
+# For reference see the configuration reference and default values, but make
+# sure to refer to the Helm chart version of interest to you!
+#
+# Introduction to YAML:     https://www.youtube.com/watch?v=cdLNKUoMc6c
+# Chart config reference:   https://zero-to-jupyterhub.readthedocs.io/en/stable/resources/reference.html
+# Chart default values:     https://github.com/jupyterhub/zero-to-jupyterhub-k8s/blob/HEAD/jupyterhub/values.yaml
+# Available chart versions: https://hub.jupyter.org/helm-chart/
+#
+# NOTE: The singleuser.networkPolicy configuration below replaces the functionality
+# of enable-external-access.sh and allows hairpin connections for JupyterHub pods
+# to access external services like minio.carlboettiger.info and other cluster services.
+#
+# Reference existing docker-registry secret for private images (NOT imagePullSecret singular!)
+# See: https://github.com/jupyterhub/zero-to-jupyterhub-k8s/issues/3760
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+# Disable pre-install and continuous image pulling (profile images may not have ARM64 builds)
+prePuller:
+  hook:
+    enabled: false
+  continuous:
+    enabled: false
+
+ingress:
+  enabled: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    kubernetes.io/ingress.class: traefik
+  tls:
+  - hosts:
+    - jupyter-nimbus.carlboettiger.info
+    secretName: nimbus-tls
+  hosts: 
+  - "jupyter-nimbus.carlboettiger.info"  
+cull:
+  enabled: false
+
+singleuser:
+  allowPrivilegeEscalation: true
+  image:
+    pullPolicy: Always
+  storage:
+    capacity: 60Gi
+    dynamic:
+      storageClass: openebs-zfs
+      pvcNameTemplate: claim-{escaped_user_server}
+      volumeNameTemplate: volume-{escaped_user_server}
+      storageAccessModes: [ReadWriteOnce]
+    extraVolumeMounts:
+      - name: shm-volume
+        mountPath: /dev/shm
+    extraVolumes:
+      - name: shm-volume
+        emptyDir:
+          medium: Memory
+  extraFiles:
+    jupyter_server_config.json:
+        mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
+        data:
+          # Allow JupyterLab to show the 'View -> Show Hidden Files' option
+          # in the menu. Defaults are not changed.
+          # https://github.com/jupyterlab/jupyterlab/issues/11304#issuecomment-945466766
+          ContentsManager:
+            allow_hidden: true
+          FileContentsManager:
+            always_delete_dir: true
+  profileList:
+    - display_name: "Choose your environment and resources"
+      default: true
+      profile_options:
+        image:
+          display_name: Environment
+          dynamic_image_building:
+            enabled: True
+          unlisted_choice:
+            enabled: True
+            display_name: "Custom image"
+            display_name_in_choices: "Specify an existing docker image"
+            description_in_choices: "Use a pre-existing docker image from a public docker registry"
+            description: Specify your own docker image (must have python and jupyterhub installed in it)
+            validation_regex: "^.+:.+$"
+            validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
+            kubespawner_override:
+              image: "{value}"
+          choices:
+            01-ml:
+              display_name: Rocker ML
+              description: Machine Learning environment (rocker/ml)
+              kubespawner_override:
+                image: "rocker/ml:latest"
+                defaultUrl: "/vscode"
+            02-spatial:
+              display_name: Rocker ML Spatial
+              description: Geospatial & ML environment (rocker/ml-spatial)
+              kubespawner_override:
+                image: "rocker/ml-spatial:latest"
+                defaultUrl: "/vscode"
+        resource_allocation:
+          display_name: Resource Allocation
+          choices:
+            mem_8:
+              display_name: 8 GB RAM
+              kubespawner_override:
+                mem_guarantee: 8G
+                mem_limit: 8G
+                cpu_limit: 2
+              default: true
+            mem_16:
+              display_name: 16 GB RAM
+              kubespawner_override:
+                mem_guarantee: 16G
+                mem_limit: 16G
+            mem_32:
+              display_name: 32 GB RAM
+              kubespawner_override:
+                mem_guarantee: 32G
+                mem_limit: 32G 
+            mem_64:
+              display_name: 64 GB RAM (preemptable)
+              kubespawner_override:
+                mem_guarantee: 32G
+                mem_limit: 64G 
+
+hub:
+  allowNamedServers: true
+  # Inject OAuth credentials from K8s secret into environment
+  # extraEnv uses dict format where key is env var name, value is valueFrom spec
+  extraEnv:
+    GITHUB_CLIENT_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_ID
+    GITHUB_CLIENT_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyter-oauth-secret
+          key: GITHUB_CLIENT_SECRET
+  config:
+    # Shared settings. we don't need nvidia to be default
+    KubeSpawner:
+      environment:
+        SHELL: /usr/bin/bash
+        AWS_S3_ENDPOINT: "minio.carlboettiger.info"
+        AWS_HTTPS: "true"
+        AWS_VIRTUAL_HOSTING: "FALSE"
+      extra_pod_config:
+        runtimeClassName: "nvidia"
+    Authenticator:
+      admin_users:
+        - cboettig 
+    GitHubOAuthenticator:
+      allowed_organizations:
+        - boettiger-lab:current-members
+        - SchmidtDSE
+      scope:
+        - read:org
+      oauth_callback_url: https://jupyter-nimbus.carlboettiger.info/hub/oauth_callback
+    JupyterHub:
+      authenticator_class: github
+  services:
+    binder:
+      url: http://binderhub
+  image:
+    name: ghcr.io/cboettig/jupyterhub-fancy-profiles/fancy-profiles-4.3.1
+    tag: arm64
+    pullSecrets:
+      - name: ghcr-pull-secret
+  extraConfig:
+    enable-fancy-profiles: |
+      from jupyterhub_fancy_profiles import setup_ui
+      setup_ui(c)
+    # Read OAuth credentials from environment variables (set via extraEnv from K8s secret)
+    configure-oauth-from-env: |
+      import os
+      c.GitHubOAuthenticator.client_id = os.environ.get('GITHUB_CLIENT_ID')
+      c.GitHubOAuthenticator.client_secret = os.environ.get('GITHUB_CLIENT_SECRET')
+

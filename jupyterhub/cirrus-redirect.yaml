@@ -1,0 +1,54 @@
+# Short-URL redirect: cirrus.carlboettiger.info -> jupyterhub.cirrus.carlboettiger.info
+#
+# JupyterHub stays served at its established host (jupyterhub.cirrus.carlboettiger.info,
+# see public-config.yaml) so the GitHub OAuth callback URL is unchanged. This just adds a
+# convenience short URL that permanently redirects to it.
+#
+# NOTE: Assumes cert-manager and external-dns are set up (same as the other cirrus ingresses).
+# A TLS cert is still issued for cirrus.carlboettiger.info so the browser completes TLS
+# before receiving the 301 redirect.
+#
+# Deploy:  kubectl apply -n jupyter -f cirrus-redirect.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cirrus-shorturl-redirect
+  namespace: jupyter
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # Apply the redirect middleware to this router (format: <namespace>-<name>@kubernetescrd)
+    traefik.ingress.kubernetes.io/router.middlewares: jupyter-cirrus-shorturl-redirect@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        # Backend is never reached (the middleware redirects first), but an Ingress
+        # requires one. Point at the existing JupyterHub proxy service.
+        backend:
+          service:
+            name: proxy-public
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - cirrus.carlboettiger.info
+    secretName: cirrus-shorturl-tls
+
+---
+# Traefik v3 middleware: permanent (301) redirect, preserving the request path.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cirrus-shorturl-redirect
+  namespace: jupyter
+spec:
+  redirectRegex:
+    regex: ^https?://cirrus\.carlboettiger\.info/(.*)
+    replacement: https://jupyterhub.cirrus.carlboettiger.info/${1}
+    permanent: true

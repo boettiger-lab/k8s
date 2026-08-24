@@ -1,0 +1,37 @@
+---
+# ServersTransport to explicitly allow h2c (HTTP/2 cleartext) backend connections
+# Required in Traefik v3 for gRPC backends that don't use TLS.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: h2c-transport
+  namespace: armada
+spec:
+  disableHTTP2: false
+  # forwardingTimeouts needed to keep long-lived gRPC streams alive
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 0s
+    idleConnTimeout: 0s
+---
+# Traefik v3 IngressRoute for Armada gRPC API.
+# Uses h2c scheme + explicit ServersTransport for reliable gRPC proxying.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: armada-grpc
+  namespace: armada
+spec:
+  entryPoints:
+  - websecure
+  routes:
+  - match: Host(`armada-api.carlboettiger.info`)
+    kind: Rule
+    priority: 1000
+    services:
+    - name: armada-server
+      port: 50051
+      scheme: h2c
+      serversTransport: h2c-transport
+  tls:
+    secretName: armada-server-service-tls

@@ -1,0 +1,70 @@
+# GPU dashboard (as-code), auto-loaded by the Grafana sidecar. Uses dcgm-exporter
+# metrics (job `kubernetes-pods` on this cluster — the community DCGM dashboard
+# 12239 assumes a different job/labels, hence No Data). cirrus has 2× Quadro
+# RTX 8000, time-sliced across namespaces; DCGM attaches pod/namespace labels, so
+# we aggregate `by (gpu, Hostname, modelName)` to get one clean line per physical
+# GPU. (Per-tenant power attribution is handled separately by cirrus-carbon-api.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-gpu
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hosts"
+data:
+  gpu.json: |
+    {
+      "uid": "gpu-health",
+      "title": "GPU (DCGM)",
+      "tags": ["gpu", "dcgm"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [] },
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "id": 1, "type": "timeseries", "title": "GPU utilization (%)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [ { "refId": "A", "expr": "max by (gpu, Hostname, modelName) (DCGM_FI_DEV_GPU_UTIL)", "legendFormat": "{{Hostname}} GPU{{gpu}} {{modelName}}" } ],
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 2, "type": "timeseries", "title": "GPU power (W)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [ { "refId": "A", "expr": "max by (gpu, Hostname) (DCGM_FI_DEV_POWER_USAGE)", "legendFormat": "{{Hostname}} GPU{{gpu}}" } ],
+          "fieldConfig": { "defaults": { "unit": "watt", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 3, "type": "timeseries", "title": "GPU temperature (°C)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [ { "refId": "A", "expr": "max by (gpu, Hostname) (DCGM_FI_DEV_GPU_TEMP)", "legendFormat": "{{Hostname}} GPU{{gpu}}" } ],
+          "fieldConfig": { "defaults": { "unit": "celsius", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 85 } ] } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "Framebuffer memory used",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [ { "refId": "A", "expr": "max by (gpu, Hostname, modelName) (DCGM_FI_DEV_FB_USED) * 1048576", "legendFormat": "{{Hostname}} GPU{{gpu}}" } ],
+          "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull","max"] } }
+        },
+        {
+          "id": 5, "type": "stat", "title": "GPU utilization now",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+          "targets": [ { "refId": "A", "expr": "max by (gpu, Hostname) (DCGM_FI_DEV_GPU_UTIL)", "legendFormat": "{{Hostname}} GPU{{gpu}}" } ],
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null }, { "color": "green", "value": 1 }, { "color": "yellow", "value": 80 } ] } }, "overrides": [] },
+          "options": { "colorMode": "background", "graphMode": "area", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        }
+      ]
+    }

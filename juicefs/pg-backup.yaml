@@ -1,0 +1,78 @@
+# Nightly backup of the JuiceFS metadata DB.
+#
+# WHY THIS MATTERS: in JuiceFS, this Postgres DB *is* the filesystem index — it
+# maps every file/dir/inode to the chunk objects in RustFS. The chunk bytes in
+# RustFS are meaningless without it. Lose this DB and EVERY home dir becomes
+# unrecoverable, even though the data still sits in RustFS. So we snapshot it.
+#
+# This dumps to a dedicated PVC on cirrus/tank. That protects against DB
+# corruption / bad migration / accidental drop. It does NOT protect against loss
+# of the tank pool itself — FOLLOW-UP: mirror these dumps off-cluster (e.g.
+# `mc mirror` the backups to an off-site S3, or restic to another host).
+#
+# (Alternative engine-agnostic approach: `juicefs dump` exports metadata to a
+# portable JSON image restorable with `juicefs load`. We use pg_dump here.)
+#
+# Apply: kubectl apply -f juicefs/pg-backup.yaml
+# Restore: gunzip -c <dump>.sql.gz | psql -h juicefs-pg.juicefs.svc -U juicefs -d juicefs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: juicefs-pg-backup
+  namespace: juicefs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: openebs-zfs
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: juicefs-pg-backup
+  namespace: juicefs
+spec:
+  schedule: "17 4 * * *"          # nightly 04:17
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: cirrus
+          containers:
+            - name: pg-dump
+              image: postgres:16          # match the server major version
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: juicefs-pg
+                      key: password
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  ts=$(date -u +%Y%m%d-%H%M%S)
+                  out="/backup/juicefs-meta-${ts}.sql.gz"
+                  echo "dumping metadata DB -> ${out}"
+                  pg_dump -h juicefs-pg.juicefs.svc -U juicefs -d juicefs \
+                    | gzip > "${out}"
+                  echo "size: $(du -h "${out}" | cut -f1)"
+                  # retain last 14 days
+                  find /backup -name 'juicefs-meta-*.sql.gz' -mtime +14 -delete
+                  echo "current backups:"; ls -lh /backup
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: juicefs-pg-backup

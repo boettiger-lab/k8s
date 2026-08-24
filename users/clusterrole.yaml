@@ -1,0 +1,20 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ${USERID}-cluster-readnodes
+rules:
+  # Allow user to list and get Nodes (cluster-scoped)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+
+  # Optional: improve `kubectl describe node` with related info
+  # Events are namespaced but binding a ClusterRole allows access across namespaces
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+
+  # Listing pods across namespaces lets `kubectl describe node` show pods on the node
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]

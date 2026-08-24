@@ -1,0 +1,153 @@
+# RustFS on the ACTIVE cirrus cluster (distinct from the nimbus manifests in
+# this dir: init.yaml/deployment.yaml/service.yaml target s3.nimbus).
+#
+# Purpose: a dedicated, durable S3 backend on cirrus/tank (openebs-zfs) for the
+# JuiceFS `juicefs-homes` bucket — see docs/.../infrastructure/shared-home-storage.md.
+# This runs ALONGSIDE the existing MinIO (minio ns, /mnt/nvme2,3 hostPath), which
+# is left completely untouched. Migrating MinIO's existing data here is a separate,
+# later effort.
+#
+# Secret is NOT in this file. Create it first (see juicefs/credentials.example.yaml):
+#   kubectl -n rustfs create secret generic rustfs-secrets \
+#     --from-literal=access-key=<AK> --from-literal=secret-key=<SK>
+#
+# NOTE: not yet applied to the cluster. Apply with `kubectl apply -f rustfs/cirrus.yaml`.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rustfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rustfs-data
+  namespace: rustfs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: openebs-zfs   # cirrus `tank` (SSD). Thin/sparse: ceiling, not a reservation.
+  resources:
+    requests:
+      storage: 4Ti
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: rustfs
+  labels:
+    app: rustfs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rustfs
+  # Single-replica store on a node-local ZFS PVC: Recreate avoids two pods
+  # racing the same /data during a rollout.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: rustfs
+    spec:
+      # Pin to cirrus: the openebs-zfs PVC lives on cirrus `tank` and is
+      # node-local. (Matches MinIO/JupyterHub node placement.)
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            # NOTE: RUSTFS_SERVER_DOMAINS intentionally NOT set. Setting it makes
+            # RustFS attempt virtual-hosted-style bucket parsing from the Host
+            # header, which breaks path-style in-cluster access from JuiceFS
+            # (rustfs.rustfs.svc:9000) with InvalidBucketName. JuiceFS + mc both
+            # use path-style, so leave it unset.
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: access-key
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: secret-key
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rustfs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: rustfs
+  labels:
+    app: rustfs
+spec:
+  # JuiceFS reaches this purely in-cluster at rustfs.rustfs.svc:9000 — no
+  # ingress/TLS hop on the data path (see doc "S3 endpoint" decision).
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: api
+    - port: 9001
+      targetPort: 9001
+      name: console
+  selector:
+    app: rustfs
+  type: ClusterIP
+---
+# Ingress is OPTIONAL — only for browsing/testing RustFS externally while MinIO
+# is still live. The JuiceFS data path does NOT use it. Remove if undesired.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rustfs-console-ingress
+  namespace: rustfs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - rustfs.cirrus.carlboettiger.info
+      secretName: rustfs-console-tls
+  rules:
+    - host: rustfs.cirrus.carlboettiger.info
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rustfs
+                port:
+                  number: 9001

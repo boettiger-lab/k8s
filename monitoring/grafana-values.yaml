@@ -1,0 +1,73 @@
+# Grafana for the monitoring stack (drive health + GPU + node status).
+# Datasource is provisioned as code (points at the existing prometheus-server).
+# Dashboards come from labelled ConfigMaps via the sidecar (dashboards-as-code):
+# ship a ConfigMap with label `grafana_dashboard: "1"` and it auto-loads
+# (see grafana-dashboard-smart.yaml). Persistence is enabled (small PVC) so
+# admin state and any dashboards you import via the UI (e.g. Node Exporter Full
+# 1860, NVIDIA DCGM 12239) survive restarts.
+#
+# Admin credentials come from the `grafana-admin` Secret (created out-of-git by
+# install.sh with a random password) — NOT the chart's insecure default. This
+# matters because the dashboard is on a public ingress. Retrieve with:
+#   kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+# Login is required (anonymous access is OFF).
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+persistence:
+  enabled: true
+  storageClassName: openebs-zfs
+  size: 2Gi
+
+# Provision the Prometheus datasource (stable uid so dashboards can reference it).
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc.cluster.local
+        isDefault: true
+
+# Sidecar watches for ConfigMaps labelled grafana_dashboard and loads them.
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: monitoring
+    folderAnnotation: grafana_folder
+    provider:
+      foldersFromFilesStructure: true
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+  hosts:
+    - grafana-cirrus.carlboettiger.info
+  tls:
+    - hosts:
+        - grafana-cirrus.carlboettiger.info
+      secretName: grafana-cirrus-tls
+
+# grafana.ini: set the external URL so redirects/links are correct behind ingress.
+grafana.ini:
+  server:
+    root_url: https://grafana-cirrus.carlboettiger.info
+  auth.anonymous:
+    enabled: false
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "128Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"

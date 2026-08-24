@@ -1,0 +1,68 @@
+# Cluster Nodes dashboard (as-code) — at-a-glance node up/down. Uses
+# `up{job="kubernetes-nodes"}` (the kubelet scrape): it reports 1/0 PER NODE and,
+# unlike node-exporter metrics, the target PERSISTS as 0 when a node is
+# unreachable (nodes come from k8s service discovery), so a down node shows red
+# rather than just disappearing. Auto-loaded by the Grafana sidecar.
+#
+# Note: this reflects kubelet reachability. A node that's up but cordoned still
+# reads UP here (kubelet is fine) — distinguishing Ready/cordoned/pressure needs
+# kube-state-metrics (currently disabled in prometheus-values.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cluster
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hosts"
+data:
+  cluster.json: |
+    {
+      "uid": "cluster-nodes",
+      "title": "Cluster Nodes",
+      "tags": ["cluster", "nodes"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "templating": { "list": [] },
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Node status (kubelet reachable)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 18, "x": 0, "y": 0 },
+          "targets": [ { "refId": "A", "expr": "up{job=\"kubernetes-nodes\"}", "legendFormat": "{{instance}}" } ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+            },
+            "overrides": []
+          },
+          "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 2, "type": "stat", "title": "Nodes up / total",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            { "refId": "A", "expr": "sum(up{job=\"kubernetes-nodes\"})", "legendFormat": "up" },
+            { "refId": "B", "expr": "count(up{job=\"kubernetes-nodes\"})", "legendFormat": "total" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+          "options": { "colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 3, "type": "timeseries", "title": "Node up/down history (1 = up, 0 = down)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+          "targets": [ { "refId": "A", "expr": "up{job=\"kubernetes-nodes\"}", "legendFormat": "{{instance}}" } ],
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 15 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min"] } }
+        }
+      ]
+    }

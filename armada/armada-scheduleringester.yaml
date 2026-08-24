@@ -1,0 +1,24 @@
+apiVersion: install.armadaproject.io/v1alpha1
+kind: SchedulerIngester
+metadata:
+  name: armada-scheduleringester
+  namespace: armada
+spec:
+  replicas: 1
+
+  image:
+    repository: gresearch/armada-scheduler-ingester
+    tag: "latest"
+
+  applicationConfig:
+    pulsar:
+      URL: "pulsar://armada-pulsar-broker.armada.svc.cluster.local:6650"
+
+    postgres:
+      connection:
+        host: armada-postgresql.armada.svc.cluster.local
+        port: 5432
+        user: armada
+        password: ${ARMADA_POSTGRES_PASSWORD}
+        dbname: scheduler
+        sslmode: disable

@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron
+  namespace: default
+  labels:
+    k8s-app: vllm-nimbus-nemotron
+spec:
+  replicas: 1
+  # Recreate (not RollingUpdate): nimbus is a single DGX Spark (one GB10 GPU)
+  # exposed via NVIDIA time-slicing as 8 nvidia.com/gpu replicas. This pod
+  # requests 7 of the 8 slices, so a surge-first rollout can't place the new
+  # pod (only 1 slice free) and pins it in Pending forever. Tear down old
+  # before creating new.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-nemotron
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-nemotron
+    spec:
+      runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ngc-pull
+      containers:
+      - name: sglang
+        # Official NVIDIA NGC container: pre-compiled for ARM64 + SM121, all
+        # dependency issues (PyTorch CUDA 13, Triton SM121, FlashInfer) pre-solved.
+        # Requires NGC pull secret — see README for setup.
+        # Alternative if NGC auth is unavailable:
+        #   scitrera/dgx-spark-sglang:0.5.8-t4
+        #
+        # 26.06 = SGLang 0.5.12.post1, FlashInfer 0.6.12 (carries PCG dynamo fix
+        # #3081), CUDA 13.3.0. First NGC tag with FlashInfer >=0.6.12, so we can
+        # finally drop --disable-piecewise-cuda-graph (see args below). 26.05
+        # shipped FlashInfer 0.6.10 (no #3081) and would re-trigger the crash.
+        image: nvcr.io/nvidia/sglang:26.06-py3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        - name: SGLANG_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        # Pre-warm the FP4 SM120 quantization kernel BEFORE sglang.launch_server.
+        # On FlashInfer <0.6.12 this was a *crash workaround*: PCG capture traced
+        # fp4_quantize under torch.dynamo, which shelled out to `nvcc --version`
+        # (threading.Lock, untraceable) and aborted the worker. FlashInfer 0.6.12
+        # (#3081) registers fp4_quantize as a torch.compile-compatible custom op,
+        # so that crash is fixed at the source. On 26.06 the prewarm is now only
+        # a startup-latency optimization — it populates ~/.cache/flashinfer so the
+        # first in-graph FP4 call hits a cached `.so` instead of JIT-compiling.
+        #
+        # Informational: log the FlashInfer version. PCG is disabled below, so
+        # this is no longer load-bearing — but the version matters if anyone
+        # re-tests PCG (needs >=0.6.12 for the #3081 dynamo fix; note even 0.6.12
+        # still hits the BF16 cublas capture crash, see the PCG flag comment).
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          FI_VER=$(python3 -c 'import flashinfer; print(flashinfer.__version__)')
+          echo "[prewarm] flashinfer=$FI_VER"
+          pip install --no-cache-dir --quiet flashinfer-jit-cache 2>&1 | tail -5 \
+            || echo "[prewarm] flashinfer-jit-cache install failed (non-fatal)"
+          python3 - <<'PY'
+          import time, torch
+          maj, mn = torch.cuda.get_device_capability(0)
+          key = f"{maj}{mn}"
+          print(f"[prewarm] device={torch.cuda.get_device_name(0)} sm={key}")
+          from flashinfer.quantization.fp4_quantization import get_fp4_quantization_module
+          t0 = time.time()
+          mod = get_fp4_quantization_module(key)
+          print(f"[prewarm] built sm{key} fp4_quantization in {time.time()-t0:.1f}s -> {mod}")
+          PY
+          echo "[prewarm] launching sglang.launch_server"
+          exec python3 -m sglang.launch_server "$@"
+        - prewarm-launcher
+        - --model
+        - nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+        - --served-model-name
+        - nemotron
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --api-key
+        - $(SGLANG_API_KEY)
+        - --trust-remote-code
+        - --enable-metrics
+        - --log-requests
+        - --tp
+        - "1"
+        - --tool-call-parser
+        - qwen3_coder
+        - --mem-fraction-static
+        - "0.875"
+        - --context-length
+        - "262144"
+        - --kv-cache-dtype
+        - fp8_e4m3
+        # no_buffer required — extra_buffer asserts on NemotronHForCausalLM
+        - --mamba-scheduler-strategy
+        - no_buffer
+        - --max-running-requests
+        - "10"
+        # Disable piecewise CUDA graph — still REQUIRED on 26.06 (2026-07-02 test).
+        # We re-enabled PCG on 26.06/FlashInfer 0.6.12 to test recovery of the
+        # prefill win. Result: FlashInfer 0.6.12 (#3081) DID fix the original
+        # torch.dynamo `allocate_lock` crash (gone from logs) — but PCG capture
+        # now fails at a *different* point: a BF16 cublasGemmEx (CUDA_R_16BF)
+        # inside moe_forward_piecewise_cuda_graph_impl returns
+        # CUBLAS_STATUS_INTERNAL_ERROR on SM121 (crashes at the 8192-token
+        # bucket). This matches FlashInfer #3170's open "no BF16 backend for
+        # SM121" item. Full (non-piecewise) CUDA-graph capture for bs
+        # {1,2,4,8,10} succeeds; only the piecewise path fails. SGLang's own
+        # error message says to add this flag. So PCG stays off; we lose the
+        # prefill win (same as 26.04) but the model serves.
+        - --disable-piecewise-cuda-graph
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        resources:
+          requests:
+            cpu: 4
+            memory: 85Gi
+            nvidia.com/gpu: 7
+          limits:
+            cpu: 4
+            memory: 85Gi
+            nvidia.com/gpu: 7
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

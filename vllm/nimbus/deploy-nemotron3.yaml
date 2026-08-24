@@ -1,0 +1,66 @@
+# DEPRECATED: vLLM deployment with Marlin fallback kernels.
+# Superseded by deploy-nemotron-sglang.yaml which uses SGLang with native
+# FlashInfer FP4 GEMM on SM121 (GB10/DGX Spark).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron-vllm
+  namespace: nimbus
+  labels:
+    app: nemotron
+    engine: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nemotron
+  template:
+    metadata:
+      labels:
+        app: nemotron
+        engine: vllm
+    spec:
+      containers:
+      - name: vllm-server
+        # It's recommended to use the official NVIDIA container or the latest vllm release 
+        # to ensure the FlashInfer SM120/GB10 kernels are present
+        image: vllm/vllm-openai:latest 
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - "--model"
+        - "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
+        - "--quantization"
+        - "modelopt_fp4"
+        - "--tensor-parallel-size"
+        - "1"  # DGX Spark is a single coherent GPU
+        - "--max-model-len"
+        - "131072"
+        - "--kv-cache-dtype"
+        - "fp8"  # CRITICAL: Prevents OOM on the 128GB Spark with this 120B model
+        - "--enable-prefix-caching" # Highly recommended for agentic workloads
+        - "--gpu-memory-utilization"
+        - "0.95"
+        - "--port"
+        - "8000"
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          limits:
+            nvidia.com/gpu: "1" # Assuming your K3s node advertises the Spark as 1 GPU
+        volumeMounts:
+        - mountPath: /root/.cache/huggingface
+          name: hf-cache
+          # If you use a gated model or require an HF token, mount your secret here
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-secret
+              key: token
+      volumes:
+      - name: hf-cache
+        hostPath:
+          path: /mnt/data/huggingface # Or your preferred K3s PVC
+          type: DirectoryOrCreate
+

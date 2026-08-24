@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemma4
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-gemma4
+spec:
+  # Kept scaled to 0: only one model serves cirrus at a time (currently qwen3-8).
+  # Scale the live model to 0 before bumping this to 1 -- they share one card.
+  replicas: 0
+  selector:
+    matchLabels:
+      k8s-app: vllm-cirrus-gemma4
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-cirrus-gemma4
+        # Selected by the shared vllm-service (see endpoint.yaml): whichever
+        # model is scaled up owns https://vllm-cirrus.carlboettiger.info
+        vllm-endpoint: cirrus
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      imagePullSecrets:
+      - name: ghcr-pull-secret
+      containers:
+      - name: vllm
+        image: ghcr.io/boettiger-lab/vllm-gemma4-audio:amd64
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vllm-huggingface-token
+              key: token
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        args:
+        - --model
+        - google/gemma-4-E2B-it
+        - --served-model-name
+        - gemma4
+        - --dtype
+        - auto
+        - --trust-remote-code
+        - --tensor-parallel-size
+        - "1"
+        - --gpu-memory-utilization
+        - "0.5"
+        - --max-model-len
+        - "65536"
+        - --limit-mm-per-prompt
+        - '{"audio": 1, "image": 4}'
+        - --enable-auto-tool-choice
+        - --tool-call-parser
+        - gemma4
+        # With a shared endpoint, the Service must not route to an engine that
+        # is still loading (weights + graph capture can take ~6 min cold, ~2 min
+        # warm), otherwise a model switch serves 502s. Readiness only, no
+        # liveness: a wedged engine stays up for debugging instead of
+        # crash-looping. /health needs no auth.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 60
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        - name: vllm-cache
+          mountPath: /root/.cache/vllm
+        resources:
+          requests:
+            cpu: 4
+            memory: 10Gi
+            nvidia.com/gpu: 2
+          limits:
+            cpu: 4
+            memory: 10Gi
+            nvidia.com/gpu: 2
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: vllm-cache
+        # torch.compile / AOT artifacts. Without this on the host, every pod
+        # restart recompiles from scratch (~80s) since /root/.cache/vllm would
+        # otherwise live in the container's ephemeral layer.
+        hostPath:
+          path: /home/cboettig/.cache/vllm
+          type: DirectoryOrCreate
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

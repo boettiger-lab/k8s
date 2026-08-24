@@ -15,6 +15,11 @@ metadata:
     k8s-app: minio-app
 spec:
   replicas: 1
+  # Recreate (not RollingUpdate): this is a single-replica store backed by
+  # hostPath dirs on cirrus. A rolling update would briefly run two MinIO
+  # pods against the same /data dirs and collide on MinIO's file locks.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       k8s-app: minio-app
@@ -23,6 +28,13 @@ spec:
       labels:
         k8s-app: minio-app
     spec:
+      # Pin to cirrus. The data lives in hostPath dirs (/mnt/nvme2,3) that
+      # ONLY exist on cirrus. Without this, the scheduler could place MinIO on
+      # thelio, where hostPath type:DirectoryOrCreate would silently create
+      # EMPTY data dirs and serve an empty object store. Also keeps the S3 data
+      # path on-node with JupyterHub/Traefik (see docs/.../node-placement.md).
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
       containers:
       - name: minio
         image: quay.io/minio/minio:latest
