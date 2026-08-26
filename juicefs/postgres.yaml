@@ -6,7 +6,7 @@
 #
 # Secret `juicefs-pg` (key: password) must exist first — see credentials.example.yaml.
 #
-# NOTE: not yet applied. Apply with `kubectl apply -f juicefs/postgres.yaml`.
+# Apply with `kubectl apply -f juicefs/postgres.yaml`.
 ---
 apiVersion: v1
 kind: Namespace
@@ -50,6 +50,22 @@ spec:
       containers:
         - name: postgres
           image: postgres:16
+          # max_connections: 200, up from the postgres default of 100.
+          #
+          # On 2026-08-26 the JuiceFS CSI provisioner deadlocked against the
+          # default: 12 stuck delete-volume jobs each opened ~8 metadata
+          # connections on every respawn, saturated the 100 slots, and then
+          # could not complete -- so the controller recreated them, consuming
+          # more. Every client, including a plain `juicefs mount`, failed with
+          #   FATAL: sorry, too many clients already (SQLSTATE 53300)
+          # The loop could only be broken by scaling the controller to zero.
+          #
+          # 200 leaves headroom for a burst of concurrent mount/delvol jobs
+          # without letting a runaway loop take the filesystem index offline.
+          # The memory limit below is raised in step: Postgres reserves
+          # per-connection memory, so lifting the ceiling without it just moves
+          # the failure from connection exhaustion to an OOM kill.
+          args: ["-c", "max_connections=200"]
           ports:
             - containerPort: 5432
               name: postgres
@@ -74,7 +90,8 @@ spec:
               memory: "512Mi"
             limits:
               cpu: "1000m"
-              memory: "2Gi"
+              # 3Gi, raised alongside max_connections=200 above.
+              memory: "3Gi"
       volumes:
         - name: data
           persistentVolumeClaim:
