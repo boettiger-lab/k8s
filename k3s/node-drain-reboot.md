@@ -135,3 +135,52 @@ downtime:
 ```bash
 kubectl get pvc -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,SC:.spec.storageClassName
 ```
+
+## When a node dies unexpectedly (recovering jupyter servers)
+
+The procedure above is for a *planned* reboot. If thelio dies on its own, the
+jupyter servers that were running on it need one manual step before they can
+come back on cirrus.
+
+Why: a pod on an unreachable node is marked for deletion after the eviction
+timeout, but the API object stays `Terminating` for as long as the node is
+gone -- the kubelet that would confirm the deletion is not there to do it.
+JupyterHub names user pods deterministically (`jupyter-<user>`), so that stuck
+pod occupies the name its own replacement needs, and the user's spawn fails.
+
+Kubernetes' Non-Graceful Node Shutdown handles this. Once you are **certain the
+node is really down** (not merely unreachable -- see the warning below), taint
+it:
+
+```bash
+kubectl taint nodes <node> node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
+```
+
+The pods are then force-deleted and their volumes released, and users can
+spawn again immediately -- landing on cirrus, since it is the only node left.
+Remove the taint before the node rejoins:
+
+```bash
+kubectl taint nodes <node> node.kubernetes.io/out-of-service=nodeshutdown:NoExecute-
+```
+
+> **Only apply this taint to a node you have confirmed is off.** It tells
+> Kubernetes to skip the safety handshake and assume nothing is still writing.
+> If the node is actually alive but merely partitioned from the API server,
+> two pods can end up writing the same home directory at once.
+
+### What survives, and what does not
+
+Homes on `juicefs-home` survive a node loss: the data lives in rustfs, not on
+the node, and that class deliberately omits `writeback` so no writes are
+staged on local disk awaiting upload (see `../juicefs/storageclass.yaml`).
+A server lost with thelio restarts on cirrus with its home intact.
+
+Homes on `openebs-zfs` do **not** move. Those volumes are node-local to
+cirrus's tank, which pins their pods to cirrus -- they were never at risk from
+a thelio failure, and equally cannot be rescued from a cirrus one. The 21
+pre-existing homes are in this category; only claims created after the switch
+to `juicefs-home` are node-mobile.
+
+Anything held only in the notebook's memory is lost either way. This protects
+saved files, not unsaved state.
