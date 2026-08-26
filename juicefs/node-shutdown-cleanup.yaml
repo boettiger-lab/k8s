@@ -1,0 +1,140 @@
+# Node teardown for the JuiceFS CSI driver.
+#
+# k3s-agent.service ships with KillMode=process, so stopping the unit kills only
+# the k3s process -- containerd shims and the JuiceFS mount pods keep running.
+# systemd-shutdown then SIGKILLs `juicefs` while its FUSE mount is still
+# attached and spins forever in its final unmount loop. journald is already dead
+# by then, so nothing is logged and the node simply never powers off (thelio,
+# 2026-08-24: hung until the power button, which left the ZFS pool dirty and
+# broke the following boot).
+#
+# This DaemonSet installs a systemd unit on EVERY node that, at shutdown, kills
+# the shims, aborts any live FUSE connection, and unmounts the JuiceFS/kubelet
+# trees -- before umount.target is reached. Same nsenter pattern as
+# node-inotify.yaml, and likewise tolerates cordoned/tainted nodes.
+#
+# Ordering note: systemd stops units in the REVERSE of start order, so
+# "Before=k3s-agent.service" is what makes the cleanup run AFTER k3s-agent has
+# stopped. With After=, kubelet is still alive and simply recreates the mount
+# pods we just tore down (verified: 12 shims killed, 14 came back).
+#
+# Deliberately NOT k3s-killall.sh: that also rm -rf's kubelet state, flushes
+# iptables and calls systemctl, none of which belong in a reboot path.
+#
+# Removing this DaemonSet does not uninstall the unit; see README.
+#
+# Apply: kubectl apply -f juicefs/node-shutdown-cleanup.yaml
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-shutdown-cleanup
+  namespace: kube-system
+  labels:
+    app: node-shutdown-cleanup
+spec:
+  selector:
+    matchLabels:
+      app: node-shutdown-cleanup
+  template:
+    metadata:
+      labels:
+        app: node-shutdown-cleanup
+    spec:
+      hostPID: true
+      # Run on all nodes, including cordoned/tainted ones.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: install-unit
+          image: alpine:3.20
+          securityContext:
+            privileged: true
+          command: ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "sh", "-c"]
+          args:
+            - |
+              set -e
+
+              cat > /usr/local/sbin/k3s-shutdown-cleanup <<'CLEANUP'
+              #!/bin/sh
+              # Managed by juicefs/node-shutdown-cleanup.yaml -- do not edit on the host.
+              # Tears down JuiceFS/CSI FUSE mounts before systemd-shutdown's final
+              # unmount loop can wedge on them.
+              set -x
+              K3S_DATA_DIR=${K3S_DATA_DIR:-/var/lib/rancher/k3s}
+
+              # 1. Kill containerd shims -> stops mount pods and their juicefs procs.
+              getshims() {
+                  ps -e -o pid= -o args= | sed -e 's/^ *//; s/\s\s*/\t/;' |
+                      grep -w "${K3S_DATA_DIR}"'/data/[^/]*/bin/containerd-shim' | cut -f1
+              }
+              shims=$(getshims)
+              [ -n "$shims" ] && kill -9 $shims 2>/dev/null
+              sleep 3
+
+              # 2. Abort any FUSE connection still attached. This is what unwedges a
+              #    juicefs whose userspace process is already gone: pending I/O fails
+              #    fast with ENOTCONN instead of blocking umount forever.
+              for c in /sys/fs/fuse/connections/*/abort; do
+                  [ -w "$c" ] && echo 1 > "$c"
+              done
+
+              # 3. Unmount the k3s/juicefs trees, deepest path first.
+              unmount_under() {
+                  while read -r _ path _; do
+                      case "$path" in "$1"*) echo "$path" ;; esac
+                  done < /proc/self/mounts | sort -r | while read -r m; do
+                      umount -f "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+                  done
+              }
+              unmount_under /var/lib/juicefs
+              unmount_under /var/lib/kubelet
+              unmount_under /run/k3s
+
+              # 4. Anything else still on a fuse type (belt and braces).
+              while read -r _ path type _; do
+                  case "$type" in fuse|fuse.*) ;; *) continue ;; esac
+                  case "$path" in /sys/fs/fuse/connections) continue ;; esac
+                  echo "$path"
+              done < /proc/self/mounts | sort -r | while read -r m; do
+                  umount -f "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+              done
+
+              exit 0
+              CLEANUP
+              chmod 0755 /usr/local/sbin/k3s-shutdown-cleanup
+
+              cat > /etc/systemd/system/k3s-shutdown-cleanup.service <<'UNIT'
+              # Managed by juicefs/node-shutdown-cleanup.yaml -- do not edit on the host.
+              [Unit]
+              Description=Unmount JuiceFS/kubelet mounts before systemd-shutdown
+              Documentation=man:systemd.special(7)
+              # systemd stops units in the REVERSE of start order, so Before= here means
+              # k3s-agent is stopped FIRST and this unit's ExecStop runs afterwards.
+              Before=k3s-agent.service
+              DefaultDependencies=no
+              Before=umount.target shutdown.target
+              Conflicts=umount.target
+
+              [Service]
+              Type=oneshot
+              RemainAfterExit=yes
+              ExecStart=/bin/true
+              ExecStop=/usr/local/sbin/k3s-shutdown-cleanup
+              TimeoutStopSec=120
+
+              [Install]
+              WantedBy=multi-user.target
+              UNIT
+
+              systemctl daemon-reload
+              systemctl enable --now k3s-shutdown-cleanup.service
+
+              echo "node $(hostname): k3s-shutdown-cleanup $(systemctl is-enabled k3s-shutdown-cleanup.service) / $(systemctl is-active k3s-shutdown-cleanup.service)"
+              sleep infinity
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
