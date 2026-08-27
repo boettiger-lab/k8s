@@ -28,13 +28,21 @@ spec:
         prometheus.io/port: "9633"
         prometheus.io/path: "/metrics"
     spec:
-      # Cover control-plane (cirrus) and any future tainted nodes; workers untainted.
+      # Cover control-plane (cirrus) and tainted worker nodes.
       tolerations:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
         - key: node-role.kubernetes.io/master
           operator: Exists
+          effect: NoSchedule
+        # thelio is jupyter-only (hub.jupyter.org/dedicated=user:NoSchedule).
+        # SMART data from that node is the whole reason this exporter matters
+        # right now -- its disks are under investigation -- so it must not be
+        # the one node the exporter cannot reach.
+        - key: hub.jupyter.org/dedicated
+          operator: Equal
+          value: user
           effect: NoSchedule
       containers:
         - name: smartctl-exporter

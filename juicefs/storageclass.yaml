@@ -4,7 +4,7 @@
 # Verify parameter/option names against the installed juicefs-csi-driver chart
 # version at deploy time (see README) — the CSI driver must be installed first.
 #
-# NOTE: not yet applied. Apply with `kubectl apply -f juicefs/storageclass.yaml`.
+# Apply with `kubectl apply -f juicefs/storageclass.yaml`.
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -30,3 +30,42 @@ mountOptions:
   - writeback                 # async upload; trades some durability for speed on
                               # write-heavy (conda/pip/.git) workloads. Reconsider
                               # if you'd rather wait for confirmed uploads.
+---
+# juicefs-home: the class for JUPYTER HOME DIRECTORIES.
+#
+# Identical to juicefs-sc above except that it does NOT set `writeback`, and
+# that difference is the whole point of a second class. StorageClass
+# mountOptions are immutable, so this could not be a change to juicefs-sc.
+#
+# Why no writeback: writeback stages writes to the local node's cache-dir and
+# uploads to the object store asynchronously. For ARC _work scratch that is a
+# good trade -- the volume is deleted at the end of the job anyway. For a home
+# directory it is not: if the node dies with blocks still queued, the user's
+# saved work is gone. The entire reason homes go on JuiceFS is so that a pod
+# lost with thelio can be restarted on cirrus with nothing missing, and
+# writeback would silently undo that guarantee on the one node whose disks are
+# under suspicion.
+#
+# Local read caching is kept -- it is pure cache, so losing it costs latency,
+# never data.
+#
+# NOTE this is for NEW claims only. The 21 existing homes stay on openebs-zfs
+# and therefore stay pinned to cirrus; z2jh only creates a PVC when one does
+# not already exist, so pointing the hub at this class does not touch them.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: juicefs-home
+provisioner: csi.juicefs.com
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: juicefs-secret
+  csi.storage.k8s.io/provisioner-secret-namespace: juicefs
+  csi.storage.k8s.io/node-publish-secret-name: juicefs-secret
+  csi.storage.k8s.io/node-publish-secret-namespace: juicefs
+  pathPattern: "${.pvc.namespace}-${.pvc.name}"
+mountOptions:
+  - cache-dir=/var/jfsCache
+  - cache-size=51200
