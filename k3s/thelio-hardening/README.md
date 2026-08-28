@@ -1,6 +1,24 @@
-# Node hardening — freeze detection and recovery
+# thelio hardening — freeze detection and recovery
 
-Host sysctls that decide what a k3s node does when it stops responding.
+Host sysctls that decide what **thelio** does when it stops responding.
+
+**Scope: thelio only.** These are per-node — see [`../README.md`](../README.md)
+for the index and for why nimbus's guards are different. In particular, nimbus's
+GPU hang is a *unified-memory driver deadlock* and has nothing to do with
+anything here; do not cross-apply.
+
+**Related:** [`../node-drain-reboot.md`](../node-drain-reboot.md) is the ordered
+drain/reboot procedure for JuiceFS nodes. On thelio it remains the right way to
+reboot a node with mounts, and the `juicefs/node-shutdown-cleanup.yaml` DaemonSet
+is a safety net that makes an *un*-drained shutdown survivable rather than a
+replacement for draining.
+
+**On `cirrus` the DaemonSet is not a safety net — it is the only protection.**
+cirrus must never be cordoned or drained (control plane + storage + compute on
+one host), so the drain procedure simply is not available there. cirrus also
+hosts RustFS and the JuiceFS Postgres, so a shutdown wedge on it strands the
+control plane, the object store and the metadata DB at once. Deploying the
+DaemonSet cluster-wide matters more for cirrus than for thelio.
 
 ## Why these are files, not a DaemonSet
 

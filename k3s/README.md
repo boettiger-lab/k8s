@@ -126,4 +126,40 @@ verify, stop-agent, reboot procedure — and for cleaning up the stranded
 CSI deletion jobs left behind by a hard power cycle.
 
 Note that `cirrus` must never be cordoned or drained: it is the control
-plane, the storage node, and the compute node at once.
+plane, the storage node, and the compute node at once. **This is exactly why
+`juicefs/node-shutdown-cleanup.yaml` must be deployed cluster-wide:** with
+draining unavailable on cirrus, that DaemonSet is the only thing standing
+between a stalled JuiceFS mount and a control plane that will not power down.
+
+### Node hardening — where things live
+
+Hardening is **per-node**, because the failure modes are hardware-specific. Do
+not copy one node's config onto another.
+
+| Path | Node | Guards against |
+|---|---|---|
+| [`node-drain-reboot.md`](node-drain-reboot.md) | any JuiceFS node | the ordered drain/reboot procedure, and cleaning up stranded CSI deletion jobs |
+| [`thelio-hardening/`](thelio-hardening/) | **thelio** (amd64, consumer board, non-ECC, RTX 2080) | freeze *detection* — `hung_task_panic` and full SysRq, so a wedge reboots itself and can be diagnosed from the console |
+| [`nimbus-hardening/`](nimbus-hardening/) | **nimbus** (DGX Spark GB10, unified memory) | a runaway GPU pod exhausting the *shared* RAM pool — vLLM budgeting, swap sizing, and the GPU hang watchdog |
+
+**These are three different failures. Do not conflate them:**
+
+- **nimbus** — a *runtime* GPU driver deadlock. Under unified-memory pressure
+  `VLLM::EngineCore` took the NVIDIA driver's rw-semaphore and never released
+  it; every NVML consumer piled up behind it. GB10-specific, because there is
+  no discrete VRAM to isolate the GPU's allocation from the host's.
+- **thelio's JuiceFS wedge** — a *runtime* filesystem hang. A stalled FUSE
+  mount (metadata/object backend unreachable) blocks anything that stats the
+  path, and then strands `systemd-shutdown`. Not GPU-related. See
+  [`../juicefs/README.md`](../juicefs/README.md) gotcha 3.
+- **thelio's boot hang (2026-08-24 → 08-28)** — self-inflicted configuration,
+  not hardware. A `memmap=`/ramoops GRUB drop-in installed to *capture* freezes
+  was itself preventing every standard boot. Recorded in the private
+  `cluster-ops` journal; the GPU was exonerated.
+
+**The one thing they share** is worth internalising: each was a **D-state
+pile-up with the kernel still alive** — no panic, no OOM kill, so a hardware
+watchdog has nothing to notice and nothing recovers on its own. That is why
+both hardening dirs reach for `hung_task_panic` and userspace watchdogs rather
+than relying on the board's watchdog. It is a shared *class* of failure, not a
+shared cause.
