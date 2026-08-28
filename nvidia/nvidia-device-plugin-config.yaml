@@ -52,3 +52,35 @@ config:
           passDeviceSpecs: false
           deviceListStrategy: "envvar"
           deviceIDStrategy: "uuid"
+
+# NO toleration for hub.jupyter.org/dedicated=user, deliberately.
+#
+# thelio carries that taint so it hosts jupyter user pods and nothing else.
+# Tolerating it here would put the device plugin on thelio and make the node
+# advertise its RTX 2080 -- which is exactly what must NOT happen right now:
+# that card throws
+#   NVRM: Xid (PCI:0000:0a:00): 79, GPU has fallen off the bus.
+# (captured 2026-08-26 17:16:10). An Xid 79 is the GPU dropping off PCIe at the
+# hardware level, and it is intermittent -- the card looks perfectly healthy in
+# DCGM between events. Any GPU notebook scheduled there would die hard when it
+# next drops, so the node must not offer nvidia.com/gpu at all until the
+# hardware is repaired or replaced.
+#
+# Withholding the toleration is the whole mechanism: no plugin pod on thelio,
+# no nvidia.com/gpu advertised, and the scheduler simply cannot place GPU work
+# there. cirrus is unaffected and keeps its 16 time-sliced slices.
+#
+# dcgm-exporter DOES tolerate the taint (see ../monitoring/dcgm-exporter-values.yaml)
+# and that is intentional: we still want the card's telemetry while diagnosing it.
+#
+# TO RE-ENABLE once the GPU is fixed, add back:
+#   - key: hub.jupyter.org/dedicated
+#     operator: Equal
+#     value: user
+#     effect: NoSchedule
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule

@@ -1,0 +1,23 @@
+# /etc/rancher/k3s/config.yaml  -- nimbus (DGX Spark GB10)
+#
+# The stock kubelet eviction threshold is memory.available<100Mi, which on a
+# 121 GiB unified-memory node means kubelet does nothing until the machine is
+# already dead. These thresholds give it room to evict a pod while the box is
+# still responsive.
+#
+# NOTE: eviction is a backstop, not the primary control. Per dgx-spark-memory.md,
+# cgroup limits do not constrain CUDA allocations on unified memory -- the real
+# control is --gpu-memory-utilization in the vLLM manifest.
+
+write-kubeconfig-mode: "0644"
+
+kubelet-arg:
+  # Reserve headroom for the OS and for k3s itself so the scheduler cannot
+  # commit the entire pool to pods.
+  - "system-reserved=cpu=1,memory=4Gi"
+  - "kube-reserved=cpu=1,memory=2Gi"
+  # Start evicting well before the driver has a chance to deadlock.
+  - "eviction-hard=memory.available<6Gi,nodefs.available<10%"
+  - "eviction-soft=memory.available<12Gi"
+  - "eviction-soft-grace-period=memory.available=90s"
+  - "eviction-max-pod-grace-period=30"

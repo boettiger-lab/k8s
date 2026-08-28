@@ -24,6 +24,12 @@ data:
     metadata:
       name: espm-job-pod
     spec:
+      # Pin job pods to cirrus as well. The runner pod's nodeSelector does NOT
+      # propagate: under containerMode kubernetes each `container:` job runs as
+      # a SIBLING pod created by the hooks, scheduled independently. Without
+      # this, a job pod can land on thelio even when its runner did not.
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
       # The kube-mode ServiceAccount holds secrets get/list in arc-runners,
       # which is where the GitHub PAT lives. Workflow steps run in THIS pod, so
       # refuse the token projection — this matters more here than for eco4cast,

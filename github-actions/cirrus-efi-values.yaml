@@ -37,6 +37,14 @@ containerMode:
 
 template:
   spec:
+    # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
+    # but has unresolved disk health issues, and ARC's _work volumes are the
+    # heaviest storage churn in the cluster -- a runner landing there is exactly
+    # what must not happen. A cordon alone is not enough: it stops NEW pods but
+    # says nothing about intent, and it gets lifted. This makes the placement
+    # explicit and survives an uncordon.
+    nodeSelector:
+      kubernetes.io/hostname: cirrus
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest

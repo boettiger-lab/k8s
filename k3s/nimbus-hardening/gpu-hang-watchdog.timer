@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the DGX Spark GPU hang watchdog every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=5s
+Unit=gpu-hang-watchdog.service
+
+[Install]
+WantedBy=timers.target

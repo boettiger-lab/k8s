@@ -1,0 +1,12 @@
+[Unit]
+Description=DGX Spark GPU hang watchdog (one-shot, driven by .timer)
+Documentation=https://github.com/boettiger-lab/k8s/tree/main/k3s/nimbus-hardening
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gpu-hang-watchdog.sh
+# Set to 0 to keep the kill escalation but never reboot the node.
+Environment=ALLOW_REBOOT=1
+# The watchdog must not be starved by the pressure it is trying to relieve.
+OOMScoreAdjust=-900
+Nice=-5

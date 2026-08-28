@@ -116,3 +116,14 @@ cp /etc/rancher/k3s/k3s.yaml ~/k3s-remote-kubeconfig.yaml
 # Edit and replace 127.0.0.1 with your server's IP or hostname
 sed -i 's/127.0.0.1/YOUR_SERVER_IP/g' ~/k3s-remote-kubeconfig.yaml
 ```
+
+## Node Maintenance
+
+Rebooting a worker node that has JuiceFS volumes mounted will hang at
+shutdown unless you drain it first. See
+[`node-drain-reboot.md`](node-drain-reboot.md) for the ordered drain,
+verify, stop-agent, reboot procedure — and for cleaning up the stranded
+CSI deletion jobs left behind by a hard power cycle.
+
+Note that `cirrus` must never be cordoned or drained: it is the control
+plane, the storage node, and the compute node at once.
