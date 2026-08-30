@@ -14,9 +14,11 @@
 # node-inotify.yaml, and likewise tolerates cordoned/tainted nodes.
 #
 # Ordering note: systemd stops units in the REVERSE of start order, so
-# "Before=k3s-agent.service" is what makes the cleanup run AFTER k3s-agent has
-# stopped. With After=, kubelet is still alive and simply recreates the mount
-# pods we just tore down (verified: 12 shims killed, 14 came back).
+# "Before=<k3s unit>" is what makes the cleanup run AFTER k3s has stopped. With
+# After=, kubelet is still alive and simply recreates the mount pods we just
+# tore down (verified: 12 shims killed, 14 came back). Both k3s-agent.service
+# and k3s.service are named, since agent nodes and the server use different
+# unit names and an unmatched ordering dependency is simply ignored.
 #
 # Deliberately NOT k3s-killall.sh: that also rm -rf's kubelet state, flushes
 # iptables and calls systemctl, none of which belong in a reboot path.
@@ -110,8 +112,16 @@ spec:
               Description=Unmount JuiceFS/kubelet mounts before systemd-shutdown
               Documentation=man:systemd.special(7)
               # systemd stops units in the REVERSE of start order, so Before= here means
-              # k3s-agent is stopped FIRST and this unit's ExecStop runs afterwards.
-              Before=k3s-agent.service
+              # k3s is stopped FIRST and this unit's ExecStop runs afterwards.
+              #
+              # BOTH unit names are listed on purpose: agent nodes (thelio) run
+              # k3s-agent.service, the server (cirrus) runs k3s.service. systemd
+              # silently ignores an ordering dependency naming a unit that does not
+              # exist, so each node picks up whichever applies and the other is a
+              # no-op. With only k3s-agent.service here, the ordering was inert on
+              # cirrus -- leaving the cleanup racing a still-live kubelet, which is
+              # the exact case this unit exists to avoid.
+              Before=k3s-agent.service k3s.service
               DefaultDependencies=no
               Before=umount.target shutdown.target
               Conflicts=umount.target
