@@ -53,34 +53,30 @@ config:
           deviceListStrategy: "envvar"
           deviceIDStrategy: "uuid"
 
-# NO toleration for hub.jupyter.org/dedicated=user, deliberately.
+# thelio carries hub.jupyter.org/dedicated=user:NoSchedule so it hosts jupyter
+# user pods and nothing else. The chart's defaults cover CriticalAddonsOnly and
+# nvidia.com/gpu but not that taint, so without the entry below the plugin does
+# not schedule there and the node advertises no nvidia.com/gpu at all -- GPU
+# notebook profiles silently cannot use its RTX 2080.
 #
-# thelio carries that taint so it hosts jupyter user pods and nothing else.
-# Tolerating it here would put the device plugin on thelio and make the node
-# advertise its RTX 2080 -- which is exactly what must NOT happen right now:
-# that card throws
+# HISTORY, so nobody removes this again on the same bad reasoning: this
+# toleration was withdrawn on 2026-08-26 after a single
 #   NVRM: Xid (PCI:0000:0a:00): 79, GPU has fallen off the bus.
-# (captured 2026-08-26 17:16:10). An Xid 79 is the GPU dropping off PCIe at the
-# hardware level, and it is intermittent -- the card looks perfectly healthy in
-# DCGM between events. Any GPU notebook scheduled there would die hard when it
-# next drops, so the node must not offer nvidia.com/gpu at all until the
-# hardware is repaired or replaced.
-#
-# Withholding the toleration is the whole mechanism: no plugin pod on thelio,
-# no nvidia.com/gpu advertised, and the scheduler simply cannot place GPU work
-# there. cirrus is unaffected and keeps its 16 time-sliced slices.
-#
-# dcgm-exporter DOES tolerate the taint (see ../monitoring/dcgm-exporter-values.yaml)
-# and that is intentional: we still want the card's telemetry while diagnosing it.
-#
-# TO RE-ENABLE once the GPU is fixed, add back:
-#   - key: hub.jupyter.org/dedicated
-#     operator: Equal
-#     value: user
-#     effect: NoSchedule
+# was read as a dying card. It was not. thelio's boot hangs were caused by
+# /etc/default/grub.d/99-freeze-capture.cfg, whose memmap/ramoops reservation
+# wedged the kernel early; recovery entries are built from GRUB_CMDLINE_LINUX
+# rather than GRUB_CMDLINE_LINUX_DEFAULT, which is the only reason they escaped
+# it. With the drop-in gone the machine runs a clean standard boot (49h+ uptime,
+# no nomodeset). The GPU is healthy: link back at x16, zero Xid since, microcode
+# applied. The Xid and an observed x8 link were a latched state that cleared
+# only once power was fully removed.
 tolerations:
   - key: CriticalAddonsOnly
     operator: Exists
   - key: nvidia.com/gpu
     operator: Exists
+    effect: NoSchedule
+  - key: hub.jupyter.org/dedicated
+    operator: Equal
+    value: user
     effect: NoSchedule
