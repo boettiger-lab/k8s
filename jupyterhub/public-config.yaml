@@ -39,7 +39,17 @@ singleuser:
   storage:
     type: dynamic
     extraLabels: {}
-    capacity: 100Gi
+    # 30Gi, down from 100Gi. On juicefs-home this is applied as a per-directory
+    # quota rather than a preallocation, so the old 100Gi never reserved
+    # anything -- but it did set the ceiling a user could fill, and 100Gi per
+    # head does not scale across a class. 30Gi is a realistic working set for a
+    # notebook home; anyone who needs more can have their PVC expanded
+    # (juicefs-home sets allowVolumeExpansion: true).
+    #
+    # NEW CLAIMS ONLY. Existing PVCs keep the size they were created with --
+    # capacity is fixed at bind time and z2jh reuses a PVC that already exists,
+    # so no current user's home changes or shrinks.
+    capacity: 30Gi
     homeMountPath: /home/jovyan
     dynamic:
       # juicefs-home (RWX), not openebs-zfs (RWO, node-local to cirrus).
