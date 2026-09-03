@@ -93,7 +93,7 @@ This is **not** a replacement for ZFS:
 
 Homes will live here, so both backends need real durability:
 
-1. **RustFS** (`rustfs/deployment.yaml`) backed by `cirrus`/`tank` (openebs-zfs),
+1. **RustFS** (`rustfs/cirrus.yaml`) backed by `cirrus`/`tank` (openebs-zfs),
    with its own redundancy/backup — it now holds home *data*, so a single-node
    RustFS is a data SPOF.
 2. **Dedicated PostgreSQL** (e.g. a `juicefs` namespace) on `tank`, with WAL

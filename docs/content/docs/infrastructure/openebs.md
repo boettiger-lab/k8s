@@ -196,15 +196,41 @@ spec:
 
 ### Test PVC Creation
 
-Use the test manifest:
+Claim a small volume from `openebs-zfs` and confirm it binds and mounts:
 
 ```bash
-kubectl apply -f openebs/nimbus/test-pvc.yml
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zfs-test
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: openebs-zfs
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: zfs-test
+spec:
+  containers:
+  - name: shell
+    image: busybox
+    command: ["sh", "-c", "echo hello > /data/test && sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: zfs-test
+EOF
 ```
 
-This creates:
-1. A PVC requesting storage from `openebs-zfs`
-2. A pod that mounts the PVC and writes test data
+Clean up with `kubectl delete pod/zfs-test pvc/zfs-test`.
 
 Verify:
 

@@ -6,12 +6,13 @@ bookToc: true
 
 # Node Placement: keep the data path on cirrus
 
-The active cluster has two nodes:
+The cluster has three nodes:
 
 | Node | Role | Hardware | Status |
 |------|------|----------|--------|
 | **cirrus** | control-plane + **primary data/compute node** | Threadripper, ECC RAM, 2× Quadro RTX 8000, NVMe | Always schedulable — **never cordon** |
 | **thelio** | expansion worker | Ryzen 9, RTX 2080, ZFS pool (HDD/SMR, problematic) | Currently **cordoned / parked** pending zpool repair |
+| **nimbus** | GPU worker, sanctioned workloads only | DGX Spark, GB10, **arm64**, 121 GiB unified memory | Ready, **tainted** `dedicated=nimbus:NoSchedule` |
 
 thelio was only ever meant to be an expansion node. All stateful and
 bandwidth-critical services live on **cirrus**, where the data physically is
@@ -80,6 +81,64 @@ upgrades and reboots.
 > (app v3.7.1) and the HelmChartConfig nodeSelector applies cleanly. This
 > delete-the-stale-job trick is the general remedy for a wedged k3s HelmChart
 > reconcile.
+
+### 4. nimbus is tainted, not cordoned
+
+nimbus is the one node that is deliberately *not* generally available. It
+registers with `node-taint: dedicated=nimbus:NoSchedule` set in
+`/etc/rancher/k3s/config.yaml`, so it is never schedulable for general work —
+not even for the moment between joining and being configured.
+
+A taint rather than a cordon, because the two are not the same tool:
+
+- **Cordon** is an operational, temporary state (`unschedulable: true`), and
+  anything that reconciles the node — an upgrade plan, an accidental
+  `kubectl uncordon` — clears it. It is also cluster-wide and all-or-nothing.
+- **A taint** is declarative and selective. It is part of the node's
+  registration, survives reboots and upgrades, and lets specific workloads opt
+  in with a matching toleration.
+
+Two reasons nimbus needs that:
+
+1. **Architecture.** nimbus is arm64; cirrus and thelio are amd64. Most of the
+   cluster's images are amd64-only, so a pod that lands on nimbus by accident
+   does not fail politely — it `CrashLoopBackOff`s with an exec-format error.
+2. **Unified memory.** The GB10 has no discrete VRAM. GPU allocations come out
+   of the same 121 GiB pool as the OS and every other pod, cgroup limits do not
+   bound CUDA, and over-committing it has twice wedged the NVIDIA driver hard
+   enough to need a physical power cycle. Co-tenancy on this node is a hazard,
+   not a feature. See
+   [`k3s/nimbus-hardening/`](https://github.com/boettiger-lab/k8s/tree/main/k3s/nimbus-hardening).
+
+Sanctioned workloads declare it twice — a toleration to get past the taint, a
+`nodeSelector` to actually land there:
+
+```yaml
+nodeSelector:
+  kubernetes.io/hostname: nimbus
+tolerations:
+- key: dedicated
+  operator: Equal
+  value: nimbus
+  effect: NoSchedule
+```
+
+A toleration alone is not enough: it grants *permission* to schedule on a
+tainted node, it does not *attract* the pod there. Today the list is vLLM
+(`vllm/nimbus/`), the GPU MCP data server (`mcp/nimbus/`), and the GPU/feature
+DaemonSets that must cover every GPU node — the NVIDIA device plugin,
+node-feature-discovery and dcgm-exporter, whose chart values carry the
+toleration.
+
+Because Traefik is pinned to cirrus (item 3), `vllm-nimbus.carlboettiger.info`
+and `gpu-mcp-nimbus.carlboettiger.info` resolve to **cirrus's** IP and hairpin
+across the LAN to nimbus. That is the accepted trade for one uniform
+ingress/cert/DNS path; the extra hop is irrelevant to token streaming, but it
+does make cirrus a hard dependency for nimbus's endpoints.
+
+nimbus holds no cluster storage. `tank`, OpenEBS ZFS-LocalPV, JuiceFS and RustFS
+are all cirrus-side, and nothing storage-related tolerates the taint on purpose.
+Its only stateful need is a hostPath model cache.
 
 ### CoreDNS
 

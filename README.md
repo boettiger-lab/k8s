@@ -11,15 +11,21 @@ and CI runners — on campus GPU workstations.
 
 ## Clusters
 
-This repo describes **more than one independent K3s cluster**. Node-specific
+This repo describes **one K3s cluster** with several nodes. Node-specific
 config lives in per-node subdirectories (e.g. `openebs/cirrus/`, `vllm/cirrus/`,
 `vllm/nimbus/`), while cluster-wide components live at the top level.
+
+nimbus was its own standalone cluster until it was merged in; the migration and
+the reasoning behind its taint are in [`k3s/nimbus-join/`](k3s/nimbus-join/).
+Note the cluster is **mixed-architecture** — cirrus and thelio are amd64,
+nimbus is arm64 — so an image that only exists for amd64 must never be allowed
+to schedule on nimbus. The taint is what enforces that.
 
 | Node | Role |
 |------|------|
 | **cirrus** | Primary active cluster: control plane + data + GPU compute. Hosts JupyterHub, storage, and inference. **Never cordon it** — it is the control plane, data, and compute all in one. |
 | **thelio** | System76 Thelio Mega GPU worker for cirrus. Currently parked/cordoned (expansion-only) pending a ZFS pool repair. |
-| **nimbus** | A separate, independent cluster (`*-nimbus` config). Not part of the cirrus+thelio cluster — don't mix them. |
+| **nimbus** | DGX Spark (GB10, **arm64**) GPU worker. Tainted `dedicated=nimbus:NoSchedule` — it runs only specially sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. See [`k3s/nimbus-join/`](k3s/nimbus-join/). |
 
 ## Architecture
 
@@ -39,9 +45,9 @@ The cluster is built on:
 
 | Directory | Purpose |
 |-----------|---------|
-| [`k3s/`](k3s/) | K3s install/reset, remote kubeconfig, and node-upgrade tooling |
+| [`k3s/`](k3s/) | K3s install/reset, remote kubeconfig, node-upgrade tooling, [nimbus join runbook](k3s/nimbus-join/) and [nimbus node hardening](k3s/nimbus-hardening/) |
 | [`nvidia/`](nvidia/) | NVIDIA device plugin + GPU time-slicing config |
-| [`openebs/`](openebs/) | OpenEBS ZFS-LocalPV storage classes (per-node: `cirrus/`, `nimbus/`) |
+| [`openebs/`](openebs/) | OpenEBS ZFS-LocalPV storage classes (cirrus only — nimbus is compute-only) |
 | [`cert-manager/`](cert-manager/) | ClusterIssuer + ingress examples for automatic HTTPS |
 | [`external-dns/`](external-dns/) | Automatic DNS provisioning |
 | [`traefik/`](traefik/) | Traefik `HelmChartConfig` overrides |
@@ -56,6 +62,8 @@ The cluster is built on:
 | [`minio/`](minio/) | MinIO S3-compatible object storage |
 | [`postgres/`](postgres/) | PostgreSQL database service |
 | [`vllm/`](vllm/) | vLLM high-performance LLM inference (per-node: `cirrus/`, `nimbus/`) |
+| [`mcp/`](mcp/) | MCP servers (GPU data server on nimbus) |
+| [`monitoring/`](monitoring/) | Prometheus, Grafana, dcgm-exporter, carbon APIs |
 | [`github-actions/`](github-actions/) | Self-hosted GitHub Actions runners (per-repo values) |
 | [`armada/`](armada/) | Armada batch/job scheduler |
 | [`codecarbon/`](codecarbon/) | Carbon-tracking utility |
