@@ -1,0 +1,109 @@
+# nimbus-carbon-api -- ARCHIVED, NOT DEPLOYED.
+#
+# This ran at https://carbon-nimbus.carlboettiger.info while nimbus was its own
+# single-node cluster. It was only ever applied by hand and existed nowhere but
+# nimbus's etcd, so it is captured here (2026-08-24) before the cluster join
+# destroyed it.
+#
+# It is deliberately NOT part of any install script. Now that nimbus and cirrus
+# are one cluster, running a second per-node carbon API alongside
+# cirrus-carbon-api.yaml is the wrong shape -- the replacement should be a
+# single cluster-wide carbon API that breaks power down per node, rather than
+# one Deployment and one hostname per machine. Until that exists, this file is
+# the record of what the nimbus half did.
+#
+# To resurrect it as-is (it needs `dedicated=nimbus` toleration only if you pin
+# it to nimbus; as written it will schedule anywhere in the cluster):
+#     kubectl apply -f monitoring/nimbus-carbon-api.yaml
+#
+# Source image: ghcr.io/boettiger-lab/nimbus-carbon-api
+# Design notes:  docs/superpowers/specs/2026-07-04-nimbus-carbon-api-design.md
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nimbus-carbon-api
+  namespace: default
+  labels:
+    app: nimbus-carbon-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nimbus-carbon-api
+  template:
+    metadata:
+      labels:
+        app: nimbus-carbon-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: nimbus-carbon-api
+        image: ghcr.io/boettiger-lab/nimbus-carbon-api:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PROMETHEUS_URL
+          value: http://prometheus-server.monitoring.svc.cluster.local
+        - name: SCRAPE_INTERVAL
+          value: 30s
+        - name: LISTEN_ADDR
+          value: ":8080"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nimbus-carbon-api
+  namespace: default
+  labels:
+    app: nimbus-carbon-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: nimbus-carbon-api
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nimbus-carbon-api
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+  labels:
+    app: nimbus-carbon-api
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: carbon-nimbus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nimbus-carbon-api
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - carbon-nimbus.carlboettiger.info
+    secretName: nimbus-carbon-api-tls
