@@ -6,125 +6,108 @@ bookToc: true
 
 # RustFS
 
-Deploy RustFS for lightweight S3-compatible object storage on Kubernetes, backed by OpenEBS ZFS.
+S3-compatible object storage on **cirrus**, backed by the `tank` ZFS pool
+through OpenEBS ZFS-LocalPV.
 
 ## Overview
 
-[RustFS](https://rustfs.com/) is a high-performance, S3-compatible object storage system written in Rust. On the Nimbus cluster, it acts as an S3 gateway to a large (1TB) OpenEBS ZFS volume, providing a unified object storage interface for large datasets.
+[RustFS](https://rustfs.com/) is a high-performance, S3-compatible object store
+written in Rust. Its job here is to be the durable object backend for
+[JuiceFS](../../infrastructure/shared-home-storage/) — the `juicefs-homes`
+bucket, which holds user home directories — and a general S3 target for large
+datasets.
 
-## Features
-
-*   **S3 Compatible**: Works with standard S3 clients (boto3, minio-mc, aws-cli).
-*   **High Performance**: Backed by ZFS LocalPV (Local NVMe/SSD speed).
-*   **Lightweight**: Minimal resource footprint compared to distributed storage systems.
-*   **Console**: built-in web-based management UI.
+> **There is no longer a nimbus deployment.** RustFS ran on
+> `s3.nimbus.carlboettiger.info` while nimbus was its own cluster; that was
+> retired when nimbus joined cirrus as a compute-only worker
+> ([`k3s/nimbus-join/`](https://github.com/boettiger-lab/k8s/tree/main/k3s/nimbus-join)).
+> Its PVC held 276 KiB and nothing was migrated. Everything below is cirrus.
 
 ## Deployment
 
-The RustFS deployment is contained in the `transport/rustfs` directory (moved to `k8s/rustfs`).
-
-### Quick Start
-
-We provide an interactive setup script to configure credentials and deploy:
+One manifest, `rustfs/cirrus.yaml`, holding the Namespace, PVC, Deployment,
+Service and console Ingress. The interactive script prompts for credentials,
+creates the `rustfs-secrets` Secret and applies it:
 
 ```bash
 cd rustfs
 ./setup-rustfs.sh
 ```
 
-This script will:
-1.  Ask for an Access Key (default: admin)
-2.  Ask for a Secret Key (default: password)
-3.  Create the `rustfs` namespace and secrets
-4.  Deploy the persistent volume (1TB), deployment, and service/ingress.
-
-### Manual Configuration
-
-If you prefer applying manifests directly:
-
-**1. Create Secret:**
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: rustfs-secrets
-  namespace: rustfs
-stringData:
-  access-key: "your-access-key"
-  secret-key: "your-secure-password"
-```
-
-**2. Apply Manifests:**
+Or, with the Secret already in place:
 
 ```bash
-kubectl apply -f init.yaml      # PVC and Namespace
-kubectl apply -f deployment.yaml # Application
-kubectl apply -f service.yaml    # Ingress/Service
+kubectl apply -f rustfs/cirrus.yaml
 ```
 
 ## Configuration
 
-*   **Storage**: 1Ti persistent volume claim (`rustfs-data`) using `openebs-zfs`.
-*   **User**: Container runs as UID `10001`.
-*   **Domain**: Configured for `s3.nimbus.carlboettiger.info`.
+*   **Storage**: 4Ti PVC (`rustfs-data`) on `openebs-zfs`, i.e. cirrus's `tank`.
+    The class is thin/sparse, so 4Ti is a ceiling, not a reservation.
+*   **Placement**: pinned to cirrus with a `kubernetes.io/hostname` nodeSelector —
+    a ZFS-LocalPV volume is node-local, so the pod cannot move anyway.
+*   **User**: container runs as UID `10001`.
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `RUSTFS_ACCESS_KEY` | S3 Access Key | From Secret |
-| `RUSTFS_SECRET_KEY` | S3 Secret Key | From Secret |
-| `RUSTFS_SERVER_DOMAINS` | API Domain | `s3.nimbus.carlboettiger.info` |
-| `RUSTFS_CONSOLE_ENABLE` | Enable Web UI | `true` |
+| `RUSTFS_ACCESS_KEY` | S3 access key | From `rustfs-secrets` |
+| `RUSTFS_SECRET_KEY` | S3 secret key | From `rustfs-secrets` |
+| `RUSTFS_CONSOLE_ENABLE` | Enable web UI | `true` |
+
+`RUSTFS_SERVER_DOMAINS` is **deliberately unset**. Setting it makes RustFS parse
+the bucket out of the `Host` header (virtual-hosted style), which breaks
+path-style access — and both JuiceFS and `mc` use path-style, so in-cluster
+requests start failing with `InvalidBucketName`.
 
 ## Access
 
-### S3 API
+### S3 API — in-cluster only
 
-*   **Endpoint**: `https://s3.nimbus.carlboettiger.info`
-*   **Region**: `us-east-1` (default)
-*   **Signature Version**: S3v4
-
-### Web Console
-
-The web console runs on port `9001`. It is accessible internally within the cluster or via port-forwarding:
-
-```bash
-kubectl port-forward -n rustfs service/rustfs 9001:9001
-```
-
-Open `http://localhost:9001` in your browser.
-
-## Integrations
-
-### JupyterHub
-
-To use RustFS from JupyterHub notebooks, configure your S3 client:
-
-**Python (boto3):**
+The API is **not** exposed through an Ingress. Clients reach it inside the
+cluster at `http://rustfs.rustfs.svc:9000`, which keeps the JuiceFS data path
+off Traefik and off TLS entirely.
 
 ```python
 import boto3
 from botocore.client import Config
 
 s3 = boto3.client('s3',
-    endpoint_url='https://s3.nimbus.carlboettiger.info',
+    endpoint_url='http://rustfs.rustfs.svc:9000',
     aws_access_key_id='your-access-key',
     aws_secret_access_key='your-secret-key',
-    config=Config(signature_version='s3v4')
+    config=Config(signature_version='s3v4'),
 )
 ```
 
-**R (aws.s3):**
-
 ```r
 Sys.setenv(
-    "AWS_S3_ENDPOINT" = "s3.nimbus.carlboettiger.info",
+    "AWS_S3_ENDPOINT" = "rustfs.rustfs.svc:9000",
     "AWS_ACCESS_KEY_ID" = "your-access-key",
     "AWS_SECRET_ACCESS_KEY" = "your-secret-key",
-    "AWS_HTTPS" = "TRUE"
+    "AWS_HTTPS" = "FALSE"
 )
 library(aws.s3)
 bucketlist()
+```
+
+From outside the cluster, port-forward instead:
+
+```bash
+kubectl port-forward -n rustfs service/rustfs 9000:9000
+```
+
+### Web console
+
+Exposed at `https://rustfs.cirrus.carlboettiger.info` (port 9001). That Ingress
+is optional and exists only for browsing — the JuiceFS data path does not use
+it. It can be removed without affecting storage.
+
+## Verification
+
+```bash
+kubectl get pods -n rustfs
+kubectl get pvc -n rustfs
+kubectl get ingress -n rustfs
 ```
