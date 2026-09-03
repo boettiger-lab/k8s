@@ -1,0 +1,80 @@
+# The ONE public endpoint for whatever model nimbus is serving.
+#
+# Mirrors ../cirrus/endpoint.yaml exactly, one node over. nimbus hosts a single
+# vLLM model at a time (one GB10, and a 27B model wants most of the unified
+# pool), so the endpoint is a property of the machine, not the model:
+# https://vllm-nimbus.carlboettiger.info. The model identifies itself via
+# --served-model-name / GET /v1/models; it never appears in the URL.
+#
+# Model switching works the same way: every model Deployment in this directory
+# carries the pod label `vllm-endpoint: nimbus`, which is what the Service
+# selects. Scale the old model to 0, scale the new one to 1. On nimbus the GPU
+# memory budget enforces one-at-a-time anyway (see dgx-spark-memory.md).
+#
+# CHANGED WHEN NIMBUS JOINED THE CIRRUS CLUSTER (see k3s/nimbus-join/):
+#   * namespace default -> vllm, matching cirrus.
+#   * Service type LoadBalancer -> ClusterIP. k3s ServiceLB would need to run an
+#     svclb pod on nimbus to hold the external IP, and svclb only tolerates
+#     control-plane/CriticalAddonsOnly taints -- not `dedicated=nimbus`. Traffic
+#     now enters through Traefik on cirrus and crosses to nimbus over flannel,
+#     which is what the ingress below expects. Negligible for token streaming.
+#   * The ServersTransport is not defined here. cirrus and nimbus share one
+#     copy in ../serverstransport.yaml, applied by both up.sh scripts; two
+#     identical definitions would be a drift hazard the day one is tuned.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-nimbus-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus
+  annotations:
+    # Scraped by the monitoring stack's Prometheus for the carbon/perf
+    # dashboard. vLLM's /metrics is unauthenticated. Keeping the annotations on
+    # the endpoint Service (not a per-model one) means metrics survive a model
+    # switch and nothing double-scrapes the same pod.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    vllm-endpoint: nimbus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-nimbus-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    # Shared with cirrus -- defined in ../serverstransport.yaml.
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-nimbus
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-nimbus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-nimbus-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - vllm-nimbus.carlboettiger.info
+    secretName: vllm-nimbus-tls

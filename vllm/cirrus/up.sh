@@ -13,6 +13,8 @@ kubectl create namespace vllm --dry-run=client -o yaml | kubectl apply -f -
 # HF token + API key
 ../secrets.sh -n vllm
 
+# Shared with nimbus -- one definition, applied by both up.sh scripts.
+kubectl apply -f ../serverstransport.yaml
 kubectl apply -f endpoint.yaml
 kubectl apply -f "$MODEL_MANIFEST"
 

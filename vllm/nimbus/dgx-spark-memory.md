@@ -74,6 +74,61 @@ This keeps the total memory requests at ~105–115 GiB out of 128 GiB, leaving a
 
 ---
 
+## CORRECTION (2026-08-24): `--gpu-memory-utilization` does not bound allocation
+
+**Everything below this heading about `--gpu-memory-utilization` being the
+effective control is wrong on NGC `vllm:26.05.post1-py3` (vLLM
+`0.21.0+2325b6f0.dev`) with a real model.** Measured on nimbus while recovering
+from the second wedge of the day:
+
+```
+--gpu-memory-utilization 0.55   (expected budget: 0.55 x 121.69 = 66.9 GiB)
+
+  free -g immediately before KV allocation :  avail = 73 GiB
+  vLLM log: "Available KV cache memory:      73.24 GiB"
+  vLLM log: "GPU KV cache size:              2,066,397 tokens"
+  resulting process RSS:                      97.7 GiB
+  node MemAvailable afterwards:               2.2 GiB
+```
+
+vLLM claimed **all remaining free memory** — 73.24 GiB of KV against a 66.9 GiB
+total budget — and ended up consuming *more* than the 0.75 configuration it was
+brought in to replace. The utilization figure did not cap anything.
+
+**Why the original test missed it.** The experiment in the Testing section used
+`facebook/opt-125m` at `--gpu-memory-utilization 0.3`. With a 250 MB model there
+was always far more free memory than `0.3 x 121.69`, so the profiler's budget was
+the binding constraint and the flag appeared to work. The failure mode only
+appears when free memory at profiling time is *less* than
+`utilization x total` — i.e. exactly when it matters.
+
+**The actual control is an absolute cap.** `CacheConfig` in this build exposes
+both `kv_cache_memory_bytes` and `num_gpu_blocks_override`. Use the former:
+
+```yaml
+- --kv-cache-memory-bytes
+- "42949672960"     # 40 GiB
+```
+
+This bypasses the memory profiler. Size it from a measured run rather than from
+first principles — on this checkpoint, 73.24 GiB held 2,066,397 tokens, i.e.
+**38,057 bytes/token**. That is higher than the ~32 KiB/token the 16
+full-attention layers imply on their own; the balance is Gated-DeltaNet mamba
+state, which vLLM pads to equal the attention page size (see the
+`Padding mamba page size by 0.25%` line at startup).
+
+**Keep setting `--gpu-memory-utilization` anyway** — it still influences
+profiling — but never rely on it alone, and always verify after a change:
+
+```bash
+kubectl logs <pod> | grep "Available KV cache memory"
+free -g   # MemAvailable must stay well clear of the watchdog's 8 GiB floor
+```
+
+See `k3s/nimbus-hardening/README.md` for the incident and the node-level guards.
+
+---
+
 ## Choosing `--gpu-memory-utilization`
 
 This flag tells vLLM to reserve `utilization × total_visible_GPU_memory` for weights + KV cache combined. On DGX Spark, `total_visible_GPU_memory` is the full unified pool (~121.69 GiB), not the cgroup limit.
