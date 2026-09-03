@@ -59,7 +59,7 @@ To deploy or upgrade JupyterHub:
 
 **For Nimbus:**
 ```bash
-./nimbus.sh
+./cirrus.sh
 ```
 
 These scripts:
@@ -82,7 +82,7 @@ kubectl apply -n jupyter -f cirrus-redirect.yaml
 
 ### Secrets Management
 
-The configurations (`public-config.yaml`, `nimbus-config.yaml`) reference K8s secrets instead of having them inline:
+The configurations (`public-config.yaml`, `basic-config.yaml`) reference K8s secrets instead of having them inline:
 
 1.  **Image Pull Secrets**:
     *   **Root level**: `imagePullSecrets` (for singleuser pods and other hooks).
@@ -95,7 +95,7 @@ The configurations (`public-config.yaml`, `nimbus-config.yaml`) reference K8s se
 
 JupyterHub is configured with network policies that enable user pods to access external services including MinIO and other cluster services via hairpin connections.
 
-The `singleuser.networkPolicy` in `nimbus-config.yaml` allows:
+The `singleuser.networkPolicy` in the hub config allows:
 - Access to `minio.carlboettiger.info` (external domain) via hairpin connections.
 - Connect to MinIO services in the `minio` namespace.
 - Access other private IP ranges for cluster services.

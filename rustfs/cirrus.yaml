@@ -1,5 +1,6 @@
-# RustFS on the ACTIVE cirrus cluster (distinct from the nimbus manifests in
-# this dir: init.yaml/deployment.yaml/service.yaml target s3.nimbus).
+# RustFS on cirrus. This is now the only RustFS manifest -- the nimbus set
+# (init/deployment/service.yaml, s3.nimbus.*) was retired when nimbus joined the
+# cirrus cluster as a compute-only worker; see ../k3s/nimbus-join/.
 #
 # Purpose: a dedicated, durable S3 backend on cirrus/tank (openebs-zfs) for the
 # JuiceFS `juicefs-homes` bucket — see docs/.../infrastructure/shared-home-storage.md.

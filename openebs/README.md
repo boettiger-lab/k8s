@@ -1,58 +1,38 @@
 # OpenEBS ZFS Storage for Kubernetes
 
-OpenEBS provides ZFS-based persistent storage with disk quotas for Kubernetes pods.
+OpenEBS ZFS-LocalPV provides node-local persistent storage with per-PVC disk
+quotas. **All cluster storage lives on cirrus** — see [`cirrus/`](cirrus/).
 
-## Quick Setup
+> **nimbus has no storage role.** It joined the cluster as a compute-only,
+> tainted worker ([`k3s/nimbus-join/`](../k3s/nimbus-join/)), and nothing
+> storage-related tolerates that taint on purpose. Its old file-backed
+> `openebs-zpool` and the `openebs/nimbus/` configs were retired with the
+> merge; the pool is still on disk, orphaned, and can be reclaimed with
+> `sudo zpool destroy openebs-zpool`. The only stateful thing nimbus needs is
+> the hostPath HuggingFace cache at `/home/cboettig/.cache/huggingface`.
 
-### Option 1: Single-Disk Setup (e.g., nimbus with NVMe)
-
-For servers with a single disk already in use, use a file-backed ZFS pool:
-
-```bash
-# Install ZFS and create a 2TB pool
-sudo bash nimbus/setup-zfs-pool.sh 2000
-```
-
-This creates a sparse file at `/var/lib/openebs/zfs/openebs-zpool.img` and configures auto-import on boot.
-
-### Option 2: Multi-Disk Setup (mirror)
-
-For servers with multiple disks, create a mirrored pool:
+## Install
 
 ```bash
-sudo apt update && sudo apt install zfsutils-linux -y
-sudo zpool create -f openebs-zpool mirror /dev/sda /dev/sdb
+bash cirrus/helm.sh                     # the lean zfs-localpv driver
+kubectl apply -f cirrus/zfs-storage.yml # StorageClass openebs-zfs -> pool `tank`
 ```
 
----
+`tank` is a pre-existing native ZFS pool on cirrus (and thelio); it is not
+created here. Do **not** install the full `openebs/openebs` umbrella chart —
+it drags in Mayastor, LVM LocalPV and their own etcd/MinIO/Loki stack, none of
+which we use, and a previous install left orphaned PVCs and CRDs behind.
 
-## Install OpenEBS
+## Verify
 
 ```bash
-bash nimbus/helm.sh
+kubectl get pods -n openebs        # zfs-localpv controller + node daemonset
+kubectl get sc openebs-zfs
+kubectl get zfsvolumes -n openebs  # one per bound PVC, ZPOOL=tank
+sudo zpool status tank
 ```
 
-Then apply the storage class:
-
-```bash
-kubectl apply -f nimbus/zfs-storage.yml
-```
-
----
-
-## Verify Setup
-
-```bash
-sudo zpool status openebs-zpool
-sudo zfs list
-kubectl get storageclass
-```
-
----
-
-## Using ZFS Storage in JupyterHub
-
-Add to your JupyterHub config:
+## Using ZFS storage in JupyterHub
 
 ```yaml
 singleuser:
@@ -67,19 +47,19 @@ singleuser:
       storageAccessModes: [ReadWriteOnce]
 ```
 
----
+Note that a `ReadWriteOnce` ZFS-LocalPV volume ties its pod to the node holding
+the dataset. For node-mobile home directories see [`../juicefs/`](../juicefs/).
 
 ## Troubleshooting
 
 **Pool not imported after reboot:**
 ```bash
-sudo zpool import -d /var/lib/openebs/zfs openebs-zpool
-sudo systemctl enable zfs-import-openebs.service
+sudo zpool import tank
 ```
 
 **Check pool health:**
 ```bash
-sudo zpool status -v openebs-zpool
+sudo zpool status -v tank
 ```
 
 See: https://github.com/openebs/zfs-localpv/blob/develop/docs/quickstart.md

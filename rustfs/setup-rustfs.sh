@@ -1,5 +1,9 @@
 #!/bin/bash
-# interactive setup for RustFS
+# Interactive setup for RustFS on cirrus.
+#
+# The nimbus manifests (init/deployment/service.yaml, s3.nimbus.*) were retired
+# when nimbus joined the cirrus cluster as a compute-only worker -- see
+# ../k3s/nimbus-join/. That deployment held 276 KiB and was never used.
 set -e
 
 NAMESPACE="rustfs"
@@ -7,8 +11,8 @@ NAMESPACE="rustfs"
 echo "Setup RustFS S3 Service"
 echo "======================="
 
-# Ensure namespace manifests are applied first (except secret)
-kubectl apply -f init.yaml --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+# Namespace first, so the secret has somewhere to go.
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 # Check if secret exists
 if kubectl get secret rustfs-secrets -n "$NAMESPACE" &>/dev/null; then
@@ -43,9 +47,7 @@ if [ "$SET_SECRET" = true ]; then
 fi
 
 echo "Applying manifests..."
-kubectl apply -f init.yaml
-kubectl apply -f deployment.yaml
-kubectl apply -f service.yaml
+kubectl apply -f cirrus.yaml
 
 echo ""
 echo "RustFS deployed! 🚀"
