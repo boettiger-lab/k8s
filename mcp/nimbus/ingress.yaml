@@ -1,27 +1,27 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vllm-nimbus-ingress
+  name: mcp-gpu-nimbus
+  namespace: default
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-    traefik.ingress.kubernetes.io/service.servertransport: default-vllm-long-timeout@kubernetescrd
   labels:
-    app: vllm-nimbus
+    app: mcp-gpu-nimbus
 spec:
   ingressClassName: traefik
   rules:
-  - host: vllm-nimbus.carlboettiger.info
+  - host: gpu-mcp-nimbus.carlboettiger.info
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: vllm-nimbus-service
+            name: mcp-gpu-nimbus
             port:
-              number: 8000
+              number: 80
   tls:
   - hosts:
-    - vllm-nimbus.carlboettiger.info
-    secretName: vllm-nimbus-tls
+    - gpu-mcp-nimbus.carlboettiger.info
+    secretName: mcp-gpu-nimbus-tls

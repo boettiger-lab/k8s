@@ -1,0 +1,90 @@
+# mcp-gpu-nimbus -- GPU-backed MCP data server (cudf/polars query engine over
+# the public STAC catalogue), live at https://gpu-mcp-nimbus.carlboettiger.info
+#
+# This manifest was reconstructed from the running object on 2026-08-24. It had
+# only ever been `kubectl apply`d by hand and existed nowhere but nimbus's
+# etcd, so it would have been destroyed by the cluster join. Committed now.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-gpu-nimbus
+  namespace: default
+  labels:
+    app: mcp-gpu-nimbus
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: this pod claims an nvidia.com/gpu slice, and a
+  # surge replica cannot be scheduled alongside the outgoing one while the GPU
+  # budget is committed. Tear down first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mcp-gpu-nimbus
+  template:
+    metadata:
+      labels:
+        app: mcp-gpu-nimbus
+    spec:
+      runtimeClassName: nvidia
+      # nimbus is tainted `dedicated=nimbus:NoSchedule` as a worker in the
+      # cirrus cluster (see k3s/nimbus-join/). The toleration gets past the
+      # taint; the nodeSelector is what actually pins it here. The image tag is
+      # arm64-specific, so cirrus could not run it regardless.
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      containers:
+      - name: server
+        image: ghcr.io/boettiger-lab/mcp-data-server:gpu-arm64
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: QUERY_ENGINE
+          value: polars-gpu-cudf
+        - name: ENABLE_HEX_TILES
+          value: "false"
+        - name: ALLOW_CPU_FALLBACK
+          value: "true"
+        - name: STAC_CATALOG_URL
+          value: https://minio.carlboettiger.info/public-data/stac/catalog.json
+        - name: S3_ENDPOINT_URL
+          value: https://minio.carlboettiger.info
+        - name: S3_DEFAULT_ENDPOINT
+          value: minio.carlboettiger.info
+        # Start and serve /healthz even if the STAC catalogue is unreachable,
+        # so a MinIO blip does not turn into a CrashLoopBackOff here.
+        - name: STAC_ALLOW_DEGRADED_START
+          value: "true"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 40
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 6
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: "2"
+            memory: 16Gi
+            # One of nimbus's 8 time-slices of the single GB10. A slice is a
+            # co-tenancy slot, not a memory cap -- see nvidia/README.md. Budget
+            # it against vLLM's 6 slices in vllm/nimbus/deploy-qwen38.yaml.
+            nvidia.com/gpu: 1

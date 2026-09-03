@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-gpu-nimbus
+  namespace: default
+  labels:
+    app: mcp-gpu-nimbus
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: mcp-gpu-nimbus
