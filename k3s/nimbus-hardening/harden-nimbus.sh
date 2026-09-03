@@ -47,12 +47,25 @@ else
 fi
 
 echo "==> 3/5  k3s kubelet eviction thresholds"
+# Two configs, because nimbus can be either a standalone k3s *server* or an
+# *agent* of the cirrus control plane (see ../nimbus-join/). They are not
+# interchangeable: the server config sets write-kubeconfig-mode, which `k3s
+# agent` rejects as an unknown flag and refuses to start on; the agent config
+# sets server/node-ip/node-taint, which a server has no use for. Pick by which
+# systemd unit the k3s installer actually laid down.
+if [ -f /etc/systemd/system/k3s-agent.service ]; then
+    SRC="$HERE/k3s-agent-config.yaml"; UNIT=k3s-agent; MODE=agent
+else
+    SRC="$HERE/k3s-config.yaml";       UNIT=k3s;       MODE=server
+fi
+echo "    detected k3s $MODE -> $(basename "$SRC")"
 if [ -f /etc/rancher/k3s/config.yaml ]; then
     cp -a /etc/rancher/k3s/config.yaml "/etc/rancher/k3s/config.yaml.bak-$STAMP"
     echo "    backed up existing config to config.yaml.bak-$STAMP"
 fi
-install -m 0644 "$HERE/k3s-config.yaml" /etc/rancher/k3s/config.yaml
-echo "    installed. NOTE: requires 'systemctl restart k3s' to take effect."
+install -d -m 0755 /etc/rancher/k3s
+install -m 0644 "$SRC" /etc/rancher/k3s/config.yaml
+echo "    installed. NOTE: requires 'systemctl restart $UNIT' to take effect."
 
 echo "==> 4/5  full magic sysrq"
 cat > /etc/sysctl.d/99-nimbus-sysrq.conf <<'CONF'
@@ -79,7 +92,7 @@ echo "  systemctl list-timers gpu-hang-watchdog.timer"
 echo "  journalctl -u gpu-hang-watchdog.service -f"
 echo
 echo "Not yet applied -- restart k3s when you are ready for the eviction thresholds:"
-echo "  sudo systemctl restart k3s"
+echo "  sudo systemctl restart $UNIT"
 echo
 echo "Separate, and destructive -- read it first, then run to drop the 128 GiB swapfile:"
 echo "  sudo ./resize-swap.sh"

@@ -268,10 +268,32 @@ sudo ALLOW_REBOOT=0 /usr/local/bin/gpu-hang-watchdog.sh
 | `gpu-hang-watchdog.sh` | `/usr/local/bin/gpu-hang-watchdog.sh` |
 | `gpu-hang-watchdog.service` | `/etc/systemd/system/` |
 | `gpu-hang-watchdog.timer` | `/etc/systemd/system/` |
-| `k3s-config.yaml` | `/etc/rancher/k3s/config.yaml` (backed up first) |
+| `k3s-config.yaml` | `/etc/rancher/k3s/config.yaml` — **server mode** (backed up first) |
+| `k3s-agent-config.yaml` | `/etc/rancher/k3s/config.yaml` — **agent mode** (backed up first) |
 | `99-nimbus-vm.conf` | `/etc/sysctl.d/99-nimbus-vm.conf` |
 | `harden-nimbus.sh` | — (installer, layers 1-5) |
 | `resize-swap.sh` | — (separate, destructive: deletes the 128 GiB swapfile) |
+
+## Server mode vs agent mode
+
+nimbus is an *agent* of the cirrus control plane (see `../nimbus-join/`), but it
+was a standalone *server* before that, and the two need different k3s configs.
+They are not interchangeable: `write-kubeconfig-mode` is server-only and `k3s
+agent` refuses to start on an unknown flag, while `server:` / `node-ip` /
+`node-taint` are meaningless to a server.
+
+`harden-nimbus.sh` picks by which systemd unit the k3s installer laid down —
+`k3s-agent.service` present means agent — so it stays correct on both sides of
+the migration and you do not have to remember which one to hand it.
+
+The taint in the agent config is what makes nimbus "sanctioned tasks only", and
+it is applied at *registration* rather than afterwards with `kubectl taint`, so
+there is no window in which the cluster's other workloads can land on this node.
+
+Everything else here is host-level and completely indifferent to how k3s is
+installed. In particular **the GPU hang watchdog never calls kubectl** — it works
+off `nvidia-smi`, `/proc/meminfo` and `pkill`. That is deliberate: the wedge it
+recovers from is precisely the situation where the node cannot be reached.
 
 ## See also
 
