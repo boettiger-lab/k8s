@@ -11,7 +11,7 @@ The cluster has three nodes:
 | Node | Role | Hardware | Status |
 |------|------|----------|--------|
 | **cirrus** | control-plane + **primary data/compute node** | Threadripper, ECC RAM, 2× Quadro RTX 8000, NVMe | Always schedulable — **never cordon** |
-| **thelio** | expansion worker | Ryzen 9, RTX 2080, ZFS pool (HDD/SMR, problematic) | Currently **cordoned / parked** pending zpool repair |
+| **thelio** | jupyter user pods only | Ryzen 9, RTX 2080, ZFS pool (HDD/SMR, problematic) | Back in service, **tainted** `hub.jupyter.org/dedicated=user:NoSchedule` |
 | **nimbus** | GPU worker, sanctioned workloads only | DGX Spark, GB10, **arm64**, 121 GiB unified memory | Ready, **tainted** `dedicated=nimbus:NoSchedule` |
 
 thelio was only ever meant to be an expansion node. All stateful and
@@ -146,14 +146,24 @@ Left floating (only an `os: linux` selector). DNS is not bandwidth-bound, so its
 node placement doesn't affect throughput. It is k3s-addon-managed, which makes
 pinning awkward; not worth it.
 
-## Bringing thelio back without regressing
+## thelio is back, as a jupyter-only node
 
-When thelio's storage is fixed and you uncordon it (`kubectl uncordon thelio`):
+thelio returned to service tainted `hub.jupyter.org/dedicated=user:NoSchedule`,
+so it takes jupyter *user* pods and nothing else. That needs no per-workload
+configuration: z2jh already puts a matching toleration on user pods, hub core
+pods tolerate `=core` and stay on cirrus, and ARC is pinned to cirrus by
+nodeSelector.
+
+New homes go on JuiceFS (`juicefs-home`) rather than `openebs-zfs`. A node-local
+volume pins its pod to one node forever; RWX on JuiceFS removes the pin, so a
+server lost with thelio restarts on cirrus with its home intact. Existing claims
+are untouched and stay on cirrus.
+
+Two things still hold now that it is schedulable again:
 
 - MinIO and Traefik stay on cirrus because they are pinned (items 2 & 3).
-- Do **not** cordon cirrus to do it.
-- Only per-node DaemonSets (storage/GPU/proxy agents) run on thelio; that is
-  expected and unavoidable while it is a cluster member.
+- Do **not** cordon cirrus to move work onto thelio.
+
 - To fully decommission thelio instead:
   `kubectl drain thelio --ignore-daemonsets --delete-emptydir-data` then
   `kubectl delete node thelio` and stop the k3s agent on it.

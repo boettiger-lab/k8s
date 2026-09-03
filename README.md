@@ -24,7 +24,7 @@ to schedule on nimbus. The taint is what enforces that.
 | Node | Role |
 |------|------|
 | **cirrus** | Primary active cluster: control plane + data + GPU compute. Hosts JupyterHub, storage, and inference. **Never cordon it** — it is the control plane, data, and compute all in one. |
-| **thelio** | System76 Thelio Mega GPU worker for cirrus. Currently parked/cordoned (expansion-only) pending a ZFS pool repair. |
+| **thelio** | System76 Thelio Mega GPU worker (amd64). Back in service tainted `hub.jupyter.org/dedicated=user:NoSchedule` — jupyter user pods only, with new homes on JuiceFS so a server can restart on cirrus if thelio is lost. |
 | **nimbus** | DGX Spark (GB10, **arm64**) GPU worker. Tainted `dedicated=nimbus:NoSchedule` — it runs only specially sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. See [`k3s/nimbus-join/`](k3s/nimbus-join/). |
 
 ## Architecture
