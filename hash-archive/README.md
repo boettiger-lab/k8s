@@ -101,8 +101,14 @@ a Traefik IP-allowlist middleware in front of `ingress.yaml`.
 ## ⚠️ The historical hash database is NOT loaded
 
 **Status 2026-09-07: the service runs on a FRESH, EMPTY store.** The original
-LevelDB — ~624 KB, data through 2025-10 — is still intact and untouched at
-`/minio/hash-archive/hash-archive.db`. **Do not delete it.**
+LevelDB — ~624 KB, data through 2025-10 — is archived to S3:
+
+```
+nvme/backup-archive/hash-archive/hash-archive-db-20260907.tar.gz
+sha256 57dfa607bd18fa00e950524ead28ecddb24ce71a0145db40b08cd48569123cd1
+```
+
+Upload was verified by round-trip checksum, so `/minio` is free to delete.
 
 Every attempt to run against the migrated copy ends in `SIGABRT` (exit 134)
 seconds after the server logs `Hash Archive running`, with no assertion text.
@@ -127,8 +133,13 @@ run to ground.
    `CONFIG_IMPORT_SOCKET_PATH`) to replay the old data into a fresh store.
 3. Open the store with a standalone LevelDB tool to check for corruption.
 
-None of this is urgent — the service works, and nothing is lost while
-`/minio/hash-archive` stays put.
+None of this is urgent — the service works, and the store is preserved in S3.
+Retrieve it with:
+
+```sh
+mc cp nvme/backup-archive/hash-archive/hash-archive-db-20260907.tar.gz .
+tar xzf hash-archive-db-20260907.tar.gz
+```
 
 ## Image provenance — a known weak point
 
@@ -186,9 +197,8 @@ curl -sI https://hash-archive.carlboettiger.info/     # expect 200, not 404
 docker start hash-archive
 ```
 
-The original store is still at `/minio/hash-archive/hash-archive.db` — **keep
-that path until the k8s deployment is confirmed working**, even while the rest
-of `/minio` is reclaimed.
+The original store is archived in S3 (see above); `/minio` no longer needs to
+be preserved.
 
 ## DNS / TLS
 
