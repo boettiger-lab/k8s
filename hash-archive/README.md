@@ -120,7 +120,7 @@ NetworkPolicy, the securityContext, and OOM. Details and next steps in the issue
 **Note for anyone debugging:** the interval is ~49 minutes, so a 60-second
 smoke test will look healthy. Observe for hours.
 
-## ⚠️ The historical hash database is NOT loaded
+## ⚠️ The historical hash database is NOT loaded — [#52](https://github.com/boettiger-lab/k8s/issues/52)
 
 **Status 2026-09-07: the service runs on a FRESH, EMPTY store.** The original
 LevelDB — ~624 KB, data through 2025-10 — is archived to S3:
