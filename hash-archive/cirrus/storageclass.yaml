@@ -1,0 +1,29 @@
+# A ZFS zvol formatted ext4, rather than a raw ZFS dataset mounted directly
+# (which is what the default `openebs-zfs` class produces via fstype: zfs).
+# Data still lives in `tank` with ZFS redundancy, checksums, compression and
+# snapshots at the block layer — only the filesystem semantics change.
+#
+# HONEST PROVENANCE: this class was created while chasing a SIGABRT in
+# hash-archive on the hypothesis that its LMDB layer was hitting ZFS mmap
+# coherency limits. THAT HYPOTHESIS WAS WRONG. The real cause was the migrated
+# LevelDB store itself — an empty store runs fine on ZFS-backed storage, and the
+# apparent "works on emptyDir, fails on the PVC" signal was confounded, because
+# the emptyDir was also empty.
+#
+# It is kept because ext4-on-zvol remains a defensible fit for mmap-heavy
+# embedded stores (LMDB, BoltDB), not because it was demonstrated necessary
+# here. Plain `openebs-zfs` is very likely fine for this workload too.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-zfs-ext4
+parameters:
+  compression: "lz4"
+  dedup: "off"
+  fstype: "ext4"
+  poolname: "tank"
+  recordsize: "16k"   # closer to LMDB/LevelDB page sizes than the 128k default
+provisioner: zfs.csi.openebs.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate

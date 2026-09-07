@@ -16,6 +16,7 @@ set -e
 cd "$(dirname "$0")"
 
 kubectl create namespace hash-archive --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f storageclass.yaml
 kubectl apply -f pvc.yaml
 kubectl apply -f networkpolicy.yaml
 kubectl apply -f service.yaml

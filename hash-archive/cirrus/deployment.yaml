@@ -42,6 +42,12 @@ spec:
       securityContext:
         fsGroup: 10001
         runAsNonRoot: true
+        # runAsUser MUST be numeric and MUST be set. The image declares
+        # `USER 10001`, but kubelet cannot resolve a *name* to a uid to verify
+        # non-root, so with runAsNonRoot and a named USER the pod fails with
+        # CreateContainerConfigError: "image has non-numeric user".
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:

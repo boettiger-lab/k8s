@@ -139,10 +139,14 @@ COPY --from=builder /src/static    ./static
 # CAP_NET_BIND_SERVICE, but that is only needed for ports < 1024 and this
 # listens on 8000 (config.h: CONFIG_SERVER_RAW_PORT 8000, TLS port 0 —
 # TLS is terminated by Traefik).
-RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin hasharchive \
+RUN groupadd --system --gid 10001 hasharchive \
+    && useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin hasharchive \
     && mkdir -p /app/hash-archive.db \
-    && chown -R hasharchive:hasharchive /app
-USER hasharchive
+    && chown -R 10001:10001 /app
+# NUMERIC, not `USER hasharchive`: with runAsNonRoot set, kubelet cannot resolve
+# a username to a uid to prove the container is non-root, and the pod dies with
+# CreateContainerConfigError "image has non-numeric user".
+USER 10001:10001
 
 EXPOSE 8000
 

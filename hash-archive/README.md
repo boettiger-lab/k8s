@@ -98,6 +98,38 @@ a Traefik IP-allowlist middleware in front of `ingress.yaml`.
 
 **To publish again:** `PUBLIC=1 ./up.sh`, or `kubectl apply -f cirrus/ingress.yaml`.
 
+## ⚠️ The historical hash database is NOT loaded
+
+**Status 2026-09-07: the service runs on a FRESH, EMPTY store.** The original
+LevelDB — ~624 KB, data through 2025-10 — is still intact and untouched at
+`/minio/hash-archive/hash-archive.db`. **Do not delete it.**
+
+Every attempt to run against the migrated copy ends in `SIGABRT` (exit 134)
+seconds after the server logs `Hash Archive running`, with no assertion text.
+Both the new image and the 2020 image fail on it (the old one with `SIGSEGV`),
+while an empty store runs cleanly for both. So the fault travels with the data,
+not the binary and not the storage backend.
+
+What was ruled out, in order: the NetworkPolicy (removed, still aborts); the
+securityContext — `cap-drop ALL`, numeric uid 10001, seccomp — (all reproduce
+fine under plain Docker); and the storage backend (an empty store runs on the
+same ZFS-backed PVC). A partial copy of the store — `*.ldb`, `CURRENT`,
+`MANIFEST-*`, `LOG` only — *did* serve correctly under Docker, which suggests
+the fault is in one of the files that copy omitted (`LOCK`, the `*.log`
+write-ahead file, or `tmp.mdb-lock`) or in copy consistency, but that was not
+run to ground.
+
+**To recover the history**, options in rough order of promise:
+1. Copy in only `000209.ldb`, `000211.ldb`, `CURRENT` and `MANIFEST-*` —
+   omitting `LOCK`, `*.log` and `tmp.mdb-lock` — which is the combination
+   observed to work under Docker.
+2. Use the repo's own import path (`cli/`, `tools/`,
+   `CONFIG_IMPORT_SOCKET_PATH`) to replay the old data into a fresh store.
+3. Open the store with a standalone LevelDB tool to check for corruption.
+
+None of this is urgent — the service works, and nothing is lost while
+`/minio/hash-archive` stays put.
+
 ## Image provenance — a known weak point
 
 `cboettig/hash-archive:latest` exists **only in cirrus's local Docker daemon**.

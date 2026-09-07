@@ -5,8 +5,11 @@
 # lands on cirrus `tank`, gaining checksums, snapshots and mirror redundancy
 # that the hostPath never had.
 #
-# The live store is only ~624 KB; 5Gi is headroom, and openebs-zfs is thin so
-# nothing is preallocated.
+# Uses openebs-zfs-ext4 (a ZFS zvol formatted ext4). See storageclass.yaml —
+# that choice was made chasing a crash it turned out not to cause, and is kept
+# on its own merits. Data still lives in `tank` with ZFS redundancy.
+#
+# The live store is only ~624 KB; 5Gi is headroom.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -15,7 +18,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: openebs-zfs
+  storageClassName: openebs-zfs-ext4
   resources:
     requests:
       storage: 5Gi
