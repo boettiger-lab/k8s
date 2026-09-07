@@ -1,0 +1,36 @@
+# NOTE: assumes cert-manager (letsencrypt-production ClusterIssuer) and
+# external-dns (Cloudflare, carlboettiger.info zone) are configured on cirrus.
+# See ../../{traefik,cert-manager,external-dns}.
+#
+# DNS ALREADY EXISTS AND IS CLOUDFLARE-PROXIED. Before this ingress,
+# https://hash-archive.carlboettiger.info returned Traefik's 404: the record
+# resolved to Cloudflare and reached cirrus, but no ingress claimed the host.
+# So `cloudflare-proxied: "true"` here MATCHES the current record — unlike
+# titiler's "false" — and avoids external-dns flipping it to DNS-only and
+# changing the exposure of the host. cert-manager's HTTP-01 challenge works
+# through the Cloudflare proxy.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hash-archive
+  namespace: hash-archive
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: hash-archive.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hash-archive
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - hash-archive.carlboettiger.info
+    secretName: hash-archive-tls

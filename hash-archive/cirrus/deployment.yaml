@@ -1,0 +1,108 @@
+# hash-archive (https://github.com/btrask/hash-archive) on cirrus k3s.
+#
+# Replaces the long-running Docker container `hash-archive` (host networking,
+# port 8000, bind-mounting /minio/hash-archive/hash-archive.db). That container
+# was the last consumer of /minio, which is being reclaimed.
+#
+# TWO THINGS ARE UNUSUAL HERE — see README.md:
+#  1. The image compiles at startup (`make install`), so first-boot is slow and
+#     the root filesystem must stay writable. A startupProbe covers this.
+#  2. The app returns 403 unless the Host header matches the configured URL, so
+#     the probes must send it explicitly or they fail closed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hash-archive
+  namespace: hash-archive
+  labels:
+    k8s-app: hash-archive
+spec:
+  replicas: 1
+  # LevelDB is single-writer: two pods sharing the PVC would contend on LOCK
+  # and risk corruption. Recreate guarantees the old pod is gone before the new
+  # one starts (RollingUpdate would briefly run both).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: hash-archive
+  template:
+    metadata:
+      labels:
+        k8s-app: hash-archive
+    spec:
+      # openebs-zfs volumes live in cirrus's `tank` pool, so the pod must be here.
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+      - name: hash-archive
+        # Imported into k3s containerd from the local Docker image by
+        # ./import-image.sh — it is not in any registry yet. IfNotPresent
+        # prevents a doomed pull attempt. See README.md "Image provenance".
+        image: docker.io/cboettig/hash-archive:latest
+        imagePullPolicy: IfNotPresent
+        workingDir: /hash-archive
+        # Same command the Docker container ran: rewrite the hard-coded
+        # upstream hostname in config.h to ours, build, then exec the server.
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            sed -i "s/hash-archive.org/$URL/" src/config.h && \
+            make install && \
+            exec /usr/local/bin/hash-archive
+        env:
+        - name: URL
+          value: hash-archive.carlboettiger.info
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        - name: data
+          mountPath: /hash-archive/hash-archive.db
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            # The startup `make` is the only CPU-hungry moment; steady state is
+            # a small Go/C server over a 624 KB LevelDB.
+            cpu: 2
+            memory: 2Gi
+        # The app 403s any request whose Host does not match $URL, so every
+        # probe must send it — otherwise the probe sees 403 and the pod never
+        # becomes ready.
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8000
+            httpHeaders:
+            - name: Host
+              value: hash-archive.carlboettiger.info
+          # Allows up to 5 minutes for the in-container build before failing.
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8000
+            httpHeaders:
+            - name: Host
+              value: hash-archive.carlboettiger.info
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+            httpHeaders:
+            - name: Host
+              value: hash-archive.carlboettiger.info
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: hash-archive-data

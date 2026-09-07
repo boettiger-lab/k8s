@@ -1,0 +1,21 @@
+# Persistent store for hash-archive's LevelDB.
+#
+# Migrated off the old Docker bind-mount at /minio/hash-archive/hash-archive.db
+# (the pre-k3s MinIO-era tree, which is being reclaimed). On openebs-zfs it
+# lands on cirrus `tank`, gaining checksums, snapshots and mirror redundancy
+# that the hostPath never had.
+#
+# The live store is only ~624 KB; 5Gi is headroom, and openebs-zfs is thin so
+# nothing is preallocated.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hash-archive-data
+  namespace: hash-archive
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: openebs-zfs
+  resources:
+    requests:
+      storage: 5Gi
