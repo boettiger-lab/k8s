@@ -23,7 +23,7 @@
 # which on a 121 GiB unified-memory node means kubelet does nothing until the
 # machine is already dead.
 #
-# NOTE: eviction is a backstop, not the primary control. Per dgx-spark-memory.md,
+# NOTE: eviction is a backstop, not the primary control. Per services/vllm/dgx-spark-memory.md,
 # cgroup limits do not constrain CUDA allocations on unified memory -- the real
 # control is --kv-cache-memory-bytes in the vLLM manifest.
 

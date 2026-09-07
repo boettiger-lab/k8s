@@ -5,7 +5,7 @@ vLLM deployment on 2026-08-24 and needed a physical power cycle both times.
 
 ## What actually happened
 
-`services/vllm/qwen3-8-nimbus.yaml` served `unsloth/Qwen3.8-27B-NVFP4` with
+`services/vllm/qwen38-nimbus.yaml` served `unsloth/Qwen3.8-27B-NVFP4` with
 `--gpu-memory-utilization 0.75` and `--max-num-seqs 8`. On a GB10 there is no
 discrete VRAM — that is 0.75 of the *same* 121.69 GiB pool the host OS, k3s,
 prometheus, jupyterhub and every other pod live in. It left about 30 GiB for
@@ -92,8 +92,8 @@ refused, so nothing was ever killed. The machine ran out of runway inside a lock
 
 ### Two things worth knowing
 
-**1. The cgroup memory limit was never going to save us.** As documented in the
-unified-memory notes in `services/vllm/README.md`, CUDA allocations are not tracked by the cgroup
+**1. The cgroup memory limit was never going to save us.** As documented in
+`services/vllm/dgx-spark-memory.md`, CUDA allocations are not tracked by the cgroup
 memory controller on unified memory. `memory: 96Gi` in the pod spec is scheduler
 accounting only. The single effective control on vLLM's footprint is
 `--gpu-memory-utilization`.
@@ -125,7 +125,7 @@ sudo /usr/local/bin/k3s-killall.sh   # stops k3s AND every pod
 
 ### Part 1 — the manifest (already applied)
 
-`services/vllm/qwen3-8-nimbus.yaml`:
+`services/vllm/qwen38-nimbus.yaml`:
 
 | setting | before | after |
 |---|---|---|
@@ -167,7 +167,8 @@ vLLM: "Available KV cache memory:                  73.24 GiB"   <- took all of i
 The working control is the absolute cap `--kv-cache-memory-bytes`, which
 bypasses the profiler. Size it from a *measured* run: 73.24 GiB held 2,066,397
 tokens = **38,057 B/token** for this checkpoint. The resulting
-`--kv-cache-memory-bytes` is in `services/vllm/qwen3-8-nimbus.yaml`.
+`--kv-cache-memory-bytes` is in `services/vllm/qwen38-nimbus.yaml`; the derivation is
+in the CORRECTION section of `services/vllm/dgx-spark-memory.md`.
 
 Verified after redeploy — prediction vs. reality:
 
@@ -297,5 +298,5 @@ recovers from is precisely the situation where the node cannot be reached.
 
 ## See also
 
-- `services/vllm/README.md` — why cgroup limits do not bound CUDA on unified memory
-- `services/vllm/qwen3-8-nimbus.yaml` — the patched manifest, with the KV arithmetic inline
+- `services/vllm/dgx-spark-memory.md` — why cgroup limits do not bound CUDA on unified memory
+- `services/vllm/qwen38-nimbus.yaml` — the patched manifest, with the KV arithmetic inline

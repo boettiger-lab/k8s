@@ -5,7 +5,7 @@
 # already dead. These thresholds give it room to evict a pod while the box is
 # still responsive.
 #
-# NOTE: eviction is a backstop, not the primary control. Per dgx-spark-memory.md,
+# NOTE: eviction is a backstop, not the primary control. Per services/vllm/dgx-spark-memory.md,
 # cgroup limits do not constrain CUDA allocations on unified memory -- the real
 # control is --gpu-memory-utilization in the vLLM manifest.
 
