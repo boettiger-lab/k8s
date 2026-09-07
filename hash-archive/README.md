@@ -71,10 +71,32 @@ hostile-input-facing software with no vendor patching it.
 `CONFIG_IMPORT_SOCKET_PATH "./import.sock"`, so the working directory must stay
 writable.
 
-**Worth deciding explicitly:** whether this needs to be reachable from the
-public internet at all, or whether it should sit behind Cloudflare Access / an
-allowlist. The NetworkPolicy contains the blast radius *inside* the cluster, but
-it does not make a 2021 TLS stack safe to point at arbitrary hosts.
+### Decision 2026-09-07: private by default
+
+**The ingress is not applied unless `PUBLIC=1`.** The NetworkPolicy contains
+*where* the service can reach; it does nothing about *who can drive it*. Since
+the vendored 2021 TLS stack is exercised on every outbound fetch, limiting who
+can trigger a fetch is the only available control over that exposure — and it
+also closes the inbound custom-HTTP-parser surface.
+
+The cost is nil: the public URL was returning Traefik 404 before this migration
+anyway, so there is no user base to disrupt, and the accumulated hash database
+is unaffected either way.
+
+**Reach it privately:**
+
+```sh
+kubectl -n hash-archive port-forward svc/hash-archive 8000:8000
+curl -H 'Host: hash-archive.carlboettiger.info' http://127.0.0.1:8000/
+```
+
+The `Host` header is mandatory — without it the app returns 403, so a browser
+pointed at `http://localhost:8000/` will *not* work. For browser access either
+add `127.0.0.1 hash-archive.carlboettiger.info` to `/etc/hosts` (note the app
+may still reject the `:8000` port suffix in the Host header), or re-publish with
+a Traefik IP-allowlist middleware in front of `ingress.yaml`.
+
+**To publish again:** `PUBLIC=1 ./up.sh`, or `kubectl apply -f cirrus/ingress.yaml`.
 
 ## Image provenance — a known weak point
 
