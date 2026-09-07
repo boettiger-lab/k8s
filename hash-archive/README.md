@@ -215,18 +215,18 @@ its `image:` line. Tracked as a follow-up.
 Run in order, from
 `/home/cboettig/Documents/boettiger-lab/k8s/hash-archive/cirrus`:
 
+The ghcr package is **public** and `imagePullPolicy: Always`, so k3s pulls the
+CI-built image directly — no side-loading and no imagePullSecret.
+
 ```sh
-# 1. Make the image visible to k3s (root: talks to Docker and containerd).
-#    Skip once CI has published to ghcr and imagePullPolicy is Always.
-sudo ./import-image.sh
-
-# 2. Stop the Docker container, copy the LevelDB into the PVC
-#    (stops it for a consistent copy; does NOT delete it)
-sudo ./migrate-store.sh
-
-# 3. Deploy
-./up.sh
+./up.sh                 # private (no ingress)
+PUBLIC=1 ./up.sh        # token-gated public ingress
 ```
+
+To pick up a new CI build: `kubectl -n hash-archive rollout restart deploy/hash-archive`.
+
+`import-image.sh` remains only for testing a locally built image before pushing;
+it is not part of normal deploys.
 
 Verify:
 
