@@ -10,12 +10,11 @@
 #   sudo /home/cboettig/Documents/boettiger-lab/k8s/hash-archive/cirrus/import-image.sh
 set -e
 
-IMAGE="cboettig/hash-archive:latest"
+IMAGE="ghcr.io/boettiger-lab/hash-archive:latest"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "ERROR: $IMAGE not found in the local Docker daemon."
-  echo "       Nothing to import. Do NOT delete the Docker image until the"
-  echo "       k8s deployment is confirmed working."
+  echo "       Build it first (see the header of this script)."
   exit 1
 fi
 

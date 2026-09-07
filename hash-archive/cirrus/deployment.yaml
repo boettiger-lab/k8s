@@ -4,11 +4,13 @@
 # port 8000, bind-mounting /minio/hash-archive/hash-archive.db). That container
 # was the last consumer of /minio, which is being reclaimed.
 #
-# TWO THINGS ARE UNUSUAL HERE — see README.md:
-#  1. The image compiles at startup (`make install`), so first-boot is slow and
-#     the root filesystem must stay writable. A startupProbe covers this.
-#  2. The app returns 403 unless the Host header matches the configured URL, so
-#     the probes must send it explicitly or they fail closed.
+# Runs the modern image built from ../Dockerfile (Ubuntu 22.04 multi-stage,
+# 90 MB) rather than the 2020 Ubuntu-16.04 one (663 MB), which recompiled itself
+# on every container start and SEGFAULTED (exit 139) ~5s after startup under k8s.
+#
+# ONE THING IS STILL UNUSUAL: the app returns 403 unless the Host header matches
+# the hostname compiled into config.h, so every probe must send it explicitly or
+# the pod never becomes ready. See README.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,32 +36,41 @@ spec:
       # openebs-zfs volumes live in cirrus's `tank` pool, so the pod must be here.
       nodeSelector:
         kubernetes.io/hostname: cirrus
+      # The image runs as uid 10001, but the migrated LevelDB files are
+      # root-owned. fsGroup makes kubelet chown the volume so the unprivileged
+      # process can write it.
+      securityContext:
+        fsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: hash-archive
-        # Imported into k3s containerd from the local Docker image by
-        # ./import-image.sh — it is not in any registry yet. IfNotPresent
-        # prevents a doomed pull attempt. See README.md "Image provenance".
-        image: docker.io/cboettig/hash-archive:latest
+        # Built by .github/workflows/hash-archive-image.yml. Until that has run,
+        # ./import-image.sh side-loads a locally built copy into k3s containerd,
+        # so IfNotPresent avoids a doomed pull. Switch to Always once CI publishes.
+        image: ghcr.io/boettiger-lab/hash-archive:latest
         imagePullPolicy: IfNotPresent
-        workingDir: /hash-archive
-        # Same command the Docker container ran: rewrite the hard-coded
-        # upstream hostname in config.h to ours, build, then exec the server.
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            sed -i "s/hash-archive.org/$URL/" src/config.h && \
-            make install && \
-            exec /usr/local/bin/hash-archive
-        env:
-        - name: URL
-          value: hash-archive.carlboettiger.info
+        # Unmaintained C network code that parses hostile input by design —
+        # give it the smallest possible blast radius. readOnlyRootFilesystem is
+        # NOT set: config.h hardcodes CONFIG_IMPORT_SOCKET_PATH "./import.sock",
+        # so the working directory must stay writable.
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        # No command override: the image's ENTRYPOINT (tini) and CMD are correct,
+        # and the hostname is compiled in at BUILD time, so there is nothing to
+        # rewrite or rebuild at startup.
         ports:
         - name: http
           containerPort: 8000
           protocol: TCP
         volumeMounts:
+        # config.h uses paths relative to the working directory, which is /app
+        # in the new image (it was /hash-archive in the old one).
         - name: data
-          mountPath: /hash-archive/hash-archive.db
+          mountPath: /app/hash-archive.db
         resources:
           requests:
             cpu: 100m
@@ -79,9 +90,9 @@ spec:
             httpHeaders:
             - name: Host
               value: hash-archive.carlboettiger.info
-          # Allows up to 5 minutes for the in-container build before failing.
-          periodSeconds: 10
-          failureThreshold: 30
+          # The image no longer builds at startup, so this is quick now.
+          periodSeconds: 5
+          failureThreshold: 12
         readinessProbe:
           httpGet:
             path: /

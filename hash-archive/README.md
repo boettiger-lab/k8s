@@ -51,6 +51,31 @@ The store is **LevelDB** (`000*.ldb`, `CURRENT`, `MANIFEST-*`, `LOCK`) —
   a RollingUpdate would briefly run two pods against one PVC and risk
   corrupting the store.
 
+## Security posture — read this before exposing it further
+
+**Upstream's last commit is 2021-10-31.** This is unmaintained C network code
+that, by design, fetches arbitrary URLs supplied by anonymous users. Treat it as
+hostile-input-facing software with no vendor patching it.
+
+| Concern | Status |
+|---|---|
+| **Vendored TLS is frozen.** LibreSSL is statically linked into the binary from a 2021 submodule pin. The app makes outbound HTTPS to attacker-chosen hosts, so it parses hostile TLS with a ~5-year-old stack. **Base-image updates cannot fix this** — it is compiled in. | ⚠️ unmitigated |
+| **SSRF is the feature.** Anyone can make it fetch any URL. Inside a cluster that means the Kubernetes API, MinIO, RustFS, Postgres, the kubelet and link-local metadata. | ✅ mitigated by [`cirrus/networkpolicy.yaml`](cirrus/networkpolicy.yaml) — egress denied to 10/8, 172.16/12, 192.168/16, 169.254/16, 127/8 |
+| **Ran as root** in the old image. | ✅ now uid 10001, `allowPrivilegeEscalation: false`, all capabilities dropped, `seccompProfile: RuntimeDefault` |
+| **Full build toolchain shipped** in the runtime image (663 MB). | ✅ multi-stage, 90 MB runtime |
+| **Frozen CA bundle** (libressl's vendored `cert.pem` from 2021). | ✅ symlinked to the distro's maintained bundle |
+| **`-Werror` stripped to build.** The warnings it was suppressing included `-Wimplicit-fallthrough` in `deps/libasync` — a genuine bug class, in code we do not maintain. | ⚠️ accepted; warnings still print |
+| **Custom HTTP parser**, no CVE process, no upstream security contact. | ⚠️ inherent |
+
+`readOnlyRootFilesystem` is deliberately **not** set: `config.h` hardcodes
+`CONFIG_IMPORT_SOCKET_PATH "./import.sock"`, so the working directory must stay
+writable.
+
+**Worth deciding explicitly:** whether this needs to be reachable from the
+public internet at all, or whether it should sit behind Cloudflare Access / an
+allowlist. The NetworkPolicy contains the blast radius *inside* the cluster, but
+it does not make a 2021 TLS stack safe to point at arbitrary hosts.
+
 ## Image provenance — a known weak point
 
 `cboettig/hash-archive:latest` exists **only in cirrus's local Docker daemon**.
@@ -58,7 +83,12 @@ It was built roughly six years ago and never pushed anywhere. k3s uses its own
 containerd and cannot see Docker's image store, so `cirrus/import-image.sh`
 bridges the gap with `docker save | k3s ctr images import -`.
 
-That is deliberately a **bridge, not the end state**. The image is
+**CI now builds this**: [`.github/workflows/hash-archive-image.yml`](../.github/workflows/hash-archive-image.yml)
+publishes multi-arch (amd64 + arm64) to `ghcr.io/boettiger-lab/hash-archive`
+on Dockerfile changes, weekly, or on manual dispatch with a chosen upstream ref.
+Once that has run, flip `imagePullPolicy` to `Always` and drop the side-load.
+
+The side-load remains a **bridge, not the end state**. The image is
 unreproducible: if cirrus's Docker store is ever pruned — and pruning it is on
 the ops backlog — the only copy is gone. **Do not run `docker rmi` or
 `docker system prune -a` until this is resolved.** The proper fix is a CI build
@@ -72,7 +102,8 @@ Run in order, from
 `/home/cboettig/Documents/boettiger-lab/k8s/hash-archive/cirrus`:
 
 ```sh
-# 1. Make the image visible to k3s (root: talks to Docker and containerd)
+# 1. Make the image visible to k3s (root: talks to Docker and containerd).
+#    Skip once CI has published to ghcr and imagePullPolicy is Always.
 sudo ./import-image.sh
 
 # 2. Stop the Docker container, copy the LevelDB into the PVC

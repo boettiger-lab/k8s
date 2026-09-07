@@ -1,0 +1,64 @@
+# SSRF containment for hash-archive.
+#
+# THE THREAT: hash-archive's entire purpose is to fetch URLs supplied by
+# anonymous internet users and hash them. That is server-side request forgery
+# BY DESIGN. On a standalone box it mostly just reaches the internet; inside a
+# cluster it can reach the Kubernetes API, MinIO, RustFS, Postgres, the kubelet
+# and cloud/link-local metadata endpoints — all from a trusted network position,
+# driven by anyone who can load the public page.
+#
+# This policy lets it reach the public internet (which it must) while denying
+# every private range. Verified enforceable: k3s runs its kube-router
+# NetworkPolicy controller (no --disable-network-policy), and other policies
+# in this cluster (hxagent-egress-only, binderhub-builder) already rely on it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hash-archive-ssrf-containment
+  namespace: hash-archive
+spec:
+  podSelector:
+    matchLabels:
+      k8s-app: hash-archive
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only Traefik may reach it; nothing else in the cluster needs to.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # DNS must be allowed explicitly: CoreDNS lives on the service network
+    # (10.43.0.0/16), which the ipBlock rule below deliberately excludes.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The public internet, minus every private/link-local range.
+    #   10.0.0.0/8      — cluster pod net (10.42/16), service net (10.43/16), LAN
+    #   172.16.0.0/12   — docker bridges, private
+    #   192.168.0.0/16  — private LAN
+    #   169.254.0.0/16  — link-local, incl. cloud metadata (169.254.169.254)
+    #   127.0.0.0/8     — loopback
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 127.0.0.0/8
