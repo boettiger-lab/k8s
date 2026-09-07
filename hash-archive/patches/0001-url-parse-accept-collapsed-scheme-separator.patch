@@ -1,0 +1,53 @@
+Accept "scheme:/host" as equivalent to "scheme://host" in url_parse()
+
+Reverse proxies commonly sanitize request paths, collapsing duplicate
+slashes. Traefik does this by default (entryPoint http.sanitizePath,
+default true; documented as directory-traversal hardening).
+
+hash-archive carries the target URL *inside* the request path, e.g.
+    GET /history/https://example.com/foo.txt
+so sanitization rewrites it to
+    GET /history/https:/example.com/foo.txt
+and url_parse() then fails: the "Absolute" branch scans for "://",
+leaves out->host empty, and returns URL_EPARSE. The user sees HTTP 400
+and the URL is never hashed. This breaks the web form, the /history/
+route and scripted clients (e.g. the R package `contentid`) alike.
+
+Percent-encoding is not a workaround: url_parse() does no percent
+decoding, so "https:%2F%2Fexample.com" is treated literally and fails
+identically with or without a proxy.
+
+Fix: in the Absolute branch only, when the "://" scan yields no host,
+retry once with a single slash. This is reached solely for input that
+would otherwise be rejected outright, so no URL that parses today can
+change meaning. Fields are reset before the retry because sscanf leaves
+partially-populated output on a failed match.
+
+Upstream is unmaintained (last commit 2021-10-31), so this is carried
+as a local patch rather than sent upstream.
+
+--- a/src/util/url.c
++++ b/src/util/url.c
+@@ -40,7 +40,21 @@
+ 		sscanf(URL, URL_SCHEME_FMT "://" URL_HOST_FMT URL_PATH_FMT URL_QUERY_FMT,
+ 			out->scheme, out->host, out->path, out->query);
+ 		if('\0' == out->scheme[0]) return URL_EPARSE;
+-		if('\0' == out->host[0]) return URL_EPARSE;
++		if('\0' == out->host[0]) {
++			// Retry with a single slash. A proxy that sanitizes request
++			// paths collapses "//" to "/", so "https://example.com/x"
++			// arrives as "https:/example.com/x". Only reached when the
++			// two-slash form already failed, so this cannot alter the
++			// parse of any URL that is currently accepted.
++			out->scheme[0] = '\0';
++			out->host[0] = '\0';
++			out->path[0] = '\0';
++			out->query[0] = '\0';
++			sscanf(URL, URL_SCHEME_FMT ":/" URL_HOST_FMT URL_PATH_FMT URL_QUERY_FMT,
++				out->scheme, out->host, out->path, out->query);
++			if('\0' == out->scheme[0]) return URL_EPARSE;
++			if('\0' == out->host[0]) return URL_EPARSE;
++		}
+ 	}
+ 	if('\0' != out->path[0] && '/' != out->path[0]) return URL_EPARSE;
+ 	if('\0' != out->query[0] && '?' != out->query[0]) return URL_EPARSE;

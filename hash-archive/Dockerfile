@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
         git \
         ca-certificates \
+        patch \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -79,6 +80,15 @@ RUN git clone --recursive https://github.com/btrask/hash-archive.git . \
 # either — make_man_page.py is Python 2 syntax, so python3 fails on it too.
 RUN sed -i 's|^\tpython man/make_man_page\.py.*|\t@mkdir -p $(dir $@) \&\& touch $@|' deps/cmark/Makefile \
     && grep -n -A1 'man/man3/cmark.3:' deps/cmark/Makefile
+
+# Local patches against unmaintained upstream (last commit 2021-10-31).
+# See patches/ for the rationale of each.
+COPY patches/ /tmp/patches/
+RUN for f in /tmp/patches/*.patch; do \
+        echo "applying $(basename "$f")"; \
+        patch -p1 --batch --forward < "$f" || exit 1; \
+    done \
+    && grep -c 'Retry with a single slash' src/util/url.c
 
 # Patch the compiled-in hostname before building, rather than at runtime.
 RUN sed -i "s/hash-archive\.org/${HOSTNAME_CONFIG}/" src/config.h \

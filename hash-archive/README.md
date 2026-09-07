@@ -169,6 +169,27 @@ mc cp nvme/hash-archive/hash-archive-db-20260907.tar.gz .
 tar xzf hash-archive-db-20260907.tar.gz
 ```
 
+## Local patches
+
+Upstream is unmaintained (last commit 2021-10-31), so fixes are carried as
+patches in [`patches/`](patches/), applied in order during the build. Each
+carries its rationale in the header.
+
+- **`0001-url-parse-accept-collapsed-scheme-separator.patch`** — hash-archive
+  puts the target URL *inside* the request path
+  (`/history/https://example.com/x`). Traefik sanitizes request paths by
+  default (`entryPoint http.sanitizePath`), collapsing `//` → `/`, so the app
+  received `https:/example.com/x`, failed to parse it, and returned **HTTP 400**
+  for every lookup — breaking the web form, the `/history/` route and scripted
+  clients such as the R package [`contentid`](https://github.com/cboettig/contentid).
+  The patch makes `url_parse()` retry with a single slash **only when the
+  two-slash form already failed**, so no URL that parses today changes meaning.
+
+  Percent-encoding is not an alternative: `url_parse()` does no percent
+  decoding, so `https:%2F%2Fexample.com` fails identically. Disabling
+  `sanitizePath` was rejected because it is an **entryPoint-wide** setting that
+  would remove path hardening from every service on 443.
+
 ## Image provenance — a known weak point
 
 `cboettig/hash-archive:latest` exists **only in cirrus's local Docker daemon**.
