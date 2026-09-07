@@ -126,9 +126,15 @@ smoke test will look healthy. Observe for hours.
 LevelDB — ~624 KB, data through 2025-10 — is archived to S3:
 
 ```
-nvme/backup-archive/hash-archive/hash-archive-db-20260907.tar.gz
+nvme/hash-archive/hash-archive-db-20260907.tar.gz
 sha256 57dfa607bd18fa00e950524ead28ecddb24ce71a0145db40b08cd48569123cd1
 ```
+
+⚠️ It must **not** live in `backup-archive` — that bucket carries an enabled
+**90-day expiry lifecycle rule** (no prefix filter) and exists only as scratch
+for the NRP sync backup system, where sync deletions are expected. Anything
+placed there is deleted silently. This object needs a bucket with no lifecycle
+policy; `nvme/hash-archive` has none.
 
 Upload was verified by round-trip checksum, so `/minio` is free to delete.
 
@@ -159,7 +165,7 @@ None of this is urgent — the service works, and the store is preserved in S3.
 Retrieve it with:
 
 ```sh
-mc cp nvme/backup-archive/hash-archive/hash-archive-db-20260907.tar.gz .
+mc cp nvme/hash-archive/hash-archive-db-20260907.tar.gz .
 tar xzf hash-archive-db-20260907.tar.gz
 ```
 
