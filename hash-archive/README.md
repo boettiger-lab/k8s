@@ -190,25 +190,19 @@ carries its rationale in the header.
   `sanitizePath` was rejected because it is an **entryPoint-wide** setting that
   would remove path hardening from every service on 443.
 
-## Image provenance — a known weak point
+## Image
 
-`cboettig/hash-archive:latest` exists **only in cirrus's local Docker daemon**.
-It was built roughly six years ago and never pushed anywhere. k3s uses its own
-containerd and cannot see Docker's image store, so `cirrus/import-image.sh`
-bridges the gap with `docker save | k3s ctr images import -`.
+Built and published by
+[`.github/workflows/hash-archive-image.yml`](../.github/workflows/hash-archive-image.yml):
+multi-arch (amd64 + arm64) to `ghcr.io/boettiger-lab/hash-archive`, on changes
+to `Dockerfile` or `patches/`, weekly, or on manual dispatch with a chosen
+upstream ref. **The package is public**, so k3s pulls it with no
+`imagePullSecret`.
 
-**CI now builds this**: [`.github/workflows/hash-archive-image.yml`](../.github/workflows/hash-archive-image.yml)
-publishes multi-arch (amd64 + arm64) to `ghcr.io/boettiger-lab/hash-archive`
-on Dockerfile changes, weekly, or on manual dispatch with a chosen upstream ref.
-Once that has run, flip `imagePullPolicy` to `Always` and drop the side-load.
-
-The side-load remains a **bridge, not the end state**. The image is
-unreproducible: if cirrus's Docker store is ever pruned — and pruning it is on
-the ops backlog — the only copy is gone. **Do not run `docker rmi` or
-`docker system prune -a` until this is resolved.** The proper fix is a CI build
-from [btrask/hash-archive](https://github.com/btrask/hash-archive) pushed to
-`ghcr.io/boettiger-lab/hash-archive`, after which the deployment just changes
-its `image:` line. Tracked as a follow-up.
+This replaced a 2020-era image (Ubuntu 16.04, 663 MB) that existed only in
+cirrus's local Docker daemon and had never been pushed anywhere — a single
+`docker system prune -a` would have destroyed the only copy. That image and its
+container have since been removed; this one is reproducible from source.
 
 ## Deploy
 
@@ -225,8 +219,8 @@ PUBLIC=1 ./up.sh        # token-gated public ingress
 
 To pick up a new CI build: `kubectl -n hash-archive rollout restart deploy/hash-archive`.
 
-`import-image.sh` remains only for testing a locally built image before pushing;
-it is not part of normal deploys.
+To test a local build before pushing, side-load it:
+`docker save <image> | sudo k3s ctr images import -`
 
 Verify:
 
@@ -238,16 +232,10 @@ curl -sI https://hash-archive.carlboettiger.info/     # expect 200, not 404
 
 ## Rollback
 
-`migrate-store.sh` stops the Docker container but never removes it, and
-`down.sh` retains the PVC. To go back:
-
-```sh
-./down.sh
-docker start hash-archive
-```
-
-The original store is archived in S3 (see above); `/minio` no longer needs to
-be preserved.
+`down.sh` retains the PVC, so the store survives a teardown. The pre-migration
+Docker container and its 2020 image have been removed — the modern image is
+reproducible from this directory and the historical store is archived in S3
+(see above), so neither was worth keeping.
 
 ## DNS / TLS
 
