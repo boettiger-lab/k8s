@@ -17,6 +17,10 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # Token gate. Format is <namespace>-<middleware-name>@kubernetescrd.
+    # cert-manager's HTTP-01 challenge is unaffected: it provisions its own
+    # temporary solver Ingress, which does not carry this middleware.
+    traefik.ingress.kubernetes.io/router.middlewares: hash-archive-hash-archive-auth@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:

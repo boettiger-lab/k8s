@@ -23,7 +23,16 @@ kubectl apply -f service.yaml
 kubectl apply -f deployment.yaml
 
 if [[ "${PUBLIC:-0}" == "1" ]]; then
-  echo ">> PUBLIC=1 — publishing at hash-archive.carlboettiger.info"
+  # Refuse to publish without credentials — an unauthenticated ingress would
+  # expose the SSRF surface to the internet.
+  if ! kubectl -n hash-archive get secret hash-archive-auth >/dev/null 2>&1; then
+    echo "ERROR: secret hash-archive-auth is missing."
+    echo "       Create it first — see ../../secrets/hash-archive-credentials.md"
+    echo "       Refusing to publish an unauthenticated ingress."
+    exit 1
+  fi
+  echo ">> PUBLIC=1 — publishing at hash-archive.carlboettiger.info (token-gated)"
+  kubectl apply -f auth-middleware.yaml
   kubectl apply -f ingress.yaml
 else
   echo ">> private mode (no ingress). Reach it with:"

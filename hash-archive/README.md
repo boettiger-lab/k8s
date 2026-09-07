@@ -96,7 +96,17 @@ add `127.0.0.1 hash-archive.carlboettiger.info` to `/etc/hosts` (note the app
 may still reject the `:8000` port suffix in the Host header), or re-publish with
 a Traefik IP-allowlist middleware in front of `ingress.yaml`.
 
-**To publish again:** `PUBLIC=1 ./up.sh`, or `kubectl apply -f cirrus/ingress.yaml`.
+**To publish again — token-gated:** `PUBLIC=1 ./up.sh`. The public ingress
+carries a Traefik BasicAuth middleware
+([`cirrus/auth-middleware.yaml`](cirrus/auth-middleware.yaml)), so authenticated
+services can reach it while anonymous callers cannot drive its URL fetching.
+`up.sh` refuses to publish if the credentials secret is absent, so an open
+ingress cannot be created by accident. Setup and rotation:
+[`../secrets/hash-archive-credentials.md`](../secrets/hash-archive-credentials.md).
+
+Callers authenticate with `curl -u user:pass` or an `Authorization: Basic …`
+header. The header is **not** forwarded upstream (`removeHeader: true`) — the
+2021-vintage HTTP parser has no use for it.
 
 ## ⚠️ The historical hash database is NOT loaded
 

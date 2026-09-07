@@ -1,0 +1,27 @@
+# Token-gated public access for hash-archive.
+#
+# WHY AUTH RATHER THAN OPEN: the app fetches arbitrary user-supplied URLs
+# through a statically vendored 2021 LibreSSL. The NetworkPolicy constrains
+# *where* it can reach; this constrains *who can make it reach*. Together they
+# are what makes public exposure defensible for unmaintained C network code.
+#
+# BasicAuth is used rather than a bearer token because Traefik implements it
+# natively with no extra component, and it is equally usable service-to-service:
+#   curl -u "$USER:$PASS" https://hash-archive.carlboettiger.info/
+#   Authorization: Basic base64(user:pass)
+#
+# Credentials live in the Secret `hash-archive-auth` (key `users`, htpasswd
+# format). It is NOT in this repo — see ../../secrets/hash-archive-credentials.md.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hash-archive-auth
+  namespace: hash-archive
+spec:
+  basicAuth:
+    secret: hash-archive-auth
+    realm: "hash-archive"
+    # Do not pass the Authorization header upstream — hash-archive has no use
+    # for it, and not forwarding credentials to a 2021-vintage HTTP parser is
+    # the safer default.
+    removeHeader: true
