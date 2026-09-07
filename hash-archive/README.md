@@ -108,6 +108,18 @@ Callers authenticate with `curl -u user:pass` or an `Authorization: Basic …`
 header. The header is **not** forwarded upstream (`removeHeader: true`) — the
 2021-vintage HTTP parser has no use for it.
 
+## ⚠️ Known fault: periodic SIGABRT — [#51](https://github.com/boettiger-lab/k8s/issues/51)
+
+The pod aborts with **exit 134 (SIGABRT) roughly every ~49 minutes** and is
+restarted by kubelet in about a second. It serves correctly between aborts, so
+impact is a brief outage per cycle rather than an outage outright — but do not
+put anything latency- or availability-critical behind it until this is
+understood. Ruled out so far: the migrated store, the storage backend, the
+NetworkPolicy, the securityContext, and OOM. Details and next steps in the issue.
+
+**Note for anyone debugging:** the interval is ~49 minutes, so a 60-second
+smoke test will look healthy. Observe for hours.
+
 ## ⚠️ The historical hash database is NOT loaded
 
 **Status 2026-09-07: the service runs on a FRESH, EMPTY store.** The original
