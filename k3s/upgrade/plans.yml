@@ -36,6 +36,29 @@ spec:
     matchExpressions:
     - key: node-role.kubernetes.io/control-plane
       operator: DoesNotExist
+  # Both worker nodes are tainted, and system-upgrade-controller schedules its
+  # upgrade Job ON the node it is upgrading -- so without a matching toleration
+  # the Job never places and the node is silently never upgraded. It does not
+  # fail loudly; the plan simply stays quiet while cirrus advances on the stable
+  # channel, until the agent drifts outside the supported kubelet/apiserver
+  # skew. That is the same hazard the nimbus join runbook guards against at
+  # join time, arriving later by a different door.
+  #
+  #   thelio  hub.jupyter.org/dedicated=user   (jupyter user pods only)
+  #   nimbus  dedicated=nimbus                 (sanctioned workloads only)
+  #
+  # Adding a toleration only grants permission to schedule; it does not attract
+  # anything anywhere, and one that matches no taint is inert. So this list is
+  # safe to carry even when a node is untainted or absent.
+  tolerations:
+  - key: hub.jupyter.org/dedicated
+    operator: Equal
+    value: user
+    effect: NoSchedule
+  - key: dedicated
+    operator: Equal
+    value: nimbus
+    effect: NoSchedule
   prepare:
     args:
     - prepare
