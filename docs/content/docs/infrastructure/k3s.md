@@ -8,6 +8,10 @@ bookToc: true
 
 [K3s](https://docs.k3s.io/installation) is a lightweight, certified Kubernetes distribution designed for resource-constrained environments and edge computing. It's the best way to provide a self-hosted Kubernetes environment for a single node or small cluster.
 
+Our cluster is **one K3s cluster**: cirrus is the server (control plane), thelio and
+nimbus are agents. Node-level host config lives in
+[`cluster/nodes/`](https://github.com/boettiger-lab/k8s/tree/main/cluster/nodes).
+
 ## Overview
 
 K3s is a fully compliant Kubernetes distribution with the following features:
@@ -62,7 +66,7 @@ If you have NVIDIA GPUs and want to enable GPU support with time-slicing:
 
 ```bash
 # From the repository root
-bash nvidia/nvidia-device-plugin.sh
+bash platform/nvidia/nvidia-device-plugin.sh
 ```
 
 See the [NVIDIA GPU Support]({{< relref "nvidia" >}}) documentation for more details.
@@ -76,6 +80,42 @@ Helm is already included with K3s, so no separate installation is needed.
 helm version
 ```
 
+## Adding a node (agent join)
+
+An agent joins the existing server; it does **not** get a cluster of its own. Before
+joining, check two things:
+
+- **Version.** Never join an agent newer than the server. Upgrade the server first
+  (the system-upgrade-controller plans in `cluster/upgrade/` handle this), then join.
+- **Network.** The agent needs the server's `6443/tcp` (API) and `8472/udp` (flannel
+  VXLAN) on a path with no NAT between them. A flat join across two subnets does not
+  work without an overlay; putting the node on the same subnet is far simpler.
+
+Write `/etc/rancher/k3s/config.yaml` **before** installing, so that node taints and
+labels are set at registration and there is never a window in which the node is
+schedulable for workloads it cannot run:
+
+```yaml
+# /etc/rancher/k3s/config.yaml on the agent
+node-taint:
+  - "dedicated=nimbus:NoSchedule"
+```
+
+Then install, pointing at the server and its token
+(`/var/lib/rancher/k3s/server/node-token` on the server):
+
+```bash
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION=<match the server> \
+  K3S_URL=https://<server-ip>:6443 \
+  K3S_TOKEN=<node-token> \
+  sh -
+```
+
+Verify from the server with `kubectl get nodes -o wide`, then confirm the taint took
+effect (`kubectl describe node <name> | grep Taints`) before deploying anything to it.
+See [Node placement]({{< relref "node-placement" >}}) for what may then run there.
+
 ## Remote kubectl Access
 
 To access the K3s cluster from a remote machine using kubectl:
@@ -84,10 +124,10 @@ To access the K3s cluster from a remote machine using kubectl:
 
 ```bash
 # On the k3s server, run:
-./configure-remote-access.sh
+./cluster/configure-remote-access.sh
 
 # Or specify the server IP/hostname explicitly:
-./configure-remote-access.sh your-server.example.com
+./cluster/configure-remote-access.sh your-server.example.com
 ```
 
 This generates `k3s-remote-kubeconfig.yaml` with the correct server address.
@@ -126,7 +166,7 @@ sudo ss -tlnp | grep 6443
 - Verify resolution points to your node:
 
 ```bash
-getent hosts nimbus.carlboettiger.info
+getent hosts cirrus.carlboettiger.info
 # The output should show your server's IP(s), not Cloudflare ranges
 ```
 

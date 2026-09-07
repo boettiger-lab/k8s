@@ -1,58 +1,62 @@
 ---
-title: "K8s Cluster Documentation"
+title: "Research Cluster Documentation"
 type: docs
 ---
 
-# K8s Cluster Documentation
+# Boettiger Lab research cluster
 
-Welcome to the documentation for our Kubernetes (K3s) cluster setup. This documentation covers both the infrastructure setup and the services running on our clusters.
+Documentation for the lab's self-hosted Kubernetes ([K3s](https://k3s.io/)) cluster —
+the computational environment our group runs on campus workstations. Configuration
+lives in [boettiger-lab/k8s](https://github.com/boettiger-lab/k8s).
 
-## Overview
+## The cluster
 
-This repository contains all the configuration files for deploying our research team's computational environment across our campus-based workstations. We use a Kubernetes-based approach (specifically K3s) that provides containerized software abstractions along with hardware orchestration and resource management capabilities.
+**One cluster, three nodes.** cirrus is the control plane; thelio and nimbus are workers.
 
-## Quick Links
+| Node | Role | Hardware |
+|------|------|----------|
+| **cirrus** | control plane, storage, most services | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank` |
+| **thelio** | amd64 GPU worker | Ryzen 9 3900X, RTX 2080 8 GB, exposed as one exclusive GPU |
+| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB unified memory; tainted for LLM inference only |
 
-### Infrastructure Setup
-- [K3s Installation & Configuration]({{< relref "docs/infrastructure/k3s" >}})
-- [NVIDIA GPU Support]({{< relref "docs/infrastructure/nvidia" >}})
-- [Storage with OpenEBS]({{< relref "docs/infrastructure/openebs" >}})
-- [Certificate Manager]({{< relref "docs/infrastructure/cert-manager" >}})
-- [External DNS]({{< relref "docs/infrastructure/external-dns" >}})
+The nodes are not interchangeable — see
+[Node placement]({{< relref "docs/infrastructure/node-placement" >}}) before pinning a
+workload to one.
 
-### Services
-- [JupyterHub]({{< relref "docs/services/jupyterhub" >}})
-- [PostgreSQL]({{< relref "docs/services/postgres" >}})
-- [MinIO]({{< relref "docs/services/minio" >}})
-- [GitHub Actions Runners]({{< relref "docs/services/github-actions" >}})
-- [vLLM]({{< relref "docs/services/vllm" >}})
+## Services — what the cluster provides
 
-### Administration
-- [User Access Management]({{< relref "docs/admin/users" >}})
-- [Secrets Management]({{< relref "docs/admin/secrets" >}})
-- [Tips & Tricks]({{< relref "docs/admin/tips-tricks" >}})
+- [**JupyterHub**]({{< relref "docs/services/jupyterhub" >}}) — multi-user notebooks, CPU and GPU profiles
+- [**MinIO**]({{< relref "docs/services/minio" >}}) — S3-compatible object storage for research data
+- [**vLLM**]({{< relref "docs/services/vllm" >}}) — OpenAI-compatible LLM inference on both GPU nodes
+- [**PostgreSQL**]({{< relref "docs/services/postgres" >}}) — relational database
+- [**GitHub Actions runners**]({{< relref "docs/services/github-actions" >}}) — self-hosted CI
 
-## Getting Started
+## Infrastructure — what holds them up
 
-If you're new to this cluster:
+- [**K3s**]({{< relref "docs/infrastructure/k3s" >}}) — the cluster itself, and how nodes join it
+- [**NVIDIA GPUs**]({{< relref "docs/infrastructure/nvidia" >}}) — device plugin and per-node sharing
+- [**OpenEBS**]({{< relref "docs/infrastructure/openebs" >}}) — node-local ZFS volumes with quotas
+- [**Shared home storage**]({{< relref "docs/infrastructure/shared-home-storage" >}}) — JuiceFS RWX homes
+- [**RustFS**]({{< relref "docs/infrastructure/rustfs" >}}) — the S3 backend beneath JuiceFS
+- [**cert-manager**]({{< relref "docs/infrastructure/cert-manager" >}}) — automatic HTTPS
+- [**external-dns**]({{< relref "docs/infrastructure/external-dns" >}}) — DNS from Ingress objects
+- [**Node placement**]({{< relref "docs/infrastructure/node-placement" >}}) — taints, labels, architecture
 
-1. **For Users**: Start with the [User Access Management]({{< relref "docs/admin/users" >}}) guide to get your credentials
-2. **For Administrators**: Begin with [K3s Installation]({{< relref "docs/infrastructure/k3s" >}}) to understand the base setup
-3. **For Service Deployment**: Check the specific service documentation in the Services section
+## Administration
 
-## Architecture
+- [**User access**]({{< relref "docs/admin/users" >}}) — credentials and RBAC
+- [**Secrets**]({{< relref "docs/admin/secrets" >}}) — how credentials reach workloads
+- [**Custom images**]({{< relref "docs/admin/custom-images" >}}) — the notebook and GPU images
+- [**Tips & tricks**]({{< relref "docs/admin/tips-tricks" >}}) — day-to-day operations
 
-Our cluster is built on:
-- **K3s**: Lightweight Kubernetes distribution
-- **Traefik**: Built-in ingress controller
-- **Cert-Manager**: Automatic SSL/TLS certificate management
-- **External-DNS**: Automatic DNS record management
-- **OpenEBS ZFS**: Persistent storage with disk quotas
-- **NVIDIA Device Plugin**: GPU resource management with time-slicing
+## Getting started
+
+1. **New user?** Start with [User access]({{< relref "docs/admin/users" >}}) to get credentials.
+2. **Running work?** Read [Node placement]({{< relref "docs/infrastructure/node-placement" >}}) —
+   arm64, GPU sharing, and node-local storage all constrain where a pod can land.
+3. **Administering?** Start from [K3s]({{< relref "docs/infrastructure/k3s" >}}).
 
 ## Support
 
-For issues or questions:
-- Check the [Tips & Tricks]({{< relref "docs/admin/tips-tricks" >}}) section
-- Review the relevant service documentation
-- Consult the [GitHub repository](https://github.com/boettiger-lab/k8s)
+Open an issue on the [GitHub repository](https://github.com/boettiger-lab/k8s), or check
+[Tips & tricks]({{< relref "docs/admin/tips-tricks" >}}) first.

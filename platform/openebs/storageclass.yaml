@@ -1,0 +1,37 @@
+# Node-local persistent storage for the cluster, backed by the native ZFS pool
+# `tank` on cirrus. Matches the live cluster: `kubectl get sc -o yaml` should agree.
+#
+# `tank` is a pre-existing pool on the host; it is not created here. Only cirrus
+# runs a zfs-localpv node plugin today, so these classes bind on cirrus.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-zfs
+allowVolumeExpansion: true
+parameters:
+  recordsize: "128k"
+  compression: "lz4"
+  dedup: "off"
+  fstype: "zfs"
+  poolname: "tank"
+provisioner: zfs.csi.openebs.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+---
+# ext4-on-zvol variant. Some workloads need a block device with real POSIX
+# semantics (e.g. databases that mmap or use O_DIRECT) rather than a ZFS dataset.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-zfs-ext4
+allowVolumeExpansion: true
+parameters:
+  recordsize: "16k"
+  compression: "lz4"
+  dedup: "off"
+  fstype: "ext4"
+  poolname: "tank"
+provisioner: zfs.csi.openebs.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate

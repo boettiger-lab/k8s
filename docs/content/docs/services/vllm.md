@@ -19,37 +19,52 @@ Deploy vLLM for high-throughput LLM inference with GPU acceleration.
 
 ## Live deployments
 
-cirrus serves **one** LLM at a time, always at the same address:
+Each GPU node serves **one** LLM at a time, always at the same address. The URL names
+the machine, not the model — ask the endpoint which model is loaded rather than
+encoding it in a hostname:
 
-> **`https://vllm-cirrus.carlboettiger.info`**
-
-The URL names the machine, not the model — mirroring
-`vllm-nimbus.carlboettiger.info`. Ask the endpoint which model is loaded rather
-than encoding it in a hostname:
+| Endpoint | Node | Model | Manifest |
+|---|---|---|---|
+| `https://vllm-cirrus.carlboettiger.info` | cirrus | Qwen3.8-27B (AWQ INT4, MTP), served as `qwen3-8` | `qwen3-8-cirrus.yaml` |
+| `https://vllm-nimbus.carlboettiger.info` | nimbus | Qwen3.8-27B (NVFP4), served as `qwen` / `qwen3.8` | `qwen3-8-nimbus.yaml` |
 
 ```bash
 curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
   https://vllm-cirrus.carlboettiger.info/v1/models | jq '.data[].id'
 ```
 
-The `vllm/cirrus/` directory holds one manifest per model, plus `endpoint.yaml`
-with the shared Service, Ingress, and certificate. Every model Deployment
-carries the pod label `vllm-endpoint: cirrus`, which the shared Service selects
-— so switching models is just scaling one down and the next up. No new Ingress,
+`services/vllm/endpoints.yaml` holds both endpoints — the Services, Ingresses, and the
+Traefik transport — and each model is a Deployment beside it. Every model Deployment
+carries the pod label `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service
+selects, so switching models is just scaling one down and the next up. No new Ingress,
 DNS record, or certificate is involved.
 
-| Model | `model` name | Manifest | State |
-|-------|--------------|----------|-------|
-| Qwen3.8-27B (AWQ INT4, MTP) | `qwen3-8` | `deploy-qwen3-8.yaml` | **live** |
-| Gemma 4 | `gemma4` | `deploy-gemma4.yaml` | scaled to 0 |
-
-Whisper (audio transcription) is a separate, non-vLLM server on its own host,
-`whisper-cirrus.carlboettiger.info` (`deploy-whisper.yaml`); it is not part of
-the single-LLM slot and can run alongside it.
+Also present: **Gemma 4** on cirrus (`gemma4-cirrus.yaml`, scaled to 0), and **Whisper**
+audio transcription — a separate, non-vLLM server on its own host
+`whisper-cirrus.carlboettiger.info` (`whisper-cirrus.yaml`), which is not part of the
+single-LLM slot and can run alongside it.
 
 All endpoints are OpenAI-compatible and **require an API key** (see
-[Authentication](#authentication)). They run on the time-sliced GPUs of the
-`cirrus` node (Quadro RTX 8000, Turing).
+[Authentication](#authentication)).
+
+### The two nodes are not equivalent
+
+**cirrus** has two discrete Quadro RTX 8000s (48 GB each, Turing), time-sliced 8 ways —
+a slice is a co-tenancy slot, not a memory partition, and each pod sees a whole card.
+
+**nimbus** is a DGX Spark: one GB10 with **unified memory**, so CPU and GPU share a
+single ~122 GiB pool. Two consequences worth internalising before deploying there:
+
+- A pod's `memory:` limit does **not** bound CUDA allocations — the cgroup controller
+  cannot see them. It is scheduler accounting, and it must reflect real unified-memory
+  use or the scheduler will co-schedule something that OOMs the host. The real control
+  is `--gpu-memory-utilization`.
+- `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
+  concurrency cap. The vLLM deployment takes 6 and leaves 2 for small jobs.
+
+nimbus is also **arm64** and tainted `dedicated=nimbus:NoSchedule`, so its manifest uses
+NGC's arm64 vLLM image and carries the toleration. See
+[Node placement]({{< relref "../infrastructure/node-placement" >}}).
 
 ## Prerequisites
 
@@ -59,18 +74,18 @@ All endpoints are OpenAI-compatible and **require an API key** (see
 
 ## Deployment
 
-The `vllm/` directory contains Kubernetes manifests for deploying vLLM.
+The `services/vllm/` directory contains the manifests for both endpoints.
 
 ### Quick Start
 
 ```bash
-cd vllm/cirrus
+cd services/vllm
 
 # Create the namespace + secrets (HF token, API key) and deploy a model
 ./up.sh
 
 # Or apply a single model manifest directly
-kubectl apply -f deploy-qwen3-8.yaml
+kubectl apply -f qwen3-8-cirrus.yaml
 
 # Check status
 kubectl get pods -n vllm
@@ -84,23 +99,23 @@ kubectl get ingress -n vllm
 
 ### Configuration Files
 
-Under `vllm/cirrus/`:
+Under `services/vllm/`:
 
-- `endpoint.yaml` - the shared Service, Ingress, and cert for `vllm-cirrus.carlboettiger.info`
-- `deploy-<model>.yaml` - a Deployment only, labelled `vllm-endpoint: cirrus` (e.g. `deploy-qwen3-8.yaml`)
-- `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets
+- `endpoints.yaml` - the Services, Ingresses, certs and Traefik transport for both nodes
+- `<model>-<node>.yaml` - a Deployment only, labelled `vllm-endpoint: <node>`
+- `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets (git-ignored)
 - `up.sh` / `down.sh` - deploy / cleanup scripts
 
 ### Deployment Configuration
 
 Each model manifest:
-- Requests GPU(s) and pins to the `cirrus` node
+- Requests GPU slice(s) and pins to a specific node with `nodeSelector`
 - Mounts the shared Hugging Face cache from the host (`/home/cboettig/.cache/huggingface`)
 - Reads the HF token and API key from Kubernetes secrets
 - Exposes the OpenAI-compatible API on port 8000
 - Uses `strategy.type: Recreate` so a redeploy frees the GPUs before the new pod starts
 
-See `vllm/cirrus/deploy-qwen3-8.yaml` for the full reference. Key arguments:
+See `services/vllm/qwen3-8-cirrus.yaml` for the full reference. Key arguments:
 
 ```yaml
 args:

@@ -35,7 +35,7 @@ If you use GitHub Container Registry (GHCR), authenticate first and use `ghcr.io
 
 ## Use in JupyterHub
 
-Reference your image in Helm values (see `jupyterhub/public-config.yaml` or your chosen values file):
+Reference your image in Helm values (see `services/jupyterhub/public-config.yaml` or your chosen values file):
 
 ```yaml
 singleuser:
@@ -53,5 +53,5 @@ singleuser:
 
 ## Related
 
-- See the `jupyterhub/` directory for deployment scripts and value files.
+- See the `services/jupyterhub/` directory for deployment scripts and value files.
 - For CI builds, see `github-actions/` examples for runner configuration.

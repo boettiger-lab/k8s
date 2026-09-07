@@ -18,8 +18,8 @@ pods can use a GPU at once.
 | Helm release | `nvdp` |
 | Namespace | `nvidia-device-plugin` |
 | Chart / app version | `nvidia-device-plugin-0.19.2` |
-| Install/upgrade script | `nvidia/nvidia-device-plugin.sh` |
-| Values | `nvidia/nvidia-device-plugin-config.yaml` |
+| Install/upgrade script | `platform/nvidia/nvidia-device-plugin.sh` |
+| Values | `platform/nvidia/nvidia-device-plugin-config.yaml` |
 
 > Older docs referenced namespace `kube-system` and a daemonset named
 > `nvidia-device-plugin-daemonset`. That is **not** how it is deployed — it is a
@@ -30,10 +30,22 @@ pods can use a GPU at once.
 | Node | GPU(s) | VRAM | Sharing | Result |
 |------|--------|------|---------|--------|
 | `cirrus` | 2× Quadro RTX 8000 | 48 GB each | **time-slicing**, 8 replicas/GPU | 16 `nvidia.com/gpu` slices; no VRAM cap |
+| `nimbus` | 1× GB10 (DGX Spark) | 128 GB **unified** (shared with CPU) | **time-slicing**, 8 replicas | 8 slices of one GPU; a concurrency cap, not a memory split |
 | `thelio` | 1× GeForce RTX 2080 | 8 GB | **none** | 1 whole GPU per pod (8 GB is too small to slice) |
 
-Neither GPU supports **MIG** (both are Turing; MIG needs A100/H100/A30-class
-cards — `nvidia.com/mig.capable=false` on both nodes).
+The two time-sliced nodes are time-sliced for *different reasons*. On cirrus, slices let
+several pods share a 48 GB card. On nimbus there is no separate VRAM at all — CPU and GPU
+draw on one pool — so slicing cannot partition memory even in principle; the replica
+count is simply how many GPU pods the scheduler will place there. vLLM claims 6 of the 8
+and leaves 2 for small jobs.
+
+thelio is the counter-example: 8 GB split eight ways is ~1 GB a pod with no isolation, so
+it advertises **one exclusive device**. It inherited 8-way slicing by accident until
+2026-09-07, purely because the node carried no config label and fell through to
+`config.default`.
+
+No GPU here supports **MIG** (two Turing cards and a GB10; MIG needs A100/H100/A30-class
+hardware — `nvidia.com/mig.capable=false` on every node).
 
 ## GPU sharing: time-slicing vs MPS vs MIG
 
@@ -66,24 +78,38 @@ The device plugin supports three sharing modes:
 ## Configuration
 
 Sharing is configured **per node** using the device plugin's named-config
-feature. `nvidia/nvidia-device-plugin-config.yaml` defines a `config.map` with
+feature. `platform/platform/nvidia/nvidia-device-plugin-config.yaml` defines a `config.map` with
 two entries — `timeslice` and `no-sharing` — and each node selects one via the
 `nvidia.com/device-plugin.config` label:
 
 ```bash
 kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
+kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
 kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 ```
 
-`config.default` is `timeslice`; both real nodes are labelled explicitly.
+`config.default` is `timeslice`, so an **unlabelled** GPU node silently gets 8-way
+slicing whether or not that suits its card. Label every GPU node explicitly, and check
+with:
+
+```bash
+kubectl get nodes -L nvidia.com/device-plugin.config,nvidia.com/gpu.count,nvidia.com/gpu.replicas
+```
+
+Changing a node's mode restarts the plugin there and renames the product label
+(`NVIDIA-GeForce-RTX-2080` gains or loses a `-SHARED` suffix), so any pod pinning
+`nvidia.com/gpu.product` in a nodeSelector must be updated to match.
+
+nimbus additionally needs the `dedicated=nimbus:NoSchedule` toleration in the chart
+values, or the plugin will not run there and the node advertises no GPU at all.
 
 ### Applying changes
 
-Edit `nvidia/nvidia-device-plugin-config.yaml`, then re-run the install script
+Edit `platform/nvidia/nvidia-device-plugin-config.yaml`, then re-run the install script
 (it is an idempotent `helm upgrade --install`):
 
 ```bash
-bash nvidia/nvidia-device-plugin.sh
+bash platform/nvidia/nvidia-device-plugin.sh
 ```
 
 ### Requesting GPUs in a pod
@@ -106,7 +132,7 @@ A large LLM can request several slices (e.g. `nvidia.com/gpu: 2`) — it still g
 the full VRAM of its card, but reserves bookkeeping slots so fewer other pods
 land on the same GPU.
 
-> **JupyterHub GPU profiles** in `jupyterhub/public-config.yaml` set
+> **JupyterHub GPU profiles** in `services/jupyterhub/public-config.yaml` set
 > `extra_resource_limits: {nvidia.com/gpu: "1"}` so notebooks claim a slice and
 > are scheduled/accounted by k8s (rather than seeing all GPUs unmanaged via the
 > nvidia runtime's "visible-devices" behaviour).
@@ -119,7 +145,7 @@ kubectl get nodes -o custom-columns=\
 'NODE:.metadata.name,ALLOC:.status.allocatable.nvidia\.com/gpu,\
 STRATEGY:.metadata.labels.nvidia\.com/gpu\.sharing-strategy,\
 REPLICAS:.metadata.labels.nvidia\.com/gpu\.replicas'
-# cirrus -> 16 / time-slicing / 8 ;  thelio -> 1 / none
+# cirrus -> 16 / time-slicing / 8 ;  nimbus -> 8 / time-slicing / 8 ;  thelio -> 1 / none
 
 # Plugin pods (expect all Running; no mps-control-daemon under time-slicing)
 kubectl get pods -n nvidia-device-plugin

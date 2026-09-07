@@ -6,41 +6,45 @@ bookCollapseSection: false
 
 # Services
 
-Documentation for services deployed on the Kubernetes cluster.
+What the cluster provides to the people using it. Repo directory:
+[`services/`](https://github.com/boettiger-lab/k8s/tree/main/services).
 
-This section covers the various applications and services running on the cluster:
+## Available services
 
-## Available Services
+| Service | What it is | Where |
+|---|---|---|
+| [**JupyterHub**](jupyterhub) | Multi-user notebooks, CPU and GPU profiles | [jupyterhub.cirrus.carlboettiger.info](https://jupyterhub.cirrus.carlboettiger.info) |
+| [**MinIO**](minio) | S3-compatible object storage for research data | [minio.carlboettiger.info](https://minio.carlboettiger.info) |
+| [**vLLM**](vllm) | OpenAI-compatible LLM inference, one model per GPU node | [vllm-cirrus](https://vllm-cirrus.carlboettiger.info), [vllm-nimbus](https://vllm-nimbus.carlboettiger.info) |
+| [**PostgreSQL**](postgres) | Relational database | in-cluster |
+| [**GitHub Actions runners**](github-actions) | Self-hosted CI for lab repositories | — |
 
-- [**JupyterHub**](jupyterhub) - Multi-user Jupyter notebook environment with GPU support
-- [**PostgreSQL**](postgres) - Relational database service
-- [**MinIO**](minio) - S3-compatible object storage
-- [**GitHub Actions Runners**](github-actions) - Self-hosted CI/CD runners
-- [**vLLM**](vllm) - High-performance LLM inference
+Also deployed, configured in the repo but without a docs page yet: **titiler** (tile
+server for cloud-optimized rasters) and **hash-archive** (content-hash registry for
+data provenance).
 
 ## Prerequisites
 
-Before deploying services, ensure the [infrastructure]({{< relref "../infrastructure" >}}) is properly configured:
+Services assume the [infrastructure]({{< relref "../infrastructure" >}}) is in place:
+K3s running, storage class available, certificates and DNS automated, and the GPU
+device plugin installed for anything that wants a GPU.
 
-- K3s is installed and running
-- Storage backend is configured (if needed)
-- SSL certificates are set up (for external access)
-- DNS is configured (for external access)
-- GPU support is enabled (if using GPU services)
+## Deployment pattern
 
-## Service Deployment
-
-Most services include deployment scripts in their respective directories. General pattern:
+Most service directories carry a deploy script and a README:
 
 ```bash
-cd <service-directory>
-./up.sh      # Deploy
-./down.sh    # Remove
+cd services/<service>
+./up.sh      # deploy
+./down.sh    # remove
 ```
 
-Or use `kubectl` and Helm directly:
+Or `kubectl` / Helm directly:
 
 ```bash
-kubectl apply -f <service>.yaml
-helm install <service> <chart> -f values.yaml
+kubectl apply -f <manifest>.yaml
+helm upgrade -i <release> <chart> -f values.yaml
 ```
+
+There is no GitOps controller — changes are applied by hand, and the manifests in the
+repo are meant to match the live cluster.

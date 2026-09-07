@@ -51,7 +51,7 @@ Use the provided deployment script:
 
 ```bash
 # Deploy to default namespace with public config
-./jupyterhub/cirrus.sh
+./services/jupyterhub/up.sh
 ```
 
 Or manually with Helm:

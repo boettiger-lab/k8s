@@ -1,0 +1,160 @@
+# The public vLLM endpoints -- one per GPU node, plus the Traefik transport they share.
+#
+# Each GPU node serves a single vLLM model at a time (on cirrus a 27B model wants
+# essentially a whole RTX 8000; on nimbus it wants most of the unified pool), so an
+# endpoint is a property of the machine, not of the model:
+#
+#   https://vllm-cirrus.carlboettiger.info   -> whatever is scaled up on cirrus
+#   https://vllm-nimbus.carlboettiger.info   -> whatever is scaled up on nimbus
+#
+# The model identifies itself via --served-model-name / GET /v1/models; it never
+# appears in the URL. Switching models therefore needs no new Ingress, DNS record or
+# certificate: every model Deployment carries the pod label `vllm-endpoint: <node>`,
+# which is what the matching Service selects. Scale the old model to 0, scale the new
+# one to 1, and the endpoint follows. (Two models on one node would split traffic; GPU
+# memory tends to enforce one-at-a-time anyway.)
+#
+# Whisper is not part of this: it is always-on with its own Service and Ingress in
+# whisper-cirrus.yaml.
+#
+# The ServersTransport is defined ONCE below and referenced by both Ingresses as
+# `vllm-vllm-long-timeout@kubernetescrd`. Two copies would be a silent drift hazard the
+# day one of them is tuned.
+
+---
+# Long timeouts for inference: a big prefill easily exceeds Traefik's default
+# response-header timeout. Shared by both endpoints below.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: vllm-long-timeout
+  namespace: vllm
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 600s
+    readIdleTimeout: 600s
+
+---
+# cirrus --- 2x Quadro RTX 8000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus
+  annotations:
+    # Scraped by the monitoring stack's Prometheus (kubernetes-service-endpoints
+    # job) for the carbon/perf dashboard at carbon-cirrus.carlboettiger.info.
+    # vLLM's /metrics is unauthenticated. See ../../monitoring/. Keeping the
+    # annotations here (not on a per-model Service) means metrics survive a
+    # model switch, and nothing double-scrapes the same pod.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    vllm-endpoint: cirrus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-cirrus
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - vllm-cirrus.carlboettiger.info
+    secretName: vllm-cirrus-tls
+
+---
+# nimbus (DGX Spark) --- one GB10, unified memory. Reached through Traefik on
+# cirrus and across flannel: k3s ServiceLB cannot hold an external IP here, because
+# svclb tolerates only control-plane/CriticalAddonsOnly taints, not `dedicated=nimbus`.
+# Negligible for token streaming.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-nimbus-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus
+  annotations:
+    # Scraped by the monitoring stack's Prometheus for the carbon/perf
+    # dashboard. vLLM's /metrics is unauthenticated. Keeping the annotations on
+    # the endpoint Service (not a per-model one) means metrics survive a model
+    # switch and nothing double-scrapes the same pod.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    vllm-endpoint: nimbus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-nimbus-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
+    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    # Shared with cirrus -- defined in ../serverstransport.yaml.
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-nimbus
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-nimbus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-nimbus-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - vllm-nimbus.carlboettiger.info
+    secretName: vllm-nimbus-tls

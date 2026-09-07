@@ -123,7 +123,7 @@ helm install external-dns external-dns/external-dns \
 Or use the provided script:
 
 ```bash
-bash external-dns/helm.sh
+bash platform/external-dns/helm.sh
 ```
 
 ### Verify Installation

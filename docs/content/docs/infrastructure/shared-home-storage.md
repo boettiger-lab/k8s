@@ -93,7 +93,7 @@ This is **not** a replacement for ZFS:
 
 Homes will live here, so both backends need real durability:
 
-1. **RustFS** (`rustfs/cirrus.yaml`) backed by `cirrus`/`tank` (openebs-zfs),
+1. **RustFS** (`platform/rustfs/cirrus.yaml`) backed by `cirrus`/`tank` (openebs-zfs),
    with its own redundancy/backup — it now holds home *data*, so a single-node
    RustFS is a data SPOF.
 2. **Dedicated PostgreSQL** (e.g. a `juicefs` namespace) on `tank`, with WAL
@@ -125,7 +125,7 @@ Homes will live here, so both backends need real durability:
    directory quota driven by the PVC's requested size. `openebs-zfs` is left
    untouched.
 
-5. **Route named servers to JuiceFS** (`jupyterhub/public-config.yaml`) — the
+5. **Route named servers to JuiceFS** (`services/jupyterhub/public-config.yaml`) — the
    only change to existing config, and it is *additive*: the hub-wide default
    stays `openebs-zfs`/RWO. A `pre_spawn_hook` switches storage **only for named
    servers** (non-empty `spawner.name`); the default server is untouched:
@@ -141,7 +141,7 @@ Homes will live here, so both backends need real durability:
                  spawner.storage_access_modes = ["ReadWriteMany"]
          c.KubeSpawner.pre_spawn_hook = pre_spawn_hook
    ```
-   Deploy with `cd jupyterhub && ./cirrus.sh`.
+   Deploy with `cd services/jupyterhub && ./up.sh`.
 
    **Why named servers, not a profile/image option:** image choice
    (`profileList`) is orthogonal to home storage — a user may run the GPU image

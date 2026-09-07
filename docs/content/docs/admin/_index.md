@@ -14,6 +14,8 @@ This section covers administrative tasks and tools for managing the Kubernetes c
 
 - [**User Access Management**](users) - Configure user authentication and access control
 - [**Secrets Management**](secrets) - Manage sensitive configuration data
+- [**Custom Images**](custom-images) - The notebook, GPU and openvscode images
+- [**OAuth Apps**](oauth-apps) - GitHub OAuth applications behind JupyterHub login
 - [**Tips & Tricks**](tips-tricks) - Useful commands and solutions to common problems
 
 ## Common Administrative Tasks

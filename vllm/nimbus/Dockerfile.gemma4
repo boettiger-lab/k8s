@@ -1,3 +1,0 @@
-FROM vllm/vllm-openai:gemma4-cu130
-
-RUN pip install --no-cache-dir av soundfile resampy soxr scipy

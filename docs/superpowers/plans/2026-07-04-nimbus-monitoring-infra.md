@@ -25,7 +25,7 @@ add-ons), `prometheus-community/prometheus`, NVIDIA's
   `gpu-helm-charts/dcgm-exporter` **4.8.2**.
 - dcgm-exporter must **not** request the `nvidia.com/gpu` extended resource —
   the node's `nvidia-device-plugin` time-slices that resource into 8
-  replicas for model-serving pods (see `nvidia/nvidia-device-plugin-config.yaml`);
+  replicas for model-serving pods (see `platform/nvidia/nvidia-device-plugin-config.yaml`);
   a monitoring pod must not consume one of those slots. It gets GPU access
   via `runtimeClassName: nvidia` instead (same mechanism `deploy-qwen.yaml`
   uses), which the chart supports as a plain value with no resource request.
@@ -40,7 +40,7 @@ add-ons), `prometheus-community/prometheus`, NVIDIA's
 - New files live under a new top-level `monitoring/` directory, following
   the existing `nvidia/` directory's convention: a `README.md`, one
   `*-values.yaml` per Helm release, and a single `install.sh` using
-  `helm upgrade -i ... --create-namespace` (see `nvidia/nvidia-device-plugin.sh`
+  `helm upgrade -i ... --create-namespace` (see `platform/nvidia/nvidia-device-plugin.sh`
   for the exact pattern to match).
 - Confirmed on the live node before writing this plan: `dcgmi dmon -e 155`
   reads real GB10 power (~11W idle); the full default dcgm-exporter field
@@ -203,7 +203,7 @@ git commit -m "monitoring: deploy minimal Prometheus for nimbus"
 ```yaml
 # dcgm-exporter on nimbus's single GB10. Must NOT request nvidia.com/gpu —
 # that resource is time-sliced 8-way for model-serving pods
-# (see ../nvidia/nvidia-device-plugin-config.yaml). GPU access instead
+# (see ../platform/nvidia/nvidia-device-plugin-config.yaml). GPU access instead
 # comes from runtimeClassName, same mechanism deploy-qwen.yaml uses.
 runtimeClassName: nvidia
 

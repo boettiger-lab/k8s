@@ -1,135 +1,138 @@
 # boettiger-lab/k8s
 
-Kubernetes ([K3s](https://k3s.io/)) configuration for the Boettiger Lab's
-self-hosted, on-premise compute clusters. This repo holds the manifests, Helm
-values, and bootstrap scripts that run our research group's computational
-environment — JupyterHub notebooks, object storage, databases, LLM inference,
-and CI runners — on campus GPU workstations.
+Kubernetes ([K3s](https://k3s.io/)) configuration for the Boettiger Lab's self-hosted
+research cluster. This repo holds the manifests, Helm values, and bootstrap scripts
+that run our group's computational environment — JupyterHub notebooks, object storage,
+databases, LLM inference, and CI runners — on campus GPU workstations.
 
 📖 **Full documentation:** <https://boettiger-lab.github.io/k8s/>
 (built with Hugo from [`docs/`](docs/))
 
-## Clusters
+## The cluster
 
-This repo describes **one K3s cluster** with several nodes. Node-specific
-config lives in per-node subdirectories (e.g. `openebs/cirrus/`, `vllm/cirrus/`,
-`vllm/nimbus/`), while cluster-wide components live at the top level.
+**One K3s cluster, three nodes.** cirrus is the control plane; thelio and nimbus are
+workers. nimbus ran a cluster of its own until 2026-09-07; the migration and the
+reasoning behind its taint are in
+[`cluster/nodes/nimbus/join/`](cluster/nodes/nimbus/join/).
 
-nimbus was its own standalone cluster until it was merged in; the migration and
-the reasoning behind its taint are in [`k3s/nimbus-join/`](k3s/nimbus-join/).
-Note the cluster is **mixed-architecture** — cirrus and thelio are amd64,
-nimbus is arm64 — so an image that only exists for amd64 must never be allowed
-to schedule on nimbus. The taint is what enforces that.
+| Node | Role | Hardware |
+|------|------|----------|
+| **cirrus** | control plane + data + GPU compute | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank`. **Never cordon it** — control plane, storage, and most services all live here. |
+| **thelio** | amd64 GPU worker | Ryzen 9 3900X, RTX 2080 8 GB. Tainted `hub.jupyter.org/dedicated=user:NoSchedule` — jupyter user pods only, with new homes on JuiceFS so a server can restart on cirrus if thelio is lost. Its GPU is one exclusive device, not time-sliced. |
+| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB **unified** memory. Tainted `dedicated=nimbus:NoSchedule` — only sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. |
 
-| Node | Role |
-|------|------|
-| **cirrus** | Primary active cluster: control plane + data + GPU compute. Hosts JupyterHub, storage, and inference. **Never cordon it** — it is the control plane, data, and compute all in one. |
-| **thelio** | System76 Thelio Mega GPU worker (amd64). Back in service tainted `hub.jupyter.org/dedicated=user:NoSchedule` — jupyter user pods only, with new homes on JuiceFS so a server can restart on cirrus if thelio is lost. |
-| **nimbus** | DGX Spark (GB10, **arm64**) GPU worker. Tainted `dedicated=nimbus:NoSchedule` — it runs only specially sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. See [`k3s/nimbus-join/`](k3s/nimbus-join/). |
+The cluster is **mixed-architecture**: cirrus and thelio are amd64, nimbus is arm64, so
+an amd64-only image must never be allowed to schedule on nimbus — the taint is what
+enforces that.
 
-## Architecture
-
-The cluster is built on:
-
-- **K3s** — lightweight Kubernetes distribution
-- **Traefik** — ingress controller (K3s built-in)
-- **cert-manager** — automatic Let's Encrypt SSL/TLS certificates
-- **external-dns** — automatic DNS record management
-- **OpenEBS ZFS-LocalPV** — node-local persistent storage with per-PVC disk quotas
-- **JuiceFS** — S3-backed ReadWriteMany shared storage for node-mobile home directories
-- **NVIDIA device plugin** — GPU scheduling with time-slicing
+Nodes differ in ways that matter when scheduling: nimbus is **arm64** (most images
+here are amd64-only) and its taint must be tolerated explicitly; only cirrus provides
+`openebs-zfs` volumes; GPU sharing is configured per node. See
+[node placement](https://boettiger-lab.github.io/k8s/docs/infrastructure/node-placement/).
 
 ## Repository layout
 
-### Infrastructure
+The split is by *audience*: `services/` is what the cluster provides to people,
+`platform/` is what makes those services possible, `cluster/` is the machines
+themselves.
+
+### [`services/`](services/) — what end users get
+
+| Directory | Provides | URL |
+|-----------|----------|-----|
+| [`jupyterhub/`](services/jupyterhub/) | Multi-user notebooks (CPU + GPU profiles), BinderHub | [jupyterhub.cirrus](https://jupyterhub.cirrus.carlboettiger.info) |
+| [`minio/`](services/minio/) | S3-compatible object storage for research data | [minio](https://minio.carlboettiger.info), [data](https://data.carlboettiger.info) |
+| [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference, one model per GPU node | [vllm-cirrus](https://vllm-cirrus.carlboettiger.info), [vllm-nimbus](https://vllm-nimbus.carlboettiger.info) |
+| [`titiler/`](services/titiler/) | Dynamic tile server for cloud-optimized rasters | [titiler](https://titiler.carlboettiger.info) |
+| [`hash-archive/`](services/hash-archive/) | Content-hash registry for data provenance | [hash-archive](https://hash-archive.carlboettiger.info) |
+| [`mcp/`](services/mcp/) | GPU MCP data server (cudf/polars over the STAC catalogue), on nimbus | [gpu-mcp-nimbus](https://gpu-mcp-nimbus.carlboettiger.info) |
+| [`postgres/`](services/postgres/) | PostgreSQL for research use (**not currently deployed**) | — |
+| [`github-actions/`](services/github-actions/) | Self-hosted CI runners for lab repos | — |
+| [`openshell/`](services/openshell/) | Sandboxed AI-agent runtime (**not yet deployed**) | — |
+| [`armada/`](services/armada/) | Batch/job scheduler (**not currently deployed**) | — |
+
+Deployed but **not yet captured here**: the `duckdb-mcp` and `gpu-mcp` servers in the
+`mcp` namespace (distinct from `services/mcp/`, which is the nimbus GPU data server),
+the `llm-proxy` gateway, `high-seas`, and `hxagent`. They run from manifests that live
+elsewhere; folding them in is outstanding work.
+
+### [`platform/`](platform/) — what holds them up
 
 | Directory | Purpose |
 |-----------|---------|
-| [`k3s/`](k3s/) | K3s install/reset, remote kubeconfig, node-upgrade tooling, [nimbus join runbook](k3s/nimbus-join/) and [nimbus node hardening](k3s/nimbus-hardening/) |
-| [`nvidia/`](nvidia/) | NVIDIA device plugin + GPU time-slicing config |
-| [`openebs/`](openebs/) | OpenEBS ZFS-LocalPV storage classes (cirrus only — nimbus is compute-only) |
-| [`cert-manager/`](cert-manager/) | ClusterIssuer + ingress examples for automatic HTTPS |
-| [`external-dns/`](external-dns/) | Automatic DNS provisioning |
-| [`traefik/`](traefik/) | Traefik `HelmChartConfig` overrides |
-| [`juicefs/`](juicefs/) | JuiceFS CSI storage class, Postgres metadata DB, backups |
-| [`rustfs/`](rustfs/) | RustFS S3 object store (JuiceFS data backend) |
+| [`traefik/`](platform/traefik/) | Ingress controller (K3s built-in), `HelmChartConfig` overrides |
+| [`cert-manager/`](platform/cert-manager/) | Automatic Let's Encrypt certificates |
+| [`external-dns/`](platform/external-dns/) | DNS records created from Ingress objects (Cloudflare) |
+| [`openebs/`](platform/openebs/) | ZFS-LocalPV — node-local volumes with real per-PVC quotas |
+| [`juicefs/`](platform/juicefs/) | S3-backed ReadWriteMany home directories, so a session can start on any node |
+| [`rustfs/`](platform/rustfs/) | RustFS object store — the JuiceFS data backend |
+| [`nvidia/`](platform/nvidia/) | GPU device plugin; per-node sharing (time-slicing vs exclusive) |
+| [`monitoring/`](platform/monitoring/) | Prometheus, Grafana, DCGM/SMART/node exporters, carbon API |
+| [`users/`](platform/users/) | Namespace-scoped user access (ServiceAccount + RBAC + kubeconfig) |
 
-### Services
+### [`cluster/`](cluster/) — the machines
 
-| Directory | Purpose |
-|-----------|---------|
-| [`jupyterhub/`](jupyterhub/) | JupyterHub + BinderHub (multi-user notebooks, GPU-enabled) |
-| [`minio/`](minio/) | MinIO S3-compatible object storage |
-| [`postgres/`](postgres/) | PostgreSQL database service |
-| [`vllm/`](vllm/) | vLLM high-performance LLM inference (per-node: `cirrus/`, `nimbus/`) |
-| [`mcp/`](mcp/) | MCP servers (GPU data server on nimbus) |
-| [`monitoring/`](monitoring/) | Prometheus, Grafana, dcgm-exporter, carbon APIs |
-| [`github-actions/`](github-actions/) | Self-hosted GitHub Actions runners (per-repo values) |
-| [`armada/`](armada/) | Armada batch/job scheduler |
-| [`codecarbon/`](codecarbon/) | Carbon-tracking utility |
-| [`openshell/`](openshell/) | Sandboxed AI-agent runtime (**planned**, not yet deployed) |
+K3s install/reset, remote kubeconfig, automated node upgrades, and per-node host
+hardening under [`cluster/nodes/`](cluster/nodes/) (kernel tunables, GPU watchdog,
+lockup capture). Host-level operational journals live in the private `cluster-ops`
+repo, not here.
 
-### Supporting
+### Everything else
 
 | Directory | Purpose |
 |-----------|---------|
 | [`images/`](images/) | Custom container images (Jupyter, GPU, openvscode); built via GitHub Actions |
-| [`users/`](users/) | Namespace-scoped user access (ServiceAccount + RBAC + kubeconfig generation) |
-| [`secrets/`](secrets/) | Local-only secret material notes (**git-ignored**, never committed) |
+| [`docs/`](docs/) | Hugo documentation site, published to GitHub Pages |
 | [`examples/`](examples/) | Deployment examples (e.g. Shiny apps) |
-| [`docs/`](docs/) | Hugo documentation site (published to GitHub Pages) |
+| [`nrp/`](nrp/) | Kubeconfig for the National Research Platform (an *external* cluster) |
+| [`secrets/`](secrets/) | Notes on secret material — **git-ignored**, never committed |
 
 ## Getting started
 
 **For users** — you need namespace-scoped credentials. See the
 [User Access Management](https://boettiger-lab.github.io/k8s/docs/admin/users/)
-guide and [`users/`](users/).
+guide and [`platform/users/`](platform/users/).
 
-**For administrators** — bootstrap a new node in roughly this order:
+**For administrators** — bootstrap order for a node:
 
-1. **K3s** — install the base cluster:
+1. **K3s** — install the base cluster (control plane) or join an agent:
    ```bash
-   ./install-reset-K3s.sh        # K3s with Traefik + world-readable kubeconfig
+   ./cluster/install-reset-K3s.sh    # K3s with Traefik + world-readable kubeconfig
    ```
-   (`initial-setup.sh` shows the same steps plus GPU enablement.)
-2. **OpenEBS** — set up ZFS-LocalPV storage (`openebs/<node>/helm.sh`)
-3. **cert-manager** — automatic HTTPS certificates (`cert-manager/helm.sh`)
-4. **external-dns** — automatic DNS (`external-dns/helm.sh`)
-5. **NVIDIA GPU** — enable device plugin + time-slicing:
-   ```bash
-   bash nvidia/nvidia-device-plugin.sh
-   ```
+2. **Storage** — `bash platform/openebs/helm.sh`, then apply the StorageClasses
+3. **HTTPS + DNS** — `bash platform/cert-manager/helm.sh`, `bash platform/external-dns/helm.sh`
+4. **GPU** — `bash platform/nvidia/nvidia-device-plugin.sh`, then label the node's
+   sharing mode (see [`platform/nvidia/`](platform/nvidia/))
+5. **Shared homes** — [`platform/juicefs/`](platform/juicefs/)
 
-Then deploy services. Most service directories include a deploy script
-(`up.sh` / `cirrus.sh` / `deploy.sh` / `helm.sh`) and a `README.md` with the
-specifics. General patterns:
+Then deploy services. Each service directory has a `README.md` and usually an
+`up.sh` / `deploy.sh` / `helm.sh`:
 
 ```bash
-cd <service-directory>
-./up.sh                          # or ./cirrus.sh, ./deploy.sh, etc.
+cd services/<service>
+./up.sh
 # or directly:
 kubectl apply -f <manifest>.yaml
 helm upgrade -i <release> <chart> -f values.yaml
 ```
 
+There is no GitOps controller — changes are applied deliberately, by hand. Manifests
+here are meant to match the live cluster; if you change one, apply it.
+
 ## Secrets
 
 Secrets are **never committed**. `.gitignore` excludes kubeconfigs, `*.key`,
-`*secret*`, `*-kubeconfig.yaml`, `values.private*.yaml`, the `secrets/`
-directory, and more. Each service that needs credentials ships an interactive
-setup script (e.g. `jupyterhub/setup-secrets.sh`, `minio/set-secrets.sh`,
-`postgres/secrets.sh.example`) that creates the required Kubernetes `Secret`
-objects. See the
-[Secrets Management](https://boettiger-lab.github.io/k8s/docs/admin/secrets/)
-docs.
+`*secret*`, `*private*`, `*-kubeconfig.yaml`, `values.private*.yaml`, and the
+`secrets/` directory. Each service that needs credentials ships an interactive setup
+script (e.g. `services/jupyterhub/setup-secrets.sh`, `services/minio/set-secrets.sh`)
+that creates the required Kubernetes `Secret` objects. See the
+[Secrets Management](https://boettiger-lab.github.io/k8s/docs/admin/secrets/) docs.
 
 ## Documentation site
 
-The `docs/` directory is a [Hugo](https://gohugo.io/) site using the
-[Hugo Book](https://github.com/alex-shpak/hugo-book) theme, auto-deployed to
-GitHub Pages via `.github/workflows/hugo.yml` on every push to `main`.
-
-Build locally:
+[`docs/`](docs/) is a [Hugo](https://gohugo.io/) site using the
+[Hugo Book](https://github.com/alex-shpak/hugo-book) theme, auto-deployed to GitHub
+Pages via `.github/workflows/hugo.yml` on every push to `main`.
 
 ```bash
 cd docs

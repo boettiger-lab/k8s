@@ -1,0 +1,248 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen38
+  # namespace vllm, matching cirrus. Was `default` when nimbus was its own
+  # single-node cluster; see cluster/nodes/nimbus/join/.
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus
+spec:
+  replicas: 1
+  # Recreate: nimbus is one GB10 time-sliced into 8 nvidia.com/gpu replicas
+  # (see reference docs). A GPU-requesting pod can't surge-replace; tear down first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-nemotron
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-nemotron
+        # What endpoint.yaml's Service selects. Scaling this Deployment to 0 and
+        # another to 1 moves vllm-nimbus.carlboettiger.info with no ingress churn.
+        vllm-endpoint: nimbus
+    spec:
+      runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ngc-pull
+      # nimbus is a worker in the cirrus cluster and is tainted
+      # `dedicated=nimbus:NoSchedule` at registration, so nothing lands here
+      # unless it says so twice: the toleration gets it past the taint, and the
+      # nodeSelector keeps it from drifting onto cirrus. Both are required --
+      # a toleration alone does not *attract* a pod to the node, and this image
+      # is an arm64 NGC build that would not run on cirrus anyway.
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      containers:
+      - name: vllm
+        # Same NGC image as the Qwen3.6 deploy. Verified in-cluster that this build
+        # already registers Qwen3_5ForConditionalGeneration + Qwen3_5MTP, which is
+        # exactly what unsloth/Qwen3.8-27B-NVFP4's config.json declares -- so we do
+        # NOT need the community nightly images (eugr/spark-vllm,
+        # ghcr.io/spark-arena/dgx-vllm-*) that the published DGX Spark recipes use.
+        image: nvcr.io/nvidia/vllm:26.05.post1-py3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: huggingface-token
+              key: token
+              optional: true
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: OMP_NUM_THREADS
+          value: "4"
+        - name: VLLM_LOGGING_LEVEL
+          value: INFO
+        # torch.compile's AOTAutograd cache cannot pickle the Triton `launcher`
+        # closure produced by this model's Gated-DeltaNet linear-attention kernels:
+        #   _pickle.PicklingError: Can't pickle <function launcher at 0x...>
+        # raised from AOTAutogradCache.save -> _pickle_entry, which kills EngineCore
+        # during determine_available_memory(). Torch/Triton version skew in this NGC
+        # build, not a config problem. Disabling only the *persistence* of the compile
+        # cache -- compilation still runs, we just pay it again on every cold start
+        # (~1 min). Retest without these on NGC 26.07+; likely fixed upstream.
+        - name: TORCHINDUCTOR_AUTOGRAD_CACHE
+          value: "0"
+        - name: VLLM_DISABLE_COMPILE_CACHE
+          value: "1"
+        args:
+        - vllm
+        - serve
+        # Community NVFP4 quant. NVIDIA has NOT published an nvidia/ NVFP4 build of
+        # Qwen3.8-27B (unlike Qwen3.6-35B-A3B), so unsloth's is the de-facto standard
+        # and is what the vLLM recipe site + NVIDIA dev-forum threads benchmark.
+        # Weights ~22 GB + 0.81 GB MTP, pre-pulled into the hostPath HF cache.
+        # NOTE: verified this snapshot has tokenizer truncation=None -- the original
+        # unsloth upload shipped truncation=2048 and silently truncated every prompt.
+        - unsloth/Qwen3.8-27B-NVFP4
+        - --served-model-name
+        - qwen
+        - qwen3.8
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --tensor-parallel-size
+        - "1"
+        - --trust-remote-code
+        - --kv-cache-dtype
+        - fp8
+        - --attention-backend
+        - flashinfer
+        - --max-model-len
+        - "262144"
+        # ---------------------------------------------------------------------
+        # 2026-08-24: was 0.75 + max-num-seqs 8. That combination wedged the box
+        # twice (unified-memory pressure -> NVIDIA driver rw-semaphore deadlock ->
+        # every NVML consumer blocked -> physical reboot). Do not raise these
+        # without redoing the arithmetic below. See dgx-spark-memory.md.
+        #
+        # KV cache is much cheaper than it looks for this checkpoint. config.json
+        # layer_types shows only every 4th layer is full_attention -- 16 of 64.
+        # The other 48 are Gated-DeltaNet linear attention, whose state is constant
+        # per sequence, not proportional to context length. So per token:
+        #     2 (K+V) x 4 kv_heads x 256 head_dim x 1 B (fp8) = 2 KiB / full layer
+        #     x 16 full-attention layers                      = 32 KiB / token
+        #     x 262144 tokens                                 =  8 GiB / sequence
+        #
+        # 0.55 of 121.69 GiB unified ~= 67 GiB:
+        #     22 GiB weights + ~3 GiB activations/CUDA graphs -> ~42 GiB KV
+        #     = ~1.3M tokens = 5 concurrent sequences at the full 262144 context.
+        # max-num-seqs 4 (32 GiB KV worst case) fits with ~10 GiB of slack.
+        #
+        # That leaves ~55 GiB of the unified pool for the host OS, k3s, prometheus,
+        # jupyterhub and every other pod. The old 0.75/8 config budgeted 64 GiB of
+        # KV + 22 GiB weights = ~91 GiB and left only ~30 GiB for everything else.
+        # Full 262144 context is preserved -- we bought safety with concurrency,
+        # not context length.
+        # ---------------------------------------------------------------------
+        - --gpu-memory-utilization
+        - "0.55"
+        # ---------------------------------------------------------------------
+        # 2026-08-24, second incident: --gpu-memory-utilization ALONE DOES NOT
+        # BOUND ALLOCATION on this build. Measured, with util set to 0.55:
+        #     monitor sample immediately before KV alloc : avail = 73 GiB
+        #     vLLM log: "Available KV cache memory:       73.24 GiB"
+        # It took *all remaining free memory* rather than 0.55 x 121.69 = 66.9.
+        # Total RSS hit 97.7 GiB and left the node with 2.2 GiB available --
+        # worse than the 0.75 config it replaced. This contradicts the assumption
+        # in dgx-spark-memory.md; that doc's test used opt-125m, where the cap was
+        # never the binding constraint, so the behaviour did not show up.
+        #
+        # The fix is an absolute cap that bypasses the memory profiler entirely.
+        # Sizing from the measured run: 73.24 GiB held 2,066,397 tokens
+        #   => 38,057 B/token (higher than the 32 KiB/token that the attention
+        #      layers alone imply -- the balance is Gated-DeltaNet mamba state,
+        #      which vLLM pads to equal the attention page size; see the
+        #      "Padding mamba page size" line in the startup log).
+        #
+        # 40 GiB = 42949672960 B  ->  ~1.13M tokens  ->  ~4.3 sequences at the
+        # full 262144 context, which matches --max-num-seqs 4.
+        # Budget: 21.23 weights + 40 KV + ~3.2 activations/graphs = ~64.5 GiB,
+        # leaving ~57 GiB of the unified pool for the host and everything else.
+        #
+        # Verify after any change to this value -- do not trust the flag alone:
+        #   kubectl logs <pod> | grep "Available KV cache memory"
+        #   free -g   # MemAvailable must stay well clear of the 8 GiB watchdog floor
+        # ---------------------------------------------------------------------
+        - --kv-cache-memory-bytes
+        - "42949672960"
+        - --max-num-seqs
+        - "4"
+        - --max-num-batched-tokens
+        - "8192"
+        - --enable-chunked-prefill
+        - --async-scheduling
+        - --enable-prefix-caching
+        - --load-format
+        - fastsafetensors
+        # Text-only: this checkpoint is a native VLM, but we don't need image/video.
+        # Setting both limits to 0 disables the modalities and -- more importantly --
+        # stops vLLM's memory profiler from reserving worst-case multimodal
+        # activation space, which otherwise eats KV cache we'd rather spend on text.
+        - --limit-mm-per-prompt
+        - '{"image": 0, "video": 0}'
+        # MTP speculative decoding. Draft head shares target weights (model_mtp.
+        # safetensors); no separate draft model. Published GB10 numbers: 3 tokens
+        # -> ~21.4 tok/s, 5 tokens -> ~24 tok/s. Starting at 3, tune after measuring
+        # the acceptance rate (vllm:spec_decode_* metrics on /metrics).
+        - --speculative-config
+        - '{"method":"mtp","num_speculative_tokens":3}'
+        - --reasoning-parser
+        - qwen3
+        # Official vLLM recipe for Qwen3.8-27B pairs this checkpoint family with
+        # qwen3_coder, and the shipped chat_template.jinja emits exactly that dialect
+        # (<tool_call><function=NAME><parameter=NAME>). Deliberately NOT reusing
+        # qwen36_tool_call_parser.py / qwen3_xml_patched -- that patch targets the
+        # Qwen3.6-35B-A3B XML quirk (vLLM #43713) and has underperformed in practice.
+        - --tool-call-parser
+        - qwen3_coder
+        - --enable-auto-tool-choice
+        - --enable-log-requests
+        - --enable-log-outputs
+        - --max-log-len
+        - "4000"
+        # Checkpoint default is temperature=1.0 (too much variance -- that's what made
+        # 3.6's tool-calls flaky). But this is a thinking model: greedy temperature=0
+        # invites repetition loops, so don't reuse the 3.6 override either. These are
+        # Qwen's documented thinking-mode sampling params.
+        - --override-generation-config
+        - '{"temperature": 0.6, "top_p": 0.95, "top_k": 20}'
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
+        # Readiness only (no liveness): if it hangs at backend selection (the known
+        # Spark bug) the pod stays NotReady for debugging instead of crash-looping.
+        # Generous window: weights are local but MTP + graph capture take minutes,
+        # and first boot also pays FlashInfer/Triton JIT compile.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 90
+          periodSeconds: 15
+          failureThreshold: 80
+        resources:
+          requests:
+            cpu: 4
+            # 67 GiB vLLM reservation + ~4 GiB CPU-side overhead. This does NOT cap
+            # CUDA allocations (cgroups don't see them on unified memory -- see
+            # dgx-spark-memory.md); it exists so the scheduler won't stack other
+            # large pods on top of vLLM. Keep it in sync with gpu-memory-utilization.
+            memory: 72Gi
+            nvidia.com/gpu: 6
+          limits:
+            cpu: 4
+            # Must match requests above.
+            memory: 72Gi
+            nvidia.com/gpu: 6
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

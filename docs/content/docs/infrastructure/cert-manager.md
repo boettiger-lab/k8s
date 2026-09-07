@@ -31,7 +31,7 @@ helm install cert-manager jetstack/cert-manager \
 Or use the provided script:
 
 ```bash
-bash cert-manager/helm.sh
+bash platform/cert-manager/helm.sh
 ```
 
 ### Verify Installation

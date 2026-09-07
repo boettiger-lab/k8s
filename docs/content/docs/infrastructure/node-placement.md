@@ -1,22 +1,37 @@
 ---
-title: "Node Placement & Cirrus Pinning"
+title: "Node Placement"
 weight: 5
 bookToc: true
 ---
 
-# Node Placement: keep the data path on cirrus
+# Node Placement: where a pod can actually run
 
-The cluster has three nodes:
+The cluster has three nodes, and they are **not interchangeable**:
 
-| Node | Role | Hardware | Status |
-|------|------|----------|--------|
-| **cirrus** | control-plane + **primary data/compute node** | Threadripper, ECC RAM, 2× Quadro RTX 8000, NVMe | Always schedulable — **never cordon** |
-| **thelio** | jupyter user pods only | Ryzen 9, RTX 2080, ZFS pool (HDD/SMR, problematic) | Back in service, **tainted** `hub.jupyter.org/dedicated=user:NoSchedule` |
-| **nimbus** | GPU worker, sanctioned workloads only | DGX Spark, GB10, **arm64**, 121 GiB unified memory | Ready, **tainted** `dedicated=nimbus:NoSchedule` |
+| Node | Role | Hardware | Taint |
+|------|------|----------|-------|
+| **cirrus** | control plane + **primary data/compute node** | Threadripper 3990X, ECC RAM, 2× Quadro RTX 8000, NVMe, ZFS `tank` | none — always schedulable, **never cordon** |
+| **thelio** | jupyter user pods only | Ryzen 9 3900X, RTX 2080 8 GB | `hub.jupyter.org/dedicated=user:NoSchedule` |
+| **nimbus** | GPU worker, sanctioned workloads only | DGX Spark GB10, **arm64**, 121 GiB unified memory | `dedicated=nimbus:NoSchedule` |
 
-thelio was only ever meant to be an expansion node. All stateful and
-bandwidth-critical services live on **cirrus**, where the data physically is
-(NVMe object store, the `tank` ZFS pool that backs every JupyterHub home).
+Three constraints decide placement, and a pod must satisfy all of them:
+
+**Architecture.** nimbus is **arm64**; cirrus and thelio are amd64. Most images in this
+cluster (including the JupyterHub profile images) are amd64-only, so anything destined
+for nimbus needs an arm64 image and usually
+`nodeSelector: kubernetes.io/arch: arm64`.
+
+**Taints.** Both workers are tainted, so nothing lands on them by accident — a pod needs
+the matching toleration. Only DaemonSets with blanket tolerations (node-exporter, the
+GPU plugins, the JuiceFS shutdown unit) run everywhere.
+
+**Storage.** `openebs-zfs` volumes are node-local and only cirrus runs a zfs-localpv
+node plugin, so a PVC on that class pins its pod to cirrus. Home directories are the
+exception: JuiceFS is ReadWriteMany over the network, so a notebook can start on any
+node — see [Shared home storage]({{< relref "shared-home-storage" >}}).
+
+All stateful and bandwidth-critical services live on **cirrus**, where the data
+physically is (the NVMe object store and the `tank` ZFS pool).
 
 ## Why this matters: the MinIO ↔ JupyterHub hairpin
 
@@ -41,9 +56,9 @@ CoreDNS/Traefik were evicted onto thelio and the S3 path silently dropped to
 
 ### 1. cirrus must never be cordoned
 
-The k3s **system-upgrade-controller** plans (`k3s/upgrade/plans.yml`) are set to
+The k3s **system-upgrade-controller** plans (`cluster/upgrade/plans.yml`) are set to
 `cordon: false`. With `cordon: true`, a k3s upgrade cordons cirrus and restarts
-k3s, evicting CoreDNS/Traefik onto thelio and frequently leaving cirrus stuck
+k3s, evicting CoreDNS/Traefik onto another node and frequently leaving cirrus stuck
 `SchedulingDisabled`. **Never re-enable cordon on the server-plan.**
 
 If cirrus is ever found cordoned: `kubectl uncordon cirrus`, then confirm
@@ -52,7 +67,7 @@ is `false`.
 
 ### 2. MinIO is pinned to cirrus
 
-`minio/minio.yaml` sets `nodeSelector: kubernetes.io/hostname: cirrus` and
+`services/minio/minio.yaml` sets `nodeSelector: kubernetes.io/hostname: cirrus` and
 `strategy: Recreate`. Two reasons:
 
 - **Data safety.** MinIO's data lives in `hostPath` dirs (`/mnt/nvme2`,
@@ -66,7 +81,7 @@ the same data dirs (they would collide on MinIO's file locks).
 
 ### 3. Traefik is pinned to cirrus
 
-`traefik/helmchartconfig.yaml` is a `HelmChartConfig` that overrides the
+`platform/traefik/helmchartconfig.yaml` is a `HelmChartConfig` that overrides the
 k3s-bundled Traefik chart with `nodeSelector: kubernetes.io/hostname: cirrus`.
 The helm-controller merges it on every reconcile, so the pin survives k3s
 upgrades and reboots.
@@ -108,7 +123,7 @@ Two reasons nimbus needs that:
    bound CUDA, and over-committing it has twice wedged the NVIDIA driver hard
    enough to need a physical power cycle. Co-tenancy on this node is a hazard,
    not a feature. See
-   [`k3s/nimbus-hardening/`](https://github.com/boettiger-lab/k8s/tree/main/k3s/nimbus-hardening).
+   [`cluster/nodes/nimbus/`](https://github.com/boettiger-lab/k8s/tree/main/cluster/nodes/nimbus).
 
 Sanctioned workloads declare it twice — a toleration to get past the taint, a
 `nodeSelector` to actually land there:
@@ -125,7 +140,7 @@ tolerations:
 
 A toleration alone is not enough: it grants *permission* to schedule on a
 tainted node, it does not *attract* the pod there. Today the list is vLLM
-(`vllm/nimbus/`), the GPU MCP data server (`mcp/nimbus/`), and the GPU/feature
+(`services/vllm/qwen38-nimbus.yaml`), the GPU MCP data server (`services/mcp/`), and the GPU/feature
 DaemonSets that must cover every GPU node — the NVIDIA device plugin,
 node-feature-discovery and dcgm-exporter, whose chart values carry the
 toleration.
@@ -146,24 +161,41 @@ Left floating (only an `os: linux` selector). DNS is not bandwidth-bound, so its
 node placement doesn't affect throughput. It is k3s-addon-managed, which makes
 pinning awkward; not worth it.
 
-## thelio is back, as a jupyter-only node
+## Scheduling onto the workers
 
-thelio returned to service tainted `hub.jupyter.org/dedicated=user:NoSchedule`,
-so it takes jupyter *user* pods and nothing else. That needs no per-workload
-configuration: z2jh already puts a matching toleration on user pods, hub core
-pods tolerate `=core` and stay on cirrus, and ARC is pinned to cirrus by
-nodeSelector.
+### thelio — jupyter user pods only
 
-New homes go on JuiceFS (`juicefs-home`) rather than `openebs-zfs`. A node-local
-volume pins its pod to one node forever; RWX on JuiceFS removes the pin, so a
-server lost with thelio restarts on cirrus with its home intact. Existing claims
-are untouched and stay on cirrus.
+thelio returned to service tainted `hub.jupyter.org/dedicated=user:NoSchedule`, so it
+takes jupyter *user* pods and nothing else. That needs no per-workload configuration:
+z2jh already puts a matching toleration on user pods, hub core pods tolerate `=core` and
+stay on cirrus, and ARC is pinned to cirrus by nodeSelector. Its RTX 2080 is exposed as
+**one exclusive GPU**, not time-sliced — 8 GB does not divide usefully.
+
+New homes go on JuiceFS (`juicefs-home`) rather than `openebs-zfs`. A node-local volume
+pins its pod to one node forever; RWX on JuiceFS removes the pin, so a server lost with
+thelio restarts on cirrus with its home intact. Existing claims are untouched and stay on
+cirrus.
 
 Two things still hold now that it is schedulable again:
 
 - MinIO and Traefik stay on cirrus because they are pinned (items 2 & 3).
 - Do **not** cordon cirrus to move work onto thelio.
 
-- To fully decommission thelio instead:
-  `kubectl drain thelio --ignore-daemonsets --delete-emptydir-data` then
-  `kubectl delete node thelio` and stop the k3s agent on it.
+### nimbus — sanctioned workloads only
+
+A workload meant for nimbus needs all three of an arm64 image,
+`nodeSelector: kubernetes.io/hostname: nimbus` (or the arch label), and:
+
+```yaml
+tolerations:
+- key: dedicated
+  operator: Equal
+  value: nimbus
+  effect: NoSchedule
+```
+
+Its GPU is time-sliced 8 ways — on unified memory that is a cap on how many GPU pods land
+there, not a memory partition. See [NVIDIA GPU support]({{< relref "nvidia" >}}).
+
+To decommission a worker: `kubectl drain <node> --ignore-daemonsets
+--delete-emptydir-data`, then `kubectl delete node <node>` and stop the k3s agent on it.

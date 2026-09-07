@@ -59,7 +59,7 @@ sudo zfs list
 
 Install **only** the lightweight `zfs-localpv` driver — not the full `openebs/openebs`
 umbrella chart. The umbrella chart pulls in Mayastor (with its own etcd / MinIO / Loki
-stack) and LVM LocalPV, none of which we use for single-node-pool ZFS storage. A previous
+stack) and LVM LocalPV, none of which we use for node-local ZFS storage. A previous
 umbrella install left orphaned PVCs/PVs and LVM CRDs behind that had to be cleaned up.
 
 ```bash
@@ -72,10 +72,10 @@ helm upgrade --install zfs-localpv openebs-zfs/zfs-localpv \
   -n openebs --create-namespace --wait
 ```
 
-Or use the provided script for the active cluster:
+Or use the provided script:
 
 ```bash
-bash openebs/cirrus/helm.sh
+bash platform/openebs/helm.sh
 ```
 
 ### Verify Installation
@@ -108,7 +108,7 @@ provisioner: zfs.csi.openebs.io
 Apply the configuration:
 
 ```bash
-kubectl apply -f openebs/cirrus/zfs-storage.yml
+kubectl apply -f platform/openebs/storageclass.yaml
 ```
 
 **Configuration Parameters**:

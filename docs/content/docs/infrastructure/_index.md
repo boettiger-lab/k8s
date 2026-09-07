@@ -6,26 +6,31 @@ bookCollapseSection: false
 
 # Infrastructure
 
-Documentation for setting up and configuring the Kubernetes cluster infrastructure.
+The supporting layer: everything that has to work before a service can be deployed.
+Repo directory: [`platform/`](https://github.com/boettiger-lab/k8s/tree/main/platform)
+(plus [`cluster/`](https://github.com/boettiger-lab/k8s/tree/main/cluster) for the
+machines themselves).
 
-This section covers the core components that need to be configured before deploying services:
+## Components
 
-## Core Components
+- [**K3s**](k3s) — the base cluster, and how a node joins it as an agent
+- [**Node placement**](node-placement) — taints, labels, architecture, and where a pod can actually run
+- [**NVIDIA GPU support**](nvidia) — device plugin, per-node time-slicing vs exclusive access
+- [**OpenEBS**](openebs) — node-local ZFS volumes with enforced per-PVC quotas
+- [**Shared home storage**](shared-home-storage) — JuiceFS ReadWriteMany homes
+- [**RustFS**](rustfs) — the S3 object store behind JuiceFS
+- [**cert-manager**](cert-manager) — automatic Let's Encrypt certificates
+- [**External DNS**](external-dns) — DNS records created from Ingress objects
 
-- [**K3s Installation & Configuration**](k3s) - Base Kubernetes setup
-- [**NVIDIA GPU Support**](nvidia) - GPU device plugin and time-slicing
-- [**Storage with OpenEBS**](openebs) - Persistent storage with disk quotas
-- [**Certificate Manager**](cert-manager) - Automatic SSL/TLS certificates
-- [**External DNS**](external-dns) - Automatic DNS record management
+## Setup order
 
-## Setup Order
+For a new cluster:
 
-For a new cluster, configure components in this order:
+1. **K3s** — install the control plane, then join agents
+2. **OpenEBS** — node-local storage
+3. **cert-manager** — certificates
+4. **external-dns** — DNS
+5. **NVIDIA device plugin** — GPUs, then label each node's sharing mode
+6. **RustFS + JuiceFS** — shared home directories
 
-1. **K3s** - Install and configure the base Kubernetes cluster
-2. **OpenEBS** - Set up persistent storage (if using disk quotas)
-3. **cert-manager** - Configure automatic certificate management
-4. **ExternalDNS** - Set up automatic DNS provisioning
-5. **NVIDIA GPU** - Enable GPU support (if using GPUs)
-
-Once these components are configured, you can deploy [services]({{< relref "../services" >}}).
+Once these are up, deploy [services]({{< relref "../services" >}}).

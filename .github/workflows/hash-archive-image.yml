@@ -1,6 +1,6 @@
 name: hash-archive Image CI
 
-# Builds ghcr.io/boettiger-lab/hash-archive from hash-archive/Dockerfile.
+# Builds ghcr.io/boettiger-lab/hash-archive from services/hash-archive/Dockerfile.
 #
 # WHY THIS EXISTS: the image this replaces (cboettig/hash-archive:latest,
 # Ubuntu 16.04, built 2020) existed ONLY in cirrus's local Docker daemon and was
@@ -21,15 +21,15 @@ on:
     - cron: '0 0 * * 0'
   push:
     paths:
-      - 'hash-archive/Dockerfile'
-      - 'hash-archive/patches/**'
+      - 'services/hash-archive/Dockerfile'
+      - 'services/hash-archive/patches/**'
       - '.github/workflows/hash-archive-image.yml'
 
 env:
   IMAGE: ghcr.io/boettiger-lab/hash-archive
   # Compiled into src/config.h. hash-archive answers 403 to any request whose
   # Host header does not match, so this must equal the public hostname served
-  # by hash-archive/cirrus/ingress.yaml.
+  # by services/hash-archive/ingress.yaml.
   HOSTNAME_CONFIG: hash-archive.carlboettiger.info
 
 jobs:
@@ -63,7 +63,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: hash-archive/
+          context: services/hash-archive/
           platforms: ${{ matrix.platform }}
           build-args: |
             HASH_ARCHIVE_REF=${{ github.event.inputs.ref || 'master' }}

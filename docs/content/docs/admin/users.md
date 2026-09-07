@@ -65,11 +65,15 @@ This script:
 # For local access
 ./generate-kubeconfig.sh [USERID]
 
-# For remote access (specify your cluster's hostname or IP)
-./generate-kubeconfig.sh [USERID] --server nimbus.carlboettiger.info
+# For remote access (the control plane's IP, or a DNS-only hostname)
+./generate-kubeconfig.sh [USERID] --server <server-ip-or-dns-only-host>
 ```
 
 This generates `${USERID}-kubeconfig.yaml` with the user's credentials.
+
+> The API server is on **cirrus**, port 6443. Do not point this at a
+> Cloudflare-proxied hostname — proxied records do not carry 6443 and kubectl will
+> simply time out. Use the node's IP, or a DNS-only (grey-cloud) record.
 
 **Output**: `${USERID}-kubeconfig.yaml` - Give this file to the user
 
