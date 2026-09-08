@@ -47,7 +47,7 @@ metadata:
     k8s-app: vllm-cirrus
   annotations:
     # Scraped by the monitoring stack's Prometheus (kubernetes-service-endpoints
-    # job) for the carbon/perf dashboard at carbon-cirrus.carlboettiger.info.
+    # job) for the carbon/perf dashboard at carbon.carlboettiger.info.
     # vLLM's /metrics is unauthenticated. See ../../monitoring/. Keeping the
     # annotations here (not on a per-model Service) means metrics survive a
     # model switch, and nothing double-scrapes the same pod.

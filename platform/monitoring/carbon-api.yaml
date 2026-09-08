@@ -1,0 +1,165 @@
+# carbon-api -- the cluster's LLM carbon/performance dashboard.
+#
+# ONE deployment for the whole cluster, one card per GPU node, live at
+# https://carbon.carlboettiger.info (carbon-cirrus.carlboettiger.info still
+# resolves here so older links keep working).
+#
+# This replaces the previous shape -- one Deployment and one hostname per
+# machine (cirrus-carbon-api.yaml + the archived nimbus-carbon-api.yaml),
+# which broke down as soon as the machines became one cluster: nimbus's
+# footprint went unreported, and because both models serve out of the `vllm`
+# namespace, nimbus's tokens were being summed into cirrus's row while
+# cirrus's watts stayed node-scoped -- understating cirrus's CO2/token.
+#
+# Which nodes are reported is data, not code: edit the ConfigMap below and
+# restart. Every vLLM query is filtered by BOTH node and namespace.
+#
+#   node_power: true   attribute TOTAL node GPU power to this node's model.
+#                      Required on any node whose GPUs are shared, and on
+#                      nimbus regardless: DCGM attributes the GB10's watts to
+#                      whichever pod its pod-resources mapping picked (an MCP
+#                      pod in `default`), so a namespace-scoped power query
+#                      there returns nothing at all. Flagged in the API as
+#                      power_is_node_total and labelled on the card.
+#
+# thelio has a GPU but serves no LLM, so it has no entry.
+#
+# Requires the monitoring stack (Prometheus + dcgm-exporter) from ./install.sh
+# and the prometheus.io/scrape annotations on the vLLM services
+# (services/vllm/endpoints.yaml), which follow whichever model is live.
+#
+# Source: https://github.com/boettiger-lab/nimbus-carbon-api
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: carbon-api-nodes
+  namespace: monitoring
+data:
+  nodes.json: |
+    [
+      {
+        "name": "cirrus",
+        "namespace": "vllm",
+        "gpu_hardware": "Quadro RTX 8000",
+        "gpu_count": 2,
+        "node_power": true
+      },
+      {
+        "name": "nimbus",
+        "namespace": "vllm",
+        "gpu_hardware": "NVIDIA GB10",
+        "gpu_count": 1,
+        "node_power": true
+      }
+    ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carbon-api
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: carbon-api
+  template:
+    metadata:
+      labels:
+        app: carbon-api
+      annotations:
+        # Roll the pod when the node list changes -- it is read once at start.
+        checksum/nodes: "cirrus-2gpu-nodepower,nimbus-1gpu-nodepower"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: carbon-api
+          image: ghcr.io/boettiger-lab/nimbus-carbon-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-server.monitoring.svc.cluster.local"
+            - name: SCRAPE_INTERVAL
+              value: "30s"
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: NODES_FILE
+              value: /etc/carbon-api/nodes.json
+          volumeMounts:
+            - name: nodes
+              mountPath: /etc/carbon-api
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+      volumes:
+        - name: nodes
+          configMap:
+            name: carbon-api-nodes
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carbon-api
+  namespace: monitoring
+spec:
+  selector:
+    app: carbon-api
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: carbon-api
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+  labels:
+    app: carbon-api
+spec:
+  ingressClassName: traefik
+  rules:
+  # New primary name: the dashboard is no longer about one machine.
+  - host: carbon.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: carbon-api
+            port:
+              number: 80
+  # Kept so existing links and docs do not 404.
+  - host: carbon-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: carbon-api
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - carbon.carlboettiger.info
+    - carbon-cirrus.carlboettiger.info
+    secretName: carbon-api-tls

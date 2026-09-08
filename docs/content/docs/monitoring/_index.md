@@ -16,7 +16,7 @@ different front ends onto it.
 | | Where | What it shows |
 |---|---|---|
 | [**Grafana**](grafana) | <https://grafana-cirrus.carlboettiger.info> | drive health (SMART), node host health, GPU utilisation, node up/down |
-| [**Carbon dashboard**](carbon) | <https://carbon-cirrus.carlboettiger.info> | LLM inference power draw, CO₂/hour, CO₂ per token |
+| [**Carbon dashboard**](carbon) | <https://carbon.carlboettiger.info> | LLM inference power draw, CO₂/hour, CO₂ per token, per GPU node |
 | [**Prometheus**](prometheus) | in-cluster only | the metrics themselves, 15 d retention |
 
 Grafana is on a public ingress and requires a login. Prometheus has no ingress —

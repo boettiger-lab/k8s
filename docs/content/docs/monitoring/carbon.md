@@ -6,9 +6,11 @@ bookToc: true
 
 # Carbon Dashboard
 
-<https://carbon-cirrus.carlboettiger.info> — the energy and carbon footprint of LLM
-inference on the cluster: live GPU power draw, CO₂ per hour, and CO₂ per token, with
-24 h and 7 d averages.
+<https://carbon.carlboettiger.info> — the energy and carbon footprint of LLM inference
+on the cluster: live GPU power draw, CO₂ per hour, and CO₂ per token, with 24 h and 7 d
+averages. **One card per GPU node serving a model** — currently cirrus and nimbus.
+
+(`carbon-cirrus.carlboettiger.info`, the old per-node name, still resolves here.)
 
 It is a small Go service ([boettiger-lab/nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api),
 image `ghcr.io/boettiger-lab/nimbus-carbon-api`) that reads Prometheus and renders both
@@ -16,8 +18,8 @@ an HTML dashboard and a JSON API. It stores nothing itself — restart it and it
 seven days of history from Prometheus.
 
 ```bash
-curl -s https://carbon-cirrus.carlboettiger.info/api/v1/carbon | python3 -m json.tool
-curl -s 'https://carbon-cirrus.carlboettiger.info/api/v1/carbon/timeseries?range=7d'
+curl -s https://carbon.carlboettiger.info/api/v1/carbon | python3 -m json.tool
+curl -s 'https://carbon.carlboettiger.info/api/v1/carbon/timeseries?range=7d'
 ```
 
 `/methodology` on the same host explains the arithmetic.
@@ -34,41 +36,55 @@ curl -s 'https://carbon-cirrus.carlboettiger.info/api/v1/carbon/timeseries?range
 - **GPU power only.** Host CPU, memory, fans, and PSU losses are not in the figure, so
   treat it as a floor for the machine's true draw.
 
-### Shared-GPU attribution on cirrus
+### Shared-GPU attribution
 
-cirrus has two RTX 8000s time-sliced across vLLM, JupyterHub and MCP workloads, so
-per-GPU DCGM power cannot be split per tenant. The deployment runs with
-`NODE_POWER=true`: it sums **total node GPU power** and attributes all of it to vLLM as
-an explicit upper bound. The API flags this — `"power_is_node_total": true` — and the
-dashboard says so. A single-GPU, single-tenant node like nimbus does not need it.
+Where a node's GPUs are shared, the dashboard reports **total node GPU power** and
+attributes it to that node's model as an explicit upper bound. The API flags it —
+`"power_is_node_total": true` — and the card is labelled `node-total power`.
+
+Both current nodes run this way, for different reasons:
+
+- **cirrus** has two RTX 8000s time-sliced across vLLM, JupyterHub and MCP workloads, so
+  per-GPU DCGM power genuinely cannot be split per tenant.
+- **nimbus** would need it even if nothing else ran there. DCGM attributes each GPU's
+  watts to whichever pod its pod-resources mapping picked, and on nimbus that is an MCP
+  pod in the `default` namespace — so a namespace-scoped power query returns *nothing at
+  all* for vLLM.
 
 ## Deployment
 
-[`platform/monitoring/cirrus-carbon-api.yaml`](https://github.com/boettiger-lab/k8s/blob/main/platform/monitoring/cirrus-carbon-api.yaml).
-The service is parameterised entirely by environment (`NAMESPACE`, `NODE_NAME`,
-`GPU_HARDWARE`, `GPU_COUNT`, `NODE_POWER`), so the same image serves any node.
+[`platform/monitoring/carbon-api.yaml`](https://github.com/boettiger-lab/k8s/blob/main/platform/monitoring/carbon-api.yaml)
+— one Deployment, one hostname, for the whole cluster.
+
+**Which nodes appear is data, not code.** The `carbon-api-nodes` ConfigMap holds a JSON
+array; edit it and restart:
+
+```json
+[
+  {"name": "cirrus", "namespace": "vllm", "gpu_hardware": "Quadro RTX 8000",
+   "gpu_count": 2, "node_power": true},
+  {"name": "nimbus", "namespace": "vllm", "gpu_hardware": "NVIDIA GB10",
+   "gpu_count": 1, "node_power": true}
+]
+```
+
+```bash
+kubectl -n monitoring edit configmap carbon-api-nodes
+kubectl -n monitoring rollout restart deployment/carbon-api
+```
+
+The node list is read once at startup, so the restart is required. thelio has a GPU but
+serves no LLM, so it has no entry.
+
+### Why every query is filtered by node *and* namespace
+
+Both models currently serve out of the `vllm` namespace. The service used to key its
+state by namespace alone, which summed nimbus's tokens into cirrus's row while cirrus's
+watts stayed node-scoped — quietly *understating* cirrus's CO₂ per token whenever nimbus
+was busy. Filtering and grouping on both labels is what prevents that, and it is covered
+by a regression test in the service repo. (Fixed 2026-09-08,
+[issue #60](https://github.com/boettiger-lab/k8s/issues/60).)
 
 It depends on the `prometheus.io/scrape` annotations on the vLLM services in
 `services/vllm/endpoints.yaml`. Those follow whichever model is live, so swapping the
 served model needs no change here.
-
-## Known limitation: it only describes cirrus
-
-**The dashboard currently covers one node, and mixes in a second one's traffic.**
-
-nimbus serves its own model at `vllm-nimbus.carlboettiger.info`, and its footprint is
-not reported anywhere. Worse, both models run in the `vllm` namespace and the service
-keys its vLLM queries by *namespace*, so nimbus's tokens are summed into cirrus's row
-while cirrus's watts stay node-filtered — which understates cirrus's CO₂ per token
-whenever nimbus is busy.
-
-The old per-node nimbus deployment (`carbon-nimbus.carlboettiger.info`) is preserved as
-[`platform/monitoring/nimbus-carbon-api.yaml`](https://github.com/boettiger-lab/k8s/blob/main/platform/monitoring/nimbus-carbon-api.yaml),
-archived and deliberately not installed: one Deployment and one hostname per machine is
-the wrong shape now that the machines are one cluster.
-
-The fix — filter by the `node` label, then decide between a per-node instance and a
-single cluster-wide API with a per-node breakdown — is tracked in
-[issue #60](https://github.com/boettiger-lab/k8s/issues/60).
-
-thelio has a GPU but runs no LLM, so it has no carbon row and needs none.

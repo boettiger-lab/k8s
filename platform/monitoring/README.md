@@ -2,39 +2,40 @@
 
 Prometheus-based stack. Originally just dcgm-exporter + vLLM `/metrics` feeding a
 carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
-(per-drive SMART), `node-exporter` (host CPU/mem/disk, on `:9101` to dodge
-armada's `:9100`), and **Grafana** for drive-health / node / GPU dashboards. The
-charts + values are cluster-agnostic; the carbon-api on top is configured per node.
+(per-drive SMART), `node-exporter` (host CPU/mem/disk), and **Grafana** for
+drive-health / node / GPU dashboards.
 
-- **nimbus** (single GB10): `nimbus-carbon-api.yaml` here is **archived, not
-  deployed** — <https://carbon-nimbus.carlboettiger.info> died with the single-node
-  nimbus cluster. nimbus's inference footprint is currently unreported, and because
-  both models now live in the `vllm` namespace its tokens are being summed into the
-  cirrus row. See issue #60 and
-  `docs/superpowers/specs/2026-07-04-nimbus-carbon-api-design.md`.
-- **cirrus** (two RTX 8000s, time-sliced across vllm/jupyter/mcp):
-  `cirrus-carbon-api.yaml` in this directory, live at
-  <https://carbon-cirrus.carlboettiger.info>. It runs the *same* image, just
-  parameterized by env (`NAMESPACE=vllm`, `NODE_NAME=cirrus`, `GPU_COUNT=2`,
-  `NODE_POWER=true`).
+Carbon dashboard: **one deployment for the whole cluster**, one card per GPU node,
+live at <https://carbon.carlboettiger.info> (`carbon-cirrus.carlboettiger.info` still
+resolves there). `carbon-api.yaml` here; the node list is the `carbon-api-nodes`
+ConfigMap, read once at startup -- edit it and `rollout restart`.
+
+This replaced the per-node deployments (`cirrus-carbon-api.yaml` and the archived
+`nimbus-carbon-api.yaml`) on 2026-09-08. They keyed state by namespace, which was fine
+while the machines were separate clusters and wrong once they were one: both models
+serve out of `vllm`, so nimbus's tokens landed in cirrus's row while cirrus's watts
+stayed node-scoped, understating cirrus's CO2/token. Every vLLM query is now filtered
+and grouped by node AND namespace (issue #60).
 
 ## Install
 
-    cd monitoring && ./install.sh          # Prometheus + dcgm-exporter (per cluster)
-    kubectl apply -f cirrus-carbon-api.yaml # cirrus only: the dashboard
+    cd platform/monitoring && ./install.sh   # Prometheus + dcgm-exporter + Grafana
+    kubectl apply -f carbon-api.yaml         # the carbon dashboard
 
-The cirrus dashboard also needs the `prometheus.io/scrape` annotations on
-`vllm-service` (see `../../services/vllm/endpoints.yaml`) so Prometheus
-scrapes vLLM's `/metrics`.
+The dashboard also needs the `prometheus.io/scrape` annotations on the vLLM services
+(see `../../services/vllm/endpoints.yaml`) so Prometheus scrapes vLLM's `/metrics`.
 
-## Shared-GPU power attribution (cirrus)
+## Shared-GPU power attribution
 
-cirrus has two physical GPUs time-sliced across several namespaces, so DCGM
-per-GPU power cannot be split per tenant. `cirrus-carbon-api` runs with
-`NODE_POWER=true`: it sums **total node GPU power** and attributes it to the
-vLLM namespace as an explicit upper bound (the API/dashboard flag this via
-`power_is_node_total=true`). nimbus (one GPU, one model at a time) does not
-need this.
+Nodes with `node_power: true` report TOTAL node GPU power, attributed to that node's
+model as an explicit upper bound (`power_is_node_total=true` in the API, labelled on
+the card). Both current nodes need it:
+
+- **cirrus**: two GPUs time-sliced across vllm/jupyter/mcp -- per-tenant power is not
+  measurable.
+- **nimbus**: DCGM attributes the GB10's watts to whichever pod the pod-resources
+  mapping picked (currently an MCP pod in `default`), so a namespace-scoped power query
+  returns nothing at all for vLLM.
 
 ## Query
 
@@ -105,6 +106,6 @@ metrics -- with the toleration but without the selector it just ImagePullBackOff
 
 ## Carbon dashboard
 
-[nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api), deployed here
-as `cirrus-carbon-api.yaml` and live at <https://carbon-cirrus.carlboettiger.info>.
+[nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api) (the name
+predates it covering more than nimbus), deployed here as `carbon-api.yaml`.
 Web docs: `docs/content/docs/monitoring/carbon.md`.
