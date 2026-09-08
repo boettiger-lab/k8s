@@ -1,0 +1,137 @@
+name: vLLM Flash-Next Image (arm64)
+
+# Builds the patched Qwen3.8-Flash-Next image for nimbus (DGX Spark, GB10) and
+# pushes it to ghcr. Single-arch on purpose: this image only ever runs on an
+# aarch64 sm_121 box, so there is no manifest list to assemble.
+#
+# The image is vLLM's official Flash-Next image plus blazux/qwen3.8-Flash-DGX
+# (Apache-2.0), whose key patch mmaps the 48 GiB FP8 PLE n-gram table from NVMe
+# instead of holding it resident -- without it the 126 GiB checkpoint does not
+# fit in nimbus's 121.7 GiB unified pool at all. See services/vllm/README.md.
+#
+# `nvcc` cross-compiles the deterministic top-k kernel for sm_121 with no GPU
+# present, so a stock runner can build this even though only nimbus can run it.
+#
+# DISK IS THE TIGHT CONSTRAINT, and it is why this is worth watching:
+#   arm64 hosted runner, out of the box   ~14 GB
+#   + free-disk-space, all options on     ~16 GB more
+#   ---------------------------------------------
+#   extracted base image                   18.7 GiB   (measured on nimbus)
+#   final image, compressed                 9.9 GB    (55 layers)
+# It fits, but not by much -- hence every cleanup option below is enabled,
+# unlike docker-gpu-image.yml which leaves large-packages and docker-images off.
+# Pushing by digest streams layers straight to ghcr rather than materialising a
+# ~9 GB local tarball, which is the other reason this stays inside the budget.
+#
+# If it ever stops fitting, the fallback is services/vllm/build-flashnext-nimbus.yaml,
+# which builds on nimbus itself (2.8 TB free) and imports into containerd.
+on:
+  workflow_dispatch: null
+  push:
+    paths:
+      - '.github/workflows/vllm-flashnext-image.yml'
+
+env:
+  IMAGE: ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx
+  # The blazux recipe commit. This repo moves fast -- pin it, and bump this one
+  # line to rebuild. The resulting image is tagged with the short SHA, so a tag
+  # always names exactly one recipe.
+  RECIPE_REPO: blazux/qwen3.8-Flash-DGX
+  RECIPE_SHA: 2d9b5b744b8b8e25e0c40120f4a13bcec3554aa9
+
+# Never let two builds of the same tag race to the same registry ref.
+concurrency:
+  group: vllm-flashnext-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'boettiger-lab/k8s'
+    runs-on: ubuntu-24.04-arm   # native arm64, no QEMU
+    # Narrower than the `write-all` the other workflows in this repo use: this
+    # job only reads the repo and writes a package.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Short SHA
+        run: echo "RECIPE_SHORT=${RECIPE_SHA:0:7}" >> "$GITHUB_ENV"
+
+      # Every option on, unlike the other workflows here: this build needs the
+      # full ~30 GB and the defaults leave roughly half of it on the floor.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+          android: true
+          dotnet: true
+          haskell: true
+
+      - name: Disk before build
+        run: df -h / /mnt 2>/dev/null || df -h /
+
+      # The build context is the recipe repo, not this one -- its Dockerfile
+      # COPYs from src/ and patches the base image in place.
+      - name: Checkout recipe (pinned)
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.RECIPE_REPO }}
+          ref: ${{ env.RECIPE_SHA }}
+          path: recipe
+
+      - name: Confirm the pin
+        working-directory: recipe
+        run: |
+          got="$(git rev-parse HEAD)"
+          echo "recipe HEAD: $got"
+          [ "$got" = "$RECIPE_SHA" ] || { echo "::error::checked out $got, expected $RECIPE_SHA"; exit 1; }
+          # The base image is pinned by digest inside the Dockerfile; surface it
+          # in the log so a silent upstream retag is visible in the build record.
+          grep -m1 '^FROM ' Dockerfile
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: recipe
+          file: recipe/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.RECIPE_SHORT }}
+          # provenance/sbom off: they add attestation layers and disk we do not
+          # have, and this image is pinned by digest at the point of use anyway.
+          provenance: false
+          sbom: false
+
+      - name: Disk after build
+        if: always()
+        run: df -h / /mnt 2>/dev/null || df -h /
+
+      # The deployment pins by digest, not tag. Print it ready to paste.
+      - name: Digest to pin
+        run: |
+          echo "digest: ${{ steps.build.outputs.digest }}"
+          {
+            echo "### Flash-Next image pushed"
+            echo ''
+            echo "Pin this in \`services/vllm/qwen38-flashnext-nimbus.yaml\`:"
+            echo ''
+            echo '```yaml'
+            echo "        image: ${IMAGE}:${RECIPE_SHORT}@${{ steps.build.outputs.digest }}"
+            echo '```'
+            echo ''
+            echo "Recipe: \`${RECIPE_REPO}@${RECIPE_SHA}\`"
+            echo ''
+            echo "Rolling it reloads the model (~12 min: 634 s weights + 100 s engine init)."
+          } >> "$GITHUB_STEP_SUMMARY"
