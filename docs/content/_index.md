@@ -44,14 +44,16 @@ workload to one.
 
 ## Administration
 
-- [**User access**]({{< relref "docs/admin/users" >}}) — credentials and RBAC
+- [**Access model & user accounts**]({{< relref "docs/admin/users" >}}) — who can reach what, and the namespace-scoped RBAC tooling
 - [**Secrets**]({{< relref "docs/admin/secrets" >}}) — how credentials reach workloads
 - [**Custom images**]({{< relref "docs/admin/custom-images" >}}) — the notebook and GPU images
 - [**Tips & tricks**]({{< relref "docs/admin/tips-tricks" >}}) — day-to-day operations
 
 ## Getting started
 
-1. **New user?** Start with [User access]({{< relref "docs/admin/users" >}}) to get credentials.
+1. **New user?** You want [JupyterHub]({{< relref "docs/services/jupyterhub" >}}) —
+   lab members work through the hosted services (notebooks, S3 buckets, LLM endpoints),
+   not through `kubectl` or SSH. See [Access model]({{< relref "docs/admin/users" >}}).
 2. **Running work?** Read [Node placement]({{< relref "docs/infrastructure/node-placement" >}}) —
    arm64, GPU sharing, and node-local storage all constrain where a pod can land.
 3. **Administering?** Start from [K3s]({{< relref "docs/infrastructure/k3s" >}}).

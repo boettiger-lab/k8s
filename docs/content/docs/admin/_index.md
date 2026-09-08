@@ -12,7 +12,7 @@ This section covers administrative tasks and tools for managing the Kubernetes c
 
 ## Administration Guides
 
-- [**User Access Management**](users) - Configure user authentication and access control
+- [**Access Model & User Accounts**](users) - Who can reach what, and namespace-scoped RBAC tooling
 - [**Secrets Management**](secrets) - Manage sensitive configuration data
 - [**Custom Images**](custom-images) - The notebook, GPU and openvscode images
 - [**OAuth Apps**](oauth-apps) - GitHub OAuth applications behind JupyterHub login
@@ -22,7 +22,10 @@ This section covers administrative tasks and tools for managing the Kubernetes c
 
 ### User Management
 
-Creating and managing user access to the cluster with namespace-scoped permissions.
+Lab members use the hosted services (JupyterHub, MinIO, vLLM) and have neither SSH nor
+`kubectl` access; the administrator is the only cluster user. Namespace-scoped
+ServiceAccount + kubeconfig tooling exists in `platform/users/` for the occasional
+walled-off collaborator, but is not issued to lab members.
 
 ### Resource Monitoring
 

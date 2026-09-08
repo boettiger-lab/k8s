@@ -1,107 +1,118 @@
 ---
-title: "User Access Management"
+title: "Access Model & User Accounts"
 weight: 1
 bookToc: true
 ---
 
-# User Access Management
+# Access Model & User Accounts
 
-Configure namespace-scoped user authentication and access control in K3s.
+Who can reach what on this cluster, and how the (rarely used) namespace-scoped
+kubectl accounts are created.
 
-## Overview
+## Who has access to what
 
-This system provides users with:
-- Dedicated namespace for their resources
-- ServiceAccount for authentication
-- Role-based permissions limited to their namespace
-- Read-only access to cluster nodes
-- Generated kubeconfig for easy access
+**Lab members are service users, not cluster users.** They do not have SSH access to
+the nodes and they do not have `kubectl` access. They use the hosted services through
+their web endpoints, authenticating with GitHub.
 
-## Permissions
+| | Lab members | Administrator (`carl`) |
+|---|---|---|
+| [JupyterHub]({{< relref "../services/jupyterhub" >}}) — notebooks, CPU/GPU profiles | ✅ primary entry point | ✅ |
+| [MinIO]({{< relref "../services/minio" >}}) — S3-compatible buckets | ✅ per-user credentials | ✅ |
+| [vLLM]({{< relref "../services/vllm" >}}) — OpenAI-compatible LLM endpoints | ✅ inference only | ✅ deploy/change models |
+| SSH to cirrus (or any node) | ❌ | ✅ |
+| `kubectl` / cluster API | ❌ | ✅ (cluster-admin) |
 
-Users have **full CRUD permissions** within their namespace for:
-- Pods
-- Services
-- ConfigMaps
-- Secrets
-- PersistentVolumeClaims
-- Deployments
-- Jobs
-- Ingresses
+There is **no plan to hand out general Kubernetes access** to lab members. Everything
+a user needs is meant to be reachable from a notebook, an S3 client, or an HTTP
+endpoint. Anything requiring cluster credentials — new deployments, ingresses, GPU
+scheduling, storage classes — is an administrator task, and the rest of this section
+documents it for that audience.
 
-Users have **read-only access** to:
-- Cluster nodes
-- Pods and events across namespaces (for `kubectl describe node`)
+### What each service gives a user
 
-Users **cannot**:
-- Access or modify other namespaces' resources
-- Create or modify cluster-wide resources
-- Manage RBAC permissions
+- **JupyterHub** — the main one. Login is GitHub OAuth, restricted to an allowed list;
+  profiles pick CPU vs GPU and the image. Homes are shared RWX
+  ([JuiceFS]({{< relref "../infrastructure/shared-home-storage" >}})), so a user's files
+  follow them across profiles.
+- **MinIO** — S3 buckets for research data, reachable both from inside notebooks and
+  from any S3 client off-cluster. Users get object-storage credentials, not cluster
+  credentials.
+- **vLLM** — users *call* the OpenAI-compatible endpoint. They cannot change which model
+  is served, restart the server, or touch GPU scheduling; that is done by editing the
+  vLLM deployment in this repo.
 
-## Setup
+### Planned, not live
 
-### Automated Setup (Recommended)
+Two things are staged in this repo but **not deployed**, and neither is available to
+users today:
 
-The setup process is split into two steps:
+- [**Armada**](https://github.com/boettiger-lab/k8s/tree/main/services/armada) — batch
+  scheduler, intended to be how users submit *headless* jobs (fair-share queueing,
+  a Lookout web UI) without ever touching `kubectl`. Torn down 2026-07-11; the recipe is
+  kept for a clean redeploy.
+- [**OpenShell**](https://github.com/boettiger-lab/k8s/tree/main/services/openshell) —
+  NVIDIA's sandboxed runtime for autonomous AI agents. This is the likely future path to
+  giving *agents* a narrow, RBAC-regulated slice of the cluster on a user's behalf, still
+  without giving the user a shell account. Plan only; currently used single-user via the
+  Docker driver on cirrus.
 
-#### Step 1: Create RBAC Permissions
+## Namespace-scoped kubectl accounts
+
+The `platform/users/` directory can mint a namespace-scoped ServiceAccount plus a
+kubeconfig. **No lab member currently holds one** — it exists as admin tooling (for
+example, to give a collaborator a walled-off namespace, or to hand a future agent a
+limited identity) and as the mechanism the administrator's own remote kubeconfig follows.
+
+### Permissions granted
+
+Full CRUD **within the user's own namespace only**: pods, services, configmaps, secrets,
+persistentvolumeclaims, deployments, jobs, ingresses.
+
+Read-only cluster-wide: nodes, plus pods and events (so `kubectl describe node` works).
+
+The account **cannot** touch other namespaces, create cluster-wide resources, or modify
+RBAC.
+
+### Creating one
 
 ```bash
-# Run with an optional username argument (defaults to your login user)
+cd platform/users
+
+# 1. RBAC: namespace, ServiceAccount, Role/RoleBinding, node-read ClusterRole/Binding
 ./setup.sh [USERID]
-```
 
-This script:
-- Creates a dedicated namespace named after the user
-- Creates a ServiceAccount for the user
-- Creates a Role with namespace-scoped permissions
-- Creates a RoleBinding connecting the ServiceAccount to the Role
-- Creates a ClusterRole for node read access
-- Creates a ClusterRoleBinding for cluster-level read access
-
-#### Step 2: Generate Kubeconfig
-
-```bash
-# For local access
+# 2. Kubeconfig (1-year token)
 ./generate-kubeconfig.sh [USERID]
-
-# For remote access (the control plane's IP, or a DNS-only hostname)
+# ...or, for access from off-box:
 ./generate-kubeconfig.sh [USERID] --server <server-ip-or-dns-only-host>
 ```
 
-This generates `${USERID}-kubeconfig.yaml` with the user's credentials.
+**Output**: `${USERID}-kubeconfig.yaml` — treat it as a credential (`chmod 600`, never
+commit it).
 
 > The API server is on **cirrus**, port 6443. Do not point this at a
 > Cloudflare-proxied hostname — proxied records do not carry 6443 and kubectl will
 > simply time out. Use the node's IP, or a DNS-only (grey-cloud) record.
 
-**Output**: `${USERID}-kubeconfig.yaml` - Give this file to the user
-
-### Manual Setup
-
-If you need to customize the setup:
+### Doing it by hand
 
 ```bash
-# 1. Set the username
 export USERID=myuser
 
-# 2. Create namespace and apply RBAC
 kubectl create namespace $USERID
-kubectl apply -f users/serviceaccount.yaml
-kubectl apply -f users/role.yaml
-kubectl apply -f users/rolebinding.yaml
-kubectl apply -f users/clusterrole.yaml
-kubectl apply -f users/clusterrolebinding.yaml
+kubectl apply -f serviceaccount.yaml
+kubectl apply -f role.yaml
+kubectl apply -f rolebinding.yaml
+kubectl apply -f clusterrole.yaml
+kubectl apply -f clusterrolebinding.yaml
 
-# 3. Generate a ServiceAccount token (valid for 1 year)
 TOKEN=$(kubectl create token "$USERID" -n "$USERID" --duration=8760h)
 
-# 4. Get cluster connection details
 CLUSTER_NAME=$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')
 CLUSTER_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 CLUSTER_CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
 
-# 5. Create kubeconfig
 KCFG="${USERID}-kubeconfig.yaml"
 
 kubectl config set-cluster ${CLUSTER_NAME} \
@@ -110,281 +121,56 @@ kubectl config set-cluster ${CLUSTER_NAME} \
   --kubeconfig=${KCFG} \
   --embed-certs=true
 
-kubectl config set-credentials ${USERID} \
-  --token=${TOKEN} \
-  --kubeconfig=${KCFG}
+kubectl config set-credentials ${USERID} --token=${TOKEN} --kubeconfig=${KCFG}
 
 kubectl config set-context ${USERID}-context \
-  --cluster=${CLUSTER_NAME} \
-  --user=${USERID} \
-  --namespace=${USERID} \
-  --kubeconfig=${KCFG}
+  --cluster=${CLUSTER_NAME} --user=${USERID} --namespace=${USERID} --kubeconfig=${KCFG}
 
-kubectl config use-context ${USERID}-context \
-  --kubeconfig=${KCFG}
+kubectl config use-context ${USERID}-context --kubeconfig=${KCFG}
 ```
 
-## Using the Kubeconfig
-
-### For Users
-
-Once you receive your kubeconfig file:
-
-#### Option 1: Replace Default Config
+### Using the kubeconfig
 
 ```bash
-# Backup existing config (if any)
-mv ~/.kube/config ~/.kube/config.backup
-
-# Use your new config
-cp your-username-kubeconfig.yaml ~/.kube/config
-
-# Test access
+export KUBECONFIG=~/myuser-kubeconfig.yaml
 kubectl get pods
+kubectl auth can-i --list          # what this identity may do
+kubectl auth whoami                # who the token says you are
 ```
 
-#### Option 2: Use KUBECONFIG Environment Variable
+Or per-command: `kubectl --kubeconfig=myuser-kubeconfig.yaml get pods`.
+
+## Managing these accounts
 
 ```bash
-# Set for current session
-export KUBECONFIG=~/your-username-kubeconfig.yaml
-
-# Test access
-kubectl get pods
-
-# Add to your shell profile for persistence
-echo 'export KUBECONFIG=~/your-username-kubeconfig.yaml' >> ~/.bashrc
-```
-
-#### Option 3: Use with kubectl --kubeconfig Flag
-
-```bash
-kubectl --kubeconfig=your-username-kubeconfig.yaml get pods
-```
-
-### Verify Access
-
-```bash
-# Check current context
-kubectl config current-context
-
-# View your permissions
-kubectl auth can-i --list
-
-# Test creating a pod
-kubectl run nginx --image=nginx
-kubectl get pods
-kubectl delete pod nginx
-```
-
-## Common Operations
-
-### Deploy Applications
-
-Users can deploy applications in their namespace:
-
-```bash
-# Create a deployment
-kubectl create deployment nginx --image=nginx
-
-# Expose as a service
-kubectl expose deployment nginx --port=80
-
-# Create an ingress
-kubectl apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: nginx-ingress
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  rules:
-  - host: myapp.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: nginx
-            port:
-              number: 80
-  tls:
-  - hosts:
-    - myapp.example.com
-    secretName: nginx-tls
-EOF
-```
-
-### Create Secrets
-
-```bash
-# Create a generic secret
-kubectl create secret generic my-secret \
-  --from-literal=password=mysecretpassword
-
-# Create from file
-kubectl create secret generic my-config \
-  --from-file=config.json
-
-# Use in pods
-kubectl run app --image=myapp --env-from=secret/my-secret
-```
-
-### Use Persistent Storage
-
-```bash
-# Create a PVC
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: my-data
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: openebs-zfs
-  resources:
-    requests:
-      storage: 10Gi
-EOF
-
-# Use in a pod
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: my-app
-spec:
-  containers:
-  - name: app
-    image: nginx
-    volumeMounts:
-    - name: data
-      mountPath: /data
-  volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: my-data
-EOF
-```
-
-### View Logs
-
-```bash
-# View pod logs
-kubectl logs <pod-name>
-
-# Follow logs
-kubectl logs -f <pod-name>
-
-# View previous container logs
-kubectl logs <pod-name> --previous
-```
-
-### Execute Commands in Pods
-
-```bash
-# Execute a command
-kubectl exec <pod-name> -- ls /
-
-# Interactive shell
-kubectl exec -it <pod-name> -- /bin/bash
-```
-
-## Management (Administrators)
-
-### List All Users
-
-```bash
-# List all namespaces (one per user)
+# What exists
 kubectl get namespaces
-
-# List service accounts
 kubectl get serviceaccounts --all-namespaces
-```
 
-### Revoke User Access
+# Revoke access but keep the resources
+kubectl delete serviceaccount <username> -n <username>
 
-```bash
-# Delete the user's namespace (this deletes all their resources!)
+# Revoke everything (deletes all their resources!)
 kubectl delete namespace <username>
 
-# Or just delete the service account to revoke access
-kubectl delete serviceaccount <username> -n <username>
-```
-
-### Modify Permissions
-
-Edit the Role to add or remove permissions:
-
-```bash
+# Adjust permissions
 kubectl edit role <username> -n <username>
-```
 
-Example modifications:
-
-```yaml
-rules:
-# Add networking resources
-- apiGroups: ["networking.k8s.io"]
-  resources: ["networkpolicies"]
-  verbs: ["get", "list", "create", "update", "delete"]
-
-# Add batch resources
-- apiGroups: ["batch"]
-  resources: ["cronjobs"]
-  verbs: ["get", "list", "create", "update", "delete"]
-```
-
-### Extend Token Lifetime
-
-Generate a new token with different duration:
-
-```bash
-# Generate 2-year token
+# Re-issue a token (e.g. 2 years) into an existing kubeconfig
 TOKEN=$(kubectl create token <username> -n <username> --duration=17520h)
-
-# Update kubeconfig with new token
 kubectl config set-credentials <username> \
-  --token=${TOKEN} \
-  --kubeconfig=<username>-kubeconfig.yaml
-```
+  --token=${TOKEN} --kubeconfig=<username>-kubeconfig.yaml
 
-### Monitor User Resources
-
-```bash
-# View all resources in user's namespace
+# Watch what they're using
 kubectl get all -n <username>
-
-# Check resource usage
 kubectl top pods -n <username>
-
-# View events
 kubectl get events -n <username>
 ```
 
-## Security Considerations
+### Resource quotas
 
-### Token Security
-
-- Tokens are long-lived (1 year by default)
-- Treat kubeconfig files as sensitive credentials
-- Set appropriate file permissions: `chmod 600 ~/.kube/config`
-- Don't commit kubeconfig files to version control
-- Rotate tokens regularly
-
-### Network Security
-
-Users' pods are subject to:
-- Namespace isolation
-- Network policies (if configured)
-- Resource quotas (if configured)
-
-### Resource Limits
-
-Consider setting ResourceQuotas per namespace:
+Nothing is quota'd by default. If an account should be bounded, apply a ResourceQuota to
+its namespace:
 
 ```yaml
 apiVersion: v1
@@ -401,147 +187,41 @@ spec:
     pods: "20"
 ```
 
-Apply quotas:
-
-```bash
-kubectl apply -f user-quota.yaml
-```
+Note that PVCs land on [node-local ZFS]({{< relref "../infrastructure/openebs" >}}) and
+pin the pod to that node — see
+[Node placement]({{< relref "../infrastructure/node-placement" >}}) before handing out
+storage.
 
 ## Troubleshooting
 
-### Connection Refused
+**Connection refused / timeout**
 
-1. **Check server address** in kubeconfig:
 ```bash
-kubectl config view --minify
+kubectl config view --minify     # is the server address right?
+nc -vz <server-address> 6443     # is 6443 reachable at all?
 ```
 
-2. **Verify port 6443 is accessible**:
-```bash
-telnet <server-address> 6443
-```
+Most often this is the Cloudflare-proxy trap above, not a broken token.
 
-3. **Check firewall rules**:
-```bash
-sudo ufw status
-```
+**Forbidden**
 
-### Forbidden Errors
-
-1. **Verify token is valid**:
 ```bash
 kubectl auth whoami
-```
-
-2. **Check permissions**:
-```bash
-kubectl auth can-i get pods
 kubectl auth can-i create deployments
-```
-
-3. **Verify ServiceAccount exists**:
-```bash
 kubectl get serviceaccount <username> -n <username>
 ```
 
-### Cannot Create Resources
+**Resources appear missing** — usually the wrong namespace:
 
-1. **Check you're in the right namespace**:
 ```bash
 kubectl config get-contexts
-```
-
-2. **Try specifying namespace explicitly**:
-```bash
 kubectl get pods -n <username>
-```
-
-3. **Check for ResourceQuotas**:
-```bash
 kubectl describe resourcequota -n <username>
 ```
 
-## Best Practices
+## Related
 
-1. **Use Strong Usernames**: Avoid special characters in usernames
-2. **Regular Token Rotation**: Rotate tokens periodically (e.g., every 6 months)
-3. **Principle of Least Privilege**: Only grant necessary permissions
-4. **Resource Quotas**: Set quotas to prevent resource exhaustion
-5. **Monitoring**: Regularly audit user activities
-6. **Backup**: Keep backups of kubeconfig generation scripts
-7. **Documentation**: Document custom permissions for users
-
-## Example Workflows
-
-### Deploying a Web Application
-
-```bash
-# Create deployment
-kubectl create deployment webapp --image=nginx
-
-# Create service
-kubectl expose deployment webapp --port=80 --target-port=80
-
-# Create ingress with HTTPS
-kubectl apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: webapp-ingress
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  rules:
-  - host: myapp.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: webapp
-            port:
-              number: 80
-  tls:
-  - hosts:
-    - myapp.example.com
-    secretName: webapp-tls
-EOF
-
-# Check status
-kubectl get ingress
-kubectl get certificate
-```
-
-### Running a Job
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: data-processing
-spec:
-  template:
-    spec:
-      containers:
-      - name: processor
-        image: python:3.9
-        command: ["python", "-c", "print('Processing data...')"]
-      restartPolicy: Never
-  backoffLimit: 3
-EOF
-
-# Watch job progress
-kubectl get jobs -w
-
-# View logs
-kubectl logs job/data-processing
-```
-
-## Related Resources
-
-- [Kubernetes RBAC Documentation](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
-- [ServiceAccount Documentation](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/)
-- [Kubectl Cheat Sheet](https://kubernetes.io/docs/reference/kubectl/cheatsheet/)
-- [K3s Installation Guide]({{< relref "../infrastructure/k3s" >}})
+- [Secrets management]({{< relref "secrets" >}}) — how credentials reach workloads
+- [JupyterHub]({{< relref "../services/jupyterhub" >}}) — where lab members actually work
+- [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+- [K3s]({{< relref "../infrastructure/k3s" >}}) — the admin kubeconfig and remote access
