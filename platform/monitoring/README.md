@@ -6,10 +6,12 @@ carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
 armada's `:9100`), and **Grafana** for drive-health / node / GPU dashboards. The
 charts + values are cluster-agnostic; the carbon-api on top is configured per node.
 
-- **nimbus** (single GB10): `nimbus-carbon-api` (see
-  `boettiger-lab/nimbus-carbon-api` and
-  `docs/superpowers/specs/2026-07-04-nimbus-carbon-api-design.md`),
-  live at <https://carbon-nimbus.carlboettiger.info>.
+- **nimbus** (single GB10): `nimbus-carbon-api.yaml` here is **archived, not
+  deployed** — <https://carbon-nimbus.carlboettiger.info> died with the single-node
+  nimbus cluster. nimbus's inference footprint is currently unreported, and because
+  both models now live in the `vllm` namespace its tokens are being summed into the
+  cirrus row. See issue #60 and
+  `docs/superpowers/specs/2026-07-04-nimbus-carbon-api-design.md`.
 - **cirrus** (two RTX 8000s, time-sliced across vllm/jupyter/mcp):
   `cirrus-carbon-api.yaml` in this directory, live at
   <https://carbon-cirrus.carlboettiger.info>. It runs the *same* image, just
@@ -95,7 +97,14 @@ QLC ~70% used). Useful queries:
 `smartctl-exporter` needs `privileged: true` for raw device access — a deliberate
 tradeoff for a control-plane DaemonSet.
 
+**amd64 only.** Upstream publishes release tags for linux/amd64 alone (only the
+floating `master` tag is multi-arch), so the DaemonSet pins
+`nodeSelector: kubernetes.io/arch: amd64`. arm64 nimbus therefore has no SMART
+metrics -- with the toleration but without the selector it just ImagePullBackOffs
+("no match for platform in manifest"). Issue #61.
+
 ## Carbon dashboard
 
-Consumed by [nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api),
-live at <https://carbon-nimbus.carlboettiger.info>.
+[nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api), deployed here
+as `cirrus-carbon-api.yaml` and live at <https://carbon-cirrus.carlboettiger.info>.
+Web docs: `docs/content/docs/monitoring/carbon.md`.

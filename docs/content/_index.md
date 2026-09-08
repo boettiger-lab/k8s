@@ -42,6 +42,12 @@ workload to one.
 - [**external-dns**]({{< relref "docs/infrastructure/external-dns" >}}) — DNS from Ingress objects
 - [**Node placement**]({{< relref "docs/infrastructure/node-placement" >}}) — taints, labels, architecture
 
+## Monitoring — how we watch it
+
+- [**Prometheus & exporters**]({{< relref "docs/monitoring/prometheus" >}}) — the metrics store, GPU/host/drive exporters
+- [**Grafana**]({{< relref "docs/monitoring/grafana" >}}) — drive health, node health, GPU dashboards
+- [**Carbon dashboard**]({{< relref "docs/monitoring/carbon" >}}) — power draw and CO₂ per token for LLM inference
+
 ## Administration
 
 - [**Access model & user accounts**]({{< relref "docs/admin/users" >}}) — who can reach what, and the namespace-scoped RBAC tooling

@@ -28,6 +28,15 @@ spec:
         prometheus.io/port: "9633"
         prometheus.io/path: "/metrics"
     spec:
+      # amd64 ONLY, deliberately. The upstream image publishes release tags for
+      # linux/amd64 alone (only the floating `master` tag is multi-arch), so on
+      # arm64 nimbus the pod does not fall back -- it ImagePullBackOffs with
+      # "no match for platform in manifest". Pinning `master` to reach one node
+      # is worse than having no SMART data from it, so nimbus is excluded here
+      # and the toleration below is left in place for when an arm64 release (or
+      # an image we build ourselves) exists.
+      nodeSelector:
+        kubernetes.io/arch: amd64
       # Cover control-plane (cirrus) and tainted worker nodes.
       tolerations:
         - key: node-role.kubernetes.io/control-plane
@@ -43,6 +52,13 @@ spec:
         - key: hub.jupyter.org/dedicated
           operator: Equal
           value: user
+          effect: NoSchedule
+        # nimbus is tainted dedicated=nimbus:NoSchedule for LLM inference. Without
+        # this the DaemonSet quietly runs 2/3 nodes -- DESIRED just drops, nothing
+        # errors, and nimbus's drive has no SMART history at all.
+        - key: dedicated
+          operator: Equal
+          value: nimbus
           effect: NoSchedule
       containers:
         - name: smartctl-exporter
