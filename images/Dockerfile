@@ -23,15 +23,22 @@ RUN install -d -o "${NB_USER}" -g "${NB_USER}" -m 0700 "${HOME}/.kube" && \
 COPY install-claude.sh /tmp/install-claude.sh
 RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
 
+# claude's launcher lives at ${HOME}/.local/bin/claude (a path it hardcodes, see
+# install-claude.sh) and it warns if that dir is not on PATH. Appended, not
+# prepended, so `claude` still resolves to the /usr/local/bin wrapper that sets
+# XDG_DATA_HOME and repairs the launcher when a PVC hides it.
+ENV PATH="${PATH}:${HOME}/.local/bin"
+
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
-# The installers above run as root with HOME=/home/${NB_USER}, so the claude
-# installer, npm, and jlpm/yarn scatter config + caches through the home dir as
-# root. Most damaging: ~/.claude.json lands root-owned mode 0600, so claude
-# fails with EACCES for the notebook user. Delete the pure build caches (~76 MB
-# of ~/.npm + ~/.yarn) and then hand every remaining root-created file in the
-# home dir (~/.claude, ~/.claude.json, ~/.cache/claude, ...) back to ${NB_USER}.
+# The installers above run as root with HOME=/home/${NB_USER}, so npm and
+# jlpm/yarn scatter config + caches through the home dir as root. Delete the
+# pure build caches (~76 MB of ~/.npm + ~/.yarn) and then hand every remaining
+# root-created file in the home dir back to ${NB_USER}. Nothing root-owned in
+# ~/.claude* should survive install-claude.sh (which drops to ${NB_USER}), but
+# a root-owned ~/.claude.json mode 0600 is the failure this guards against:
+# claude then dies with EACCES for the notebook user.
 RUN rm -rf "${HOME}/.npm" "${HOME}/.yarn" "${HOME}/.wget-hsts" && \
     chown -R "${NB_USER}:${NB_USER}" "${HOME}"
 
