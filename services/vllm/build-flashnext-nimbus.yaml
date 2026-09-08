@@ -118,8 +118,17 @@ spec:
       containers:
       # ---------------------------------------------------------------------
       # Import into k3s's containerd under the k8s.io namespace, which is where
-      # the kubelet looks. This is what lets qwen38-flashnext-nimbus.yaml use
-      # `imagePullPolicy: Never` against an image that is in no registry.
+      # the kubelet looks, so the image is usable on this node immediately.
+      #
+      # It does NOT stay local: push it to ghcr afterwards, which is what
+      # qwen38-flashnext-nimbus.yaml actually references (pinned by digest).
+      # A local-only image referenced imagePullPolicy: Never is a durability
+      # gap -- k3s image GC may reclaim it and leave nothing to pull:
+      #   skopeo copy --dest-authfile <ghcr dockerconfigjson> \
+      #     docker-archive:/var/lib/flashnext-build/qwen38-flash-dgx.tar \
+      #     docker://ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx:<recipe sha>
+      # (run it in a Job on nimbus; the skopeo image has no python3, so do not
+      # pipe its output through python as this file's author first tried.)
       # Uses the rancher/k3s image purely for its `k3s ctr` binary (arm64
       # published); it talks to the host socket and starts no k3s of its own.
       # ---------------------------------------------------------------------

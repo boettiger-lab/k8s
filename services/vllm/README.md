@@ -23,7 +23,7 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it), `whisper-cirrus.yaml` | Model Deployments on cirrus |
 | `qwen38-flashnext-nimbus.yaml` | **Current** nimbus model: Qwen3.8-Flash-Next NVFP4, PLE table mmapped from NVMe |
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
-| `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus**, into k3s's containerd |
+| `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |
 | `bench-qwen38-nimbus.sh` | Throughput benchmark for the nimbus endpoint |
 | `dgx-spark-memory.md` | The full unified-memory analysis: measurements, KV-cache arithmetic, and why the cgroup limit is not a limit |
@@ -164,9 +164,12 @@ opt-in for that reason.
   ~11 GiB spare that would only thrash. The cost is a 2–3× slower first pass over a cold
   region of the table, which is most of the gap between our ~1,600 tok/s prefill and
   their ~2,400–2,900.
-- **The image is in no registry.** It is built on nimbus into containerd and referenced
-  `imagePullPolicy: Never`, so k3s image GC could in principle reclaim it, leaving
-  nothing to pull. Pushing it to ghcr is the fix — see issue #57.
+- **The image is built on nimbus but lives in ghcr.** A hosted arm64 runner cannot
+  build it (~14 GB of runner disk against a ~30 GB extracted base image), so
+  `build-flashnext-nimbus.yaml` builds it on the node; it is then pushed to
+  `ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx` and referenced **by digest**. Do not
+  leave it local with `imagePullPolicy: Never` — k3s image GC may reclaim an
+  unreferenced image, and the recovery is a ~40 minute rebuild.
 
 ## Operational notes worth keeping
 

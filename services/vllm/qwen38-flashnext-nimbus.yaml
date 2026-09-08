@@ -30,13 +30,23 @@ spec:
         value: nimbus
         effect: NoSchedule
       runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ghcr-pull-secret
       containers:
       - name: vllm
         # ---------------------------------------------------------------------
-        # Built ON nimbus by build-flashnext-nimbus.yaml, straight into k3s's
-        # containerd -- it is in no registry, hence `Never`. It is
         # blazux/qwen3.8-Flash-DGX @ 2d9b5b7 (Apache-2.0) layered on
         # vllm/vllm-openai:qwen38-flash-next@sha256:fc120ec..., both pinned.
+        # Built ON nimbus by build-flashnext-nimbus.yaml (a hosted arm64 runner
+        # has ~14 GB of disk against a ~30 GB extracted base image), then pushed
+        # to ghcr so the cluster has something to pull. Pinned by digest, not
+        # tag: the tag names the recipe commit and would move if the image were
+        # ever rebuilt from a different base.
+        #
+        # It previously ran straight out of nimbus's containerd with
+        # imagePullPolicy: Never, which was a real durability gap -- k3s image
+        # GC may reclaim an unreferenced image, and there would have been
+        # nothing to pull and a ~40 min rebuild to recover.
         #
         # Note this is NOT the NGC image the other nimbus models use. NGC
         # 26.05.post1 ships vLLM 0.21.0.dev, whose registry has no
@@ -47,8 +57,8 @@ spec:
         # this tag (verified arm64 child in the manifest index), which is what
         # makes leaving NGC possible at all.
         # ---------------------------------------------------------------------
-        image: docker.io/library/qwen38-flash-dgx:2d9b5b7
-        imagePullPolicy: Never
+        image: ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx:2d9b5b7@sha256:6d487efba9a3838d75295354d5ee11f51fca865189bd6d89854b6503d95aa683
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
           name: http
