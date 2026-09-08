@@ -10,6 +10,11 @@ USER root
 COPY install-claude.sh /tmp/install-claude.sh
 RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
 
+# Same as the CPU image: claude hardcodes its launcher to ${HOME}/.local/bin and
+# warns when that is off PATH. Appended so `claude` keeps resolving to the
+# /usr/local/bin wrapper install-claude.sh writes.
+ENV PATH="${PATH}:${HOME}/.local/bin"
+
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
@@ -27,10 +32,10 @@ RUN /opt/venv/bin/pip install \
     sb3-contrib
 
 # Same root-in-home cleanup as the CPU image (images/Dockerfile). Every step
-# above runs as root with HOME=/home/${NB_USER}, so the claude installer, npm,
-# jlpm/yarn and pip scatter root-owned config + caches through the home dir —
-# most damagingly ~/.claude.json (mode 0600), which makes claude fail with
-# EACCES for the notebook user. Drop the build caches (~/.npm, ~/.yarn,
+# above runs as root with HOME=/home/${NB_USER}, so npm, jlpm/yarn and pip
+# scatter root-owned config + caches through the home dir — the failure this
+# guards against is a root-owned ~/.claude.json (mode 0600), which makes claude
+# fail with EACCES for the notebook user. Drop the build caches (~/.npm, ~/.yarn,
 # ~/.cache/pip) and the cuda base image's leftover install_llms.sh helper, then
 # hand the home dir back to ${NB_USER}.
 RUN rm -rf "${HOME}/.npm" "${HOME}/.yarn" "${HOME}/.wget-hsts" "${HOME}/.cache/pip" && \
