@@ -1,0 +1,165 @@
+# Build the patched Qwen3.8-Flash-Next image ON nimbus, into k3s's image store.
+#
+# Why on the node instead of the usual GitHub Actions arm64 runner
+# (.github/workflows/docker-gpu-image.yml): the base image is 9.7 GB compressed
+# and ~30 GB extracted, against a hosted runner's ~14 GB disk even after
+# jlumbroso/free-disk-space. nimbus is native arm64 with 2.8 TB free and is the
+# only machine that can run the result.
+#
+# Why buildkit's OCI worker plus a tarball import, rather than pointing buildkit
+# at k3s's containerd directly: the containerd worker splits the work across two
+# mount namespaces -- buildkitd sets up rootfs and cache mounts inside this pod,
+# while the containerd-shim that has to consume them runs on the host. Every
+# path therefore has to exist identically on both sides, and getting
+# /run/buildkit and /var/lib/buildkit onto hostPaths still left it failing at
+# `exec: "/bin/sh": stat /bin/sh: no such file or directory` -- the snapshot was
+# never materialised where the shim looked. The OCI worker keeps the entire
+# build inside this pod with its own runc executor and snapshotter, so none of
+# that applies; the only thing crossing the boundary is a finished tarball.
+#
+#   kubectl apply -f build-flashnext-nimbus.yaml
+#   kubectl logs -n vllm -f job/build-flashnext -c build
+#
+# ~25-40 min, most of it pulling and extracting the base image. The build is
+# CPU/disk only -- nvcc cross-compiles for sm_121 with no GPU present -- so it
+# is safe to run while the current model is still serving.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-flashnext
+  namespace: vllm
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      initContainers:
+      # ---------------------------------------------------------------------
+      # blazux/qwen3.8-Flash-DGX, Apache-2.0, pinned by commit. The only
+      # published recipe that fits on a single Spark: it mmaps the 48 GiB FP8
+      # PLE n-gram table from NVMe instead of holding it resident, taking the
+      # 126 GiB checkpoint down to ~76 GiB of weights. Every other recipe keeps
+      # the table (or a 4-bit requant of it) in the pool, which does not fit
+      # next to k3s on a 121.7 GiB node. See README.md.
+      # ---------------------------------------------------------------------
+      - name: clone
+        image: alpine/git:2.49.1
+        args: ["clone", "--depth=1", "--branch=main",
+               "https://github.com/blazux/qwen3.8-Flash-DGX", "/src"]
+        volumeMounts:
+        - name: src
+          mountPath: /src
+      - name: pin
+        image: alpine/git:2.49.1
+        workingDir: /src
+        command: ["sh", "-c"]
+        # --depth=1 only fetches the branch tip, so fetch the pinned commit
+        # explicitly rather than assuming main still points at it. This repo
+        # moved twice in the week this was written; unpinned would be a
+        # different image every build.
+        args:
+        - |
+          set -eux
+          git fetch --depth=1 origin "$SHA"
+          git checkout --detach "$SHA"
+          git rev-parse HEAD
+        env:
+        - name: SHA
+          value: 2d9b5b744b8b8e25e0c40120f4a13bcec3554aa9
+        volumeMounts:
+        - name: src
+          mountPath: /src
+      # Native sidecar: buildkitd must stay up for the build step below and for
+      # the main container's lifetime accounting.
+      - name: buildkitd
+        image: moby/buildkit:v0.28.0
+        restartPolicy: Always
+        args: ["--addr=unix:///run/buildkit/buildkitd.sock", "--root=/var/lib/buildkit"]
+        # runc needs to create namespaces for each RUN step.
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: buildkit-sock
+          mountPath: /run/buildkit
+        - name: buildkit-state
+          mountPath: /var/lib/buildkit
+        readinessProbe:
+          exec:
+            command: ["buildctl", "--addr", "unix:///run/buildkit/buildkitd.sock", "debug", "workers"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+      - name: build
+        image: moby/buildkit:v0.28.0
+        command: ["buildctl"]
+        args:
+        - --addr=unix:///run/buildkit/buildkitd.sock
+        - build
+        - --frontend=dockerfile.v0
+        - --local=context=/src
+        - --local=dockerfile=/src
+        # docker-archive rather than OCI layout: it carries an explicit RepoTag,
+        # so `ctr images import` lands it under exactly this name.
+        - --output=type=docker,name=docker.io/library/qwen38-flash-dgx:2d9b5b7,dest=/out/qwen38-flash-dgx.tar
+        volumeMounts:
+        - name: src
+          mountPath: /src
+        - name: buildkit-sock
+          mountPath: /run/buildkit
+        - name: out
+          mountPath: /out
+      containers:
+      # ---------------------------------------------------------------------
+      # Import into k3s's containerd under the k8s.io namespace, which is where
+      # the kubelet looks. This is what lets qwen38-flashnext-nimbus.yaml use
+      # `imagePullPolicy: Never` against an image that is in no registry.
+      # Uses the rancher/k3s image purely for its `k3s ctr` binary (arm64
+      # published); it talks to the host socket and starts no k3s of its own.
+      # ---------------------------------------------------------------------
+      - name: import
+        image: rancher/k3s:v1.36.4-k3s1
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eux
+          ls -la /out/
+          # `ctr`, not `k3s ctr`: in this image /bin/ctr is an argv0 symlink to
+          # the k3s multicall binary, and the k3s CLI itself has no ctr
+          # subcommand -- `k3s ctr ...` fails with "No help topic for 'ctr'".
+          ctr --address /run/k3s/containerd/containerd.sock \
+            -n k8s.io images import /out/qwen38-flash-dgx.tar
+          ctr --address /run/k3s/containerd/containerd.sock \
+            -n k8s.io images ls name==docker.io/library/qwen38-flash-dgx:2d9b5b7
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: out
+          mountPath: /out
+        - name: containerd-sock
+          mountPath: /run/k3s/containerd
+      volumes:
+      - name: src
+        emptyDir: {}
+      - name: buildkit-sock
+        emptyDir: {}
+      # hostPath, not emptyDir: survives a retry, so a failed build does not
+      # re-pull the 9.7 GB base image. Lives on the 2.8 TB NVMe.
+      - name: buildkit-state
+        hostPath:
+          path: /var/lib/buildkit
+          type: DirectoryOrCreate
+      - name: out
+        hostPath:
+          path: /var/lib/flashnext-build
+          type: DirectoryOrCreate
+      - name: containerd-sock
+        hostPath:
+          path: /run/k3s/containerd
+          type: Directory

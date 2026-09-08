@@ -4,9 +4,10 @@
 # Each GPU node serves a single model at a time behind a fixed URL (endpoints.yaml).
 # Pass a model manifest to pick which one; defaults to the current cirrus model.
 #
-#   ./up.sh                        # cirrus: Qwen3.8-27B (AWQ INT4)
-#   ./up.sh qwen38-nimbus.yaml     # nimbus: Qwen3.8-27B (NVFP4)
-#   ./up.sh gemma4-cirrus.yaml     # cirrus: Gemma 4
+#   ./up.sh                              # cirrus: Qwen3.8-27B (AWQ INT4)
+#   ./up.sh qwen38-flashnext-nimbus.yaml # nimbus: Qwen3.8-Flash-Next (NVFP4)
+#   ./up.sh qwen38-nimbus.yaml           # nimbus: Qwen3.8-27B (NVFP4), the rollback
+#   ./up.sh gemma4-cirrus.yaml           # cirrus: Gemma 4
 #
 # nimbus is a tainted worker in this same cluster, so its models deploy against the
 # cirrus control plane like everything else -- there is no separate nimbus kubeconfig.

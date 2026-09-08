@@ -1,0 +1,60 @@
+# Drop nimbus's page cache immediately before loading a very large model.
+#
+# On GB10 there is no discrete VRAM: the page cache holding a previous model's
+# weights and the pool the CUDA allocator draws from are the same ~121.7 GiB of
+# LPDDR5X. A warm cache from the outgoing model is clean and reclaimable, but
+# reclaim is not instant, and both dual-Spark recipes report it starving the
+# allocator partway through a >100 GiB load. Cheaper to drop it up front than
+# to find out during graph capture.
+#
+# This is a k8s stand-in for `sync; echo 3 | sudo tee /proc/sys/vm/drop_caches`,
+# needed because there is no working ssh to nimbus from the deploy host. It only
+# drops CLEAN cache -- `sync` first so nothing dirty is lost -- and is a no-op
+# for anonymous memory, so it cannot evict a running model's weights.
+#
+#   kubectl apply -f drop-caches-nimbus.yaml
+#   kubectl logs -n vllm job/drop-caches-nimbus
+#   kubectl delete -f drop-caches-nimbus.yaml
+#
+# Run it AFTER scaling the outgoing model to 0 and confirming its pod is gone.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: drop-caches-nimbus
+  namespace: vllm
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      containers:
+      - name: drop
+        image: busybox:1.37
+        # privileged so /proc/sys is writable; hostPID so `sync` flushes the
+        # host's dirty pages rather than just this namespace's.
+        securityContext:
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          echo "before:"; grep -E '^(MemFree|MemAvailable|Cached|Dirty|Shmem):' /proc/meminfo
+          sync
+          echo 3 > /proc/sys/vm/drop_caches
+          sleep 2
+          echo "after:";  grep -E '^(MemFree|MemAvailable|Cached|Dirty|Shmem):' /proc/meminfo
+        resources:
+          requests:
+            cpu: 100m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 64Mi
+      hostPID: true
