@@ -1,0 +1,302 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen38-flashnext
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus
+spec:
+  replicas: 1
+  # Recreate, as with every model Deployment here: a rolling update deadlocks
+  # waiting for GPU the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-flashnext
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-flashnext
+        # What endpoints.yaml's Service selects; scaling qwen38 to 0 and this to
+        # 1 moves vllm-nimbus.carlboettiger.info with no ingress churn.
+        vllm-endpoint: nimbus
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      imagePullSecrets:
+      - name: ghcr-pull-secret
+      containers:
+      - name: vllm
+        # ---------------------------------------------------------------------
+        # blazux/qwen3.8-Flash-DGX @ 2d9b5b7 (Apache-2.0) layered on
+        # vllm/vllm-openai:qwen38-flash-next@sha256:fc120ec..., both pinned.
+        # Built ON nimbus by build-flashnext-nimbus.yaml (a hosted arm64 runner
+        # has ~14 GB of disk against a ~30 GB extracted base image), then pushed
+        # to ghcr so the cluster has something to pull. Pinned by digest, not
+        # tag: the tag names the recipe commit and would move if the image were
+        # ever rebuilt from a different base.
+        #
+        # It previously ran straight out of nimbus's containerd with
+        # imagePullPolicy: Never, which was a real durability gap -- k3s image
+        # GC may reclaim an unreferenced image, and there would have been
+        # nothing to pull and a ~40 min rebuild to recover.
+        #
+        # Note this is NOT the NGC image the other nimbus models use. NGC
+        # 26.05.post1 ships vLLM 0.21.0.dev, whose registry has no
+        # Qwen4ExpForConditionalGeneration -- verified in-cluster:
+        #   Qwen4ExpForConditionalGeneration supported: False
+        # Flash-Next is a new architecture (`model_type: qwen4_exp`) and the
+        # official recipe wants vLLM 0.29.0+. vllm/vllm-openai is multi-arch for
+        # this tag (verified arm64 child in the manifest index), which is what
+        # makes leaving NGC possible at all.
+        # ---------------------------------------------------------------------
+        image: ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx:2d9b5b7@sha256:6d487efba9a3838d75295354d5ee11f51fca865189bd6d89854b6503d95aa683
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: HF_HUB_OFFLINE
+          value: "1"
+        # ---------------------------------------------------------------------
+        # The whole reason this model fits. The NVFP4 checkpoint is 126 GiB and
+        # nimbus's entire unified pool is 121.7 GiB -- it is larger than the
+        # machine, before KV cache or the OS. 48 GiB of it is the FP8 PLE n-gram
+        # table (`model-plefp8-*`), a pure lookup of which a token touches 16
+        # rows. This serves it from NVMe via mmap instead of holding it
+        # resident, taking weights to ~76 GiB.
+        #
+        # This is why the checkpoint is RadixArk's and not nvidia's: RadixArk
+        # shards the PLE into ten model-plefp8-* files, NVIDIA ships one 53.72 GB
+        # blob, and the mmap patch and its range guard expect the shards.
+        # ---------------------------------------------------------------------
+        - name: VLLM_PLE_MMAP
+          value: "1"
+        - name: VLLM_PLE_MMAP_WORKERS
+          value: "32"
+        # PREWARM streams the whole 48 GiB table through the page cache at boot.
+        # blazux runs a dedicated Spark with ~40 GiB spare; we have ~13 GiB after
+        # k3s, so a prewarm would only thrash and be evicted. Off. The cost is a
+        # 2-3x slower first pass over a cold region of the table.
+        - name: VLLM_PLE_MMAP_PREWARM
+          value: "0"
+        # Deterministic QSA top-k at temperature 0. The stock GB10 kernel is
+        # non-deterministic AND drops real top-k candidates (vllm#51782) -- on a
+        # single Spark this showed up as 13/50 identical greedy prompts giving
+        # different answers. DET_TOPK is the kernel fix (vllm#55122), which
+        # unlike the EXACT_TOPK torch fallback costs no prefill speed.
+        - name: VLLM_QSA_DET_TOPK
+          value: "1"
+        - name: VLLM_QSA_DET_LIB
+          value: /opt/llm/kernel-det/_C_det.so
+        - name: VLLM_QSA_EXACT_TOPK
+          value: "0"
+        # Hybrid-mode-only knobs; inert here, set explicitly so the mode is
+        # unambiguous. MODE=hybrid (fp8 side layers, +20% decode) needs a
+        # one-time offline checkpoint conversion we have not done.
+        - name: VLLM_FP8_PAD_M4
+          value: "0"
+        - name: VLLM_USE_FLASHINFER_SAMPLER
+          value: "1"
+        - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "0"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Resolve the snapshot the cache's refs/main actually points at, the
+          # way blazux's serve.sh does, rather than hardcoding a revision hash
+          # or letting `ls` pick whichever of two revisions sorts first.
+          REPO_DIR=/hf/hub/models--RadixArk--Qwen3.8-Flash-Next-NVFP4
+          SNAP=""
+          for REF in main master; do
+            REV="$(cat "$REPO_DIR/refs/$REF" 2>/dev/null || true)"
+            if [ -n "$REV" ] && [ -d "$REPO_DIR/snapshots/$REV" ]; then
+              SNAP="$REPO_DIR/snapshots/$REV"; break
+            fi
+          done
+          [ -n "$SNAP" ] || { echo "!! checkpoint not found under $REPO_DIR"; exit 1; }
+          echo "serving snapshot: $SNAP"
+
+          # The PLE gather is a CPU op plus a pageable host->device copy, so it
+          # MUST run outside CUDA graphs: declare it a splitting op and capture
+          # PIECEWISE, never FULL.
+          SPLIT='["vllm::unified_attention_with_output","vllm::unified_mla_attention_with_output","vllm::mamba_mixer2","vllm::mamba_mixer","vllm::short_conv","vllm::qwen3_8_flash_next_ple_short_conv","vllm::qwen3_8_flash_next_qsa_with_output","vllm::linear_attention","vllm::qwen_gdn_attention_core","vllm::qwen_gdn_attention_core_fused_norm_packed","vllm::sparse_attn_indexer","vllm::ple_mmap_lookup"]'
+
+          # This checkpoint's generation_config.json ships temperature 1.0 (with
+          # top_k 20 / top_p 0.95). That is the variance that made 3.6's
+          # tool-calls flip between answering and calling, run to run, so pin
+          # Qwen's documented thinking-mode temperature instead -- only the
+          # temperature differs from the checkpoint's own defaults. Verified
+          # separately that this snapshot has tokenizer truncation=None.
+          # Built as an array, not a backslash-continued command line: a `#`
+          # comment inside a `\`-continuation silently truncates the command
+          # (bash splices the lines, the rest becomes comment text, and `exec`
+          # never returns to run what follows). That cost one failed load here
+          # -- vLLM started with only the model path and its own default
+          # utilisation. Inside an array literal, comments between elements are
+          # safe, so the flags can stay documented.
+          ARGS=(
+            # Same names the outgoing qwen38 deployment served, deliberately:
+            # clients keep working across the swap with no config change, and
+            # "qwen3.8" is still accurate -- Flash-Next is a Qwen3.8 model. The
+            # endpoint has never carried the model name anyway (endpoints.yaml).
+            --served-model-name qwen qwen3.8
+            --host 0.0.0.0 --port 8000
+            --load-format safetensors
+            --max-model-len 262144
+            --max-num-seqs 4
+            --gpu-memory-utilization 0.82
+            # HARD KV CAP -- this, not the utilization fraction, is what keeps
+            # the node above its watchdog floor. Measured at 0.82 with no cap:
+            #   Available KV cache memory: 12.05 GiB  -> 425,802 tokens, 1.62x
+            #   node MemAvailable afterwards: 7.64 GiB
+            # which is BELOW gpu-hang-watchdog's MEM_MIN of 8 GiB -- it drops
+            # page cache at 2 consecutive sub-floor samples and SIGKILLs vLLM at
+            # 3, one sample per minute. The cache-drop rung is the worse of the
+            # two here: it repeatedly evicts the page cache the mmapped PLE
+            # table reads through, so prefill degrades instead of failing
+            # loudly. 8 GiB of KV gives back ~4 GiB and lands MemAvailable near
+            # ~11.7 GiB, clear of the floor.
+            #
+            # 8 GiB still holds ~280k tokens. The "1.08x concurrency" vLLM
+            # prints is the worst case for simultaneous *max-length* (262144)
+            # requests only -- KV is allocated per token, so ordinary traffic
+            # gets far more than one concurrent stream.
+            #
+            # The flag is --kv-cache-memory in this build (config field
+            # kv_cache_memory_bytes); vLLM names it itself in the "Replace
+            # gpu_memory_utilization config with ..." startup line.
+            #
+            # IMPORTANT: this cap does NOT combine with --gpu-memory-utilization
+            # -- it replaces it. vLLM says so on startup:
+            #   "reserved 8.0 GiB memory for KV Cache as specified by
+            #    kv_cache_memory_bytes config and skipped memory profiling.
+            #    This does not respect the gpu_memory_utilization config."
+            # So the 0.82 above is inert while this line is present. It is kept
+            # only as documentation of how the 8 GiB was derived, and as the
+            # value to fall back to if this cap is ever removed. Re-derive both
+            # from a real load after any image or checkpoint change: vLLM prints
+            # the initial free memory it profiled against, and the correct cap
+            # moves with it.
+            --kv-cache-memory=8589934592
+            # The image's block_size fix makes prefix caching correct for this
+            # model; without it a cache hit restored an all-zero Mamba state and
+            # returned silently wrong answers. Confirmed active in the startup
+            # log: "Mamba cache mode is set to 'align' ... prefix caching".
+            --enable-prefix-caching
+            --enable-chunked-prefill
+            --max-num-batched-tokens 8192
+            # Trades single-stream TTFT for responsiveness: without it a decode
+            # client drops to one token per 3-7 s step while another client's
+            # prompt is prefilling. This endpoint is multi-user.
+            --long-prefill-token-threshold 1024
+            # The PLE gather is a CPU op plus a pageable host->device copy, so
+            # it must run outside CUDA graphs -- PIECEWISE, never FULL.
+            -cc.cudagraph_mode=PIECEWISE
+            "-cc.splitting_ops=$SPLIT"
+            --no-enable-flashinfer-autotune
+            --kv-cache-dtype auto
+            --enable-auto-tool-choice
+            --tool-call-parser qwen3_coder
+            --reasoning-parser qwen3
+            --speculative-config '{"method":"mtp","num_speculative_tokens":2}'
+            --override-generation-config '{"temperature": 0.6, "top_p": 0.95, "top_k": 20}'
+            --enable-log-requests --enable-log-outputs --max-log-len 4000
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        # ---------------------------------------------------------------------
+        # MEMORY BUDGET -- MEASURED on this node, 2026-09-08, not estimated.
+        # From a real load at --gpu-memory-utilization 0.76:
+        #   "Model loading took 79.42 GiB memory and 603.97 seconds"
+        #   "Available KV cache memory: 6.32 GiB"
+        # which gives, against the 0.76 x 121.69 = 92.48 GiB budget:
+        #   weights             79.42 GiB
+        #   activations/graphs   6.74 GiB   (derived: budget - weights - KV)
+        #   KV                   6.32 GiB
+        # 0.76 FAILED: one sequence at the full 262144 needs 7.41 GiB of KV, so
+        # the engine refused to start ("estimated maximum model length 219200").
+        #
+        # At 0.82 -> 99.79 GiB budget -> ~13.6 GiB of KV, 1.8x the minimum for
+        # full context. Node accounting for the rest:
+        #   121.69 pool - 99.79 vLLM - ~9 host/k3s/pods = ~12.9 GiB left, which
+        # is the page cache the mmapped PLE table reads through, and is also the
+        # margin above the gpu-hang-watchdog's 8 GiB floor. Do not raise this
+        # much further: 0.86 leaves only ~8 GiB and lands on that floor, and
+        # blazux reports 0.85 drifting into swap after a day on a *dedicated*
+        # Spark with more slack than we have.
+        #
+        # NOTE on --gpu-memory-utilization: on THIS image it behaves as a real
+        # cap -- vLLM stayed inside the 92.48 GiB it was given. That is the
+        # opposite of the NGC 0.21 build's behaviour recorded in
+        # dgx-spark-memory.md, where the profiler took all free memory despite
+        # the flag. Whether it caps is a property of the model and build, not a
+        # rule, so measure on every change rather than assuming either way:
+        #   kubectl logs <pod> | grep -E "Model loading took|Available KV cache"
+        # --kv-cache-memory-bytes exists in this build (verified) if a hard,
+        # profiler-independent cap is ever needed.
+        # ---------------------------------------------------------------------
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only -- cgroups do not see CUDA allocations on
+            # unified memory (dgx-spark-memory.md). ~76 weights + 16 KV + 4.
+            memory: 96Gi
+            # All 8 slices, deliberately. A slice is a co-tenancy slot, not a
+            # memory partition, so this frees no memory (mcp-gpu holds 178Mi) --
+            # it is how we tell the scheduler to put NOTHING else on this GPU.
+            # That matters more than usual here: the model already needs ~76 GiB
+            # of weights plus KV out of a 121.7 GiB pool shared with the host, so
+            # any co-scheduled GPU pod is competing for the pool that keeps this
+            # node alive. mcp-gpu-nimbus must be scaled to 0 first or this pod
+            # stays Pending -- it holds the 8th slice.
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 8
+            memory: 96Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        # Readiness only, no liveness: a hang at load leaves the pod NotReady for
+        # debugging instead of crash-looping a 76 GiB load forever. 30 min:
+        # this reads far more from disk than the 22 GiB model it replaces.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 120
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          # blazux runs --shm-size 16g. Allocation is lazy, so this is a ceiling
+          # rather than a reservation, but it is 16 GiB of the same pool if it
+          # ever fills -- worth knowing when reading a memory incident.
+          sizeLimit: 16Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

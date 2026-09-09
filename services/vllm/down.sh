@@ -11,7 +11,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--all" ]]; then
-  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 --ignore-not-found
+  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 qwen38-flashnext --ignore-not-found
   kubectl delete -f endpoints.yaml --ignore-not-found
   echo "Endpoints removed too (DNS records and certs will need re-issuing on next up)."
 else
