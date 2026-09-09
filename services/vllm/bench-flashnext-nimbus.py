@@ -10,6 +10,12 @@ every later measurement. Launch it detached and poll the output file:
   kubectl exec -n vllm deploy/qwen38-flashnext -- \\
     bash -c 'nohup setsid python3 /tmp/bench.py > /tmp/bench.log 2>&1 & echo started'
 
+Afterwards, delete /tmp/bench*.  Two cleanup notes: pid 1 in this container is
+vLLM, not an init, so a setsid'd child reparents to it and is never reaped --
+each run leaves one harmless <defunct> entry until the pod restarts. And do not
+clean up with `pkill -f bench`: the pattern matches the shell running it, which
+then kills itself (exit 143) before the rm executes.
+
 Separates prefill from decode by streaming: TTFT is the prefill wall (the first
 token cannot arrive until the whole prompt is processed), and the remaining
 tokens divided by the remaining time is the true decode rate.
