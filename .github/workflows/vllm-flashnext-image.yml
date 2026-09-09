@@ -12,19 +12,28 @@ name: vLLM Flash-Next Image (arm64)
 # `nvcc` cross-compiles the deterministic top-k kernel for sm_121 with no GPU
 # present, so a stock runner can build this even though only nimbus can run it.
 #
-# DISK IS THE TIGHT CONSTRAINT, and it is why this is worth watching:
-#   arm64 hosted runner, out of the box   ~14 GB
-#   + free-disk-space, all options on     ~16 GB more
-#   ---------------------------------------------
-#   extracted base image                   18.7 GiB   (measured on nimbus)
-#   final image, compressed                 9.9 GB    (55 layers)
-# It fits, but not by much -- hence every cleanup option below is enabled,
-# unlike docker-gpu-image.yml which leaves large-packages and docker-images off.
-# Pushing by digest streams layers straight to ghcr rather than materialising a
-# ~9 GB local tarball, which is the other reason this stays inside the budget.
+# DISK IS NOT THE CONSTRAINT -- measured on the first real run, 2026-09-09:
+#   /dev/root  145 GB total, 109 GB free before any cleanup
+# against an 18.7 GiB extracted base image and a 9.9 GB result. The build
+# completed comfortably. An earlier version of this file claimed the runner had
+# only ~14 GB and used that to justify building on nimbus instead; that number
+# came from a search result rather than a measurement and was wrong by an order
+# of magnitude. free-disk-space is therefore NOT run here -- it reclaimed 14 GiB
+# we did not need and cost ~45 s.
 #
-# If it ever stops fitting, the fallback is services/vllm/build-flashnext-nimbus.yaml,
-# which builds on nimbus itself (2.8 TB free) and imports into containerd.
+# services/vllm/build-flashnext-nimbus.yaml still exists as a fallback for
+# building without GitHub (or without ghcr write access), but it is no longer
+# the recommended path.
+#
+# WHAT DOES BLOCK THIS: ghcr package permissions. The package was first created
+# by a `skopeo` push from nimbus using a PAT, so it is not linked to this
+# repository and GITHUB_TOKEN cannot write to it:
+#     denied: permission_denied: write_package
+# Fix once, in the package settings -> Manage Actions access -> add the `k8s`
+# repository with Write:
+#   https://github.com/orgs/boettiger-lab/packages/container/vllm-qwen38-flash-dgx/settings
+# Packages that Actions created itself (e.g. k8s-gpu) are linked automatically,
+# which is why the other workflows here never hit this.
 on:
   workflow_dispatch: null
   push:
@@ -57,19 +66,10 @@ jobs:
       - name: Short SHA
         run: echo "RECIPE_SHORT=${RECIPE_SHA:0:7}" >> "$GITHUB_ENV"
 
-      # Every option on, unlike the other workflows here: this build needs the
-      # full ~30 GB and the defaults leave roughly half of it on the floor.
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-          android: true
-          dotnet: true
-          haskell: true
-
+      # No free-disk-space step: measured 109 GB free out of 145 GB on this
+      # runner before any cleanup, against a build that needs well under 30 GB.
+      # The step is kept out rather than kept "just in case" so that the disk
+      # readings below stay an honest record of what this build actually needs.
       - name: Disk before build
         run: df -h / /mnt 2>/dev/null || df -h /
 

@@ -1,10 +1,14 @@
 # Build the patched Qwen3.8-Flash-Next image ON nimbus, into k3s's image store.
 #
-# Why on the node instead of the usual GitHub Actions arm64 runner
-# (.github/workflows/docker-gpu-image.yml): the base image is 9.7 GB compressed
-# and ~30 GB extracted, against a hosted runner's ~14 GB disk even after
-# jlumbroso/free-disk-space. nimbus is native arm64 with 2.8 TB free and is the
-# only machine that can run the result.
+# NOTE (2026-09-09): this is now the FALLBACK, not the recommended path. It was
+# written on the claim that a hosted arm64 runner has only ~14 GB of disk, too
+# little for the ~18.7 GiB extracted base image. That claim was wrong -- the
+# first real run of .github/workflows/vllm-flashnext-image.yml measured 145 GB
+# total and 109 GB free before any cleanup, and the build completed there.
+#
+# Keep this for building without GitHub, or without ghcr write access. It is
+# also the only path that needs no network egress for the result, since it
+# imports straight into containerd.
 #
 # Why buildkit's OCI worker plus a tarball import, rather than pointing buildkit
 # at k3s's containerd directly: the containerd worker splits the work across two
