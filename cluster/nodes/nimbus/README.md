@@ -196,7 +196,7 @@ Four independent layers, so no single one has to be perfect:
 
 | # | layer | catches | recovery |
 |---|---|---|---|
-| 1 | `gpu-hang-watchdog.timer` | `nvidia-smi` hanging, or MemAvailable < 8 GiB | kills vLLM after 3 min, force-reboots after 6 |
+| 1 | `gpu-hang-watchdog.timer` | `nvidia-smi` hanging, or MemAvailable < 8 GiB **with reclaim distress** | kills vLLM after 3 min, force-reboots after 6 |
 | 2 | systemd hardware watchdog | a true kernel hang | board self-resets after 60 s |
 | 3 | k3s eviction thresholds | scheduler overcommit | kubelet evicts before the pool is gone |
 | 4 | `kernel.sysrq = 1` | — | lets layer 1's reboot path work when the clean one is blocked |
@@ -208,6 +208,50 @@ GPU did. The watchdog polls `nvidia-smi` under a 20 s timeout and requires three
 consecutive failures before acting, so a slow model load (which legitimately
 takes minutes) is never killed. Its escalation is deliberately narrow: **it only
 ever kills vLLM**, never a user's Jupyter session or another team's pod.
+
+### 2026-09-09: the memory trigger needed corroboration
+
+The memory trigger, as originally written, **killed a healthy production model.**
+Qwen3.8-Flash-Next mmaps its 48 GiB PLE table from NVMe, so a large and growing
+file-backed mapping *is* its normal decode path. `MemAvailable` discounts
+actively-mapped file pages, so it drifted down ~0.23 GiB/h and crossed the 8 GiB
+floor after 14h52m of healthy serving:
+
+```
+[gpu-hang-watchdog] dropped clean page cache: MemAvailable 8038 -> 8125 MiB
+[gpu-hang-watchdog] MemAvailable 8122 MiB below 8192 MiB (consecutive: 3)
+[gpu-hang-watchdog] ESCALATION: killing vLLM (consecutive failures reached 3)
+```
+
+`gpu_fails` was 0 the whole time — the GPU was fine. Two things were wrong:
+
+1. **The lossless rung cannot work on this metric.** Dropping clean page cache
+   recovered 87 MiB, and could not do better: `MemAvailable` *already counts*
+   reclaimable page cache, so dropping it just moves pages from `Cached` to
+   `MemFree`, both already inside the number. There was no real step between
+   "below threshold" and "SIGKILL".
+2. **Low MemAvailable is not evidence of danger.** What actually preceded the
+   2026-08-24 wedge was *direct reclaim* — synchronous reclaim inside the
+   faulting task, which was `VLLM::EngineCore` holding the driver's
+   rw-semaphore. That is directly measurable.
+
+So the memory trigger now requires **both** low MemAvailable **and** real reclaim
+distress, measured per tick from `/proc/vmstat`:
+
+| | |
+|---|---|
+| `pgscan_direct` delta | ≥ 51200 pages/tick (~200 MiB/min of direct reclaim) |
+| `pswpin + pswpout` delta | ≥ 12800 pages/tick (~50 MiB/min of swap traffic) |
+| `MEM_CRIT_KIB` | 1.5 GiB — kills without waiting for corroboration |
+
+Low memory *without* distress is logged every tick and not acted on, so the drift
+stays visible and the thresholds can be calibrated against real numbers. The
+`nvidia-smi` trigger is unchanged: a wedged driver still kills on its own, which
+is the failure this watchdog exists for.
+
+Run `./test-watchdog.sh` after touching any of this. It drives the escalation
+logic against synthetic `meminfo`/`vmstat` with `pkill` and `nvidia-smi` stubbed,
+needs no root and no GPU, and covers the regression above explicitly.
 
 To keep the kill escalation but never let it reboot the node, set
 `Environment=ALLOW_REBOOT=0` in `gpu-hang-watchdog.service`.
@@ -250,8 +294,9 @@ anything gets killed.
 ## Verifying
 
 ```bash
+./test-watchdog.sh                                # escalation logic, offline
 systemctl list-timers gpu-hang-watchdog.timer
-journalctl -u gpu-hang-watchdog.service -f
+journalctl -u gpu-hang-watchdog.service -f        # look for "no reclaim distress"
 sudo systemctl show -p RuntimeWatchdogUSec        # expect 1min
 kubectl describe node | grep -A6 'Allocated resources'
 ```
@@ -267,6 +312,7 @@ sudo ALLOW_REBOOT=0 /usr/local/bin/gpu-hang-watchdog.sh
 | file | installs to |
 |---|---|
 | `gpu-hang-watchdog.sh` | `/usr/local/bin/gpu-hang-watchdog.sh` |
+| `test-watchdog.sh` | — (unit tests for the escalation logic; no root, no GPU) |
 | `gpu-hang-watchdog.service` | `/etc/systemd/system/` |
 | `gpu-hang-watchdog.timer` | `/etc/systemd/system/` |
 | `k3s-config.yaml` | `/etc/rancher/k3s/config.yaml` — **server mode** (backed up first) |
