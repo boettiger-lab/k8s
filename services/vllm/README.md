@@ -25,7 +25,8 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |
-| `bench-qwen38-nimbus.sh` | Throughput benchmark for the nimbus endpoint |
+| `bench-flashnext-nimbus.py` | Prefill/decode + concurrency benchmark, cold vs warm prefix (run inside the pod) |
+| `bench-qwen38-nimbus.sh` | Older decode/MTP benchmark for the 27B nimbus model |
 | `dgx-spark-memory.md` | The full unified-memory analysis: measurements, KV-cache arithmetic, and why the cgroup limit is not a limit |
 | `Dockerfile.gemma4` | `vllm-openai:gemma4` + audio extras (`ghcr.io/boettiger-lab/vllm-gemma4-audio`) |
 | `up.sh` / `down.sh` | Apply the endpoints plus one model / remove models but keep the endpoints |
@@ -146,6 +147,60 @@ token, so ordinary traffic gets far more than one concurrent stream.
 If that proves too tight, `--kv-cache-dtype fp8_e4m3` buys ~1.9× the KV in the same
 8 GiB — full context and real concurrency, at a speed and quality cost. blazux ships it
 opt-in for that reason.
+
+### Measured throughput, 2026-09-08
+
+`bench-flashnext-nimbus.py`, run **inside the pod** against `localhost:8000`, so
+these exclude Traefik/TLS/WAN. Prefill and decode are separated by streaming: TTFT
+is the prefill wall, and the tokens after it over the time after it are the decode
+rate. 256 generated tokens per request, `temperature 0`.
+
+**Single stream.** Cold = unique prefix, warm = prefix already cached.
+
+| prompt | cold TTFT | cold prefill | warm TTFT | decode (cold/warm) |
+|---:|---:|---:|---:|---:|
+| 4,067 | 2.4 s | 1,684 tok/s | 1.5 s | 27.2 / 29.5 |
+| 16,008 | 9.5 s | 1,689 tok/s | 1.1 s | 26.9 / 29.5 |
+| 31,926 | 19.0 s | 1,682 tok/s | 2.0 s | 26.2 / 28.8 |
+| 63,767 | 39.1 s | 1,632 tok/s | 2.1 s | 26.7 / 29.5 |
+| 127,446 | 81.3 s | 1,568 tok/s | 2.1 s | 25.5 / 28.6 |
+
+Two properties matter more than the absolute numbers:
+
+- **Prefill is flat in context length** — 1,684 tok/s at 4k, 1,568 at 128k, across a
+  31x range. QSA sparse attention means no quadratic collapse. This is the opposite
+  of cirrus, whose prefill falls apart with length (issue #38).
+- **Decode is also flat** — ~26 tok/s at 4k and at 128k alike. Only 12 of 48 layers
+  are full attention; the other 36 are Gated DeltaNet linear attention whose state is
+  constant per sequence, so KV barely grows with context.
+
+Warm TTFT is ~2 s at *any* prompt size, so at 128k a cache hit is worth **38x**
+(81.3 s -> 2.1 s). MTP acceptance held 62-68% throughout.
+
+**Concurrency, 32k prompts.** All-cold is the pathological case; shared-prefix is
+what agentic traffic actually looks like (the geo-agent slice hit 84.9% prefix hits).
+
+| N | TTFT median, cold / shared | decode per stream, cold / shared | aggregate tok/s, cold / shared |
+|---:|---:|---:|---:|
+| 1 | 19.2 s / 2.0 s | 26.6 / 26.2 | 8.9 / 21.8 |
+| 2 | 33.6 s / 3.5 s | 22.8 / 23.3 | 11.4 / 35.0 |
+| 4 | 60.5 s / 6.0 s | 17.3 / 18.2 | 13.6 / **50.7** |
+| 8 | 91.3 s / 13.5 s | 15.7 / 17.8 | 14.1 / 52.1 |
+
+- **Prefix reuse is worth 3.7x aggregate throughput and ~7x TTFT** at N=8. It is the
+  single largest lever available, and it is client-side: keep the system prompt and
+  tool definitions byte-identical at the front of every turn.
+- **All-cold concurrency is prefill-bound, not decode-bound.** Eight cold 32k prompts
+  is 256k tokens of prefill at ~1,600 tok/s ~= 160 s, which is essentially the 145 s
+  wall observed. Aggregate throughput gains only 58% for 8x the load.
+- **`--max-num-seqs 4` is the right cap.** 4 -> 8 buys 3% aggregate (50.7 -> 52.1)
+  while median TTFT doubles and worst case reaches 25.6 s. Four is the knee.
+
+Benchmarking notes, learned the hard way: run the load **detached inside the pod**
+(`nohup setsid`) -- a client killed by a tool timeout leaves its request generating
+server-side and corrupts later measurements. Do not use `ignore_eos` on this
+checkpoint. Do not derive decode from `vllm:inter_token_latency`: under MTP that is
+per *step*, and a step emits up to 3 tokens.
 
 ### Things that are easy to get wrong
 
