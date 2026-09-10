@@ -219,12 +219,19 @@ per *step*, and a step emits up to 3 tokens.
   ~11 GiB spare that would only thrash. The cost is a 2–3× slower first pass over a cold
   region of the table, which is most of the gap between our ~1,600 tok/s prefill and
   their ~2,400–2,900.
-- **The image is built on nimbus but lives in ghcr.** A hosted arm64 runner cannot
-  build it (~14 GB of runner disk against a ~30 GB extracted base image), so
-  `build-flashnext-nimbus.yaml` builds it on the node; it is then pushed to
-  `ghcr.io/boettiger-lab/vllm-qwen38-flash-dgx` and referenced **by digest**. Do not
-  leave it local with `imagePullPolicy: Never` — k3s image GC may reclaim an
-  unreferenced image, and the recovery is a ~40 minute rebuild.
+- **The image lives in ghcr and is referenced by digest.** Do not leave it local
+  with `imagePullPolicy: Never` — k3s image GC may reclaim an unreferenced image,
+  and the recovery is a ~40 minute rebuild.
+  `.github/workflows/vllm-flashnext-image.yml` builds it on `ubuntu-24.04-arm`.
+  A hosted arm64 runner handles this fine: measured 145 GB of disk with 109 GB
+  free before cleanup, against an 18.7 GiB extracted base. (An earlier note here
+  claimed ~14 GB and used that to justify building on the node — wrong by an
+  order of magnitude, from a search result rather than a measurement.)
+  `build-flashnext-nimbus.yaml` remains as the offline fallback.
+  The one real blocker is ghcr package permissions: the package was first created
+  by a PAT push, so it is not linked to this repo and `GITHUB_TOKEN` gets
+  `denied: permission_denied: write_package` until the `k8s` repository is granted
+  Write under the package's *Manage Actions access* settings.
 
 ## Operational notes worth keeping
 
