@@ -51,6 +51,27 @@ data:
             # created first, and nothing creates HOME for you.
             - name: HOME
               value: /tmp
+            # Cap thread/process fan-out. THIS IS NOT REDUNDANT WITH limits.cpu
+            # below: a CPU limit is a CFS quota, and `nproc` reads the affinity
+            # mask, which still reports all 128 of cirrus's cores inside the
+            # container. Without these, anything that sizes itself from nproc
+            # -- a pip sdist build, make -j$(nproc), OpenMP, the BLAS under
+            # numpy/scipy -- still forks 128 workers and allocates 128 workers'
+            # worth of RAM, just throttled to 4 cores of throughput. That is
+            # slower AND still hits the memory limit. The cgroup caps CPU time;
+            # only these cap concurrency.
+            - name: OMP_NUM_THREADS
+              value: "4"
+            - name: OPENBLAS_NUM_THREADS
+              value: "4"
+            - name: MKL_NUM_THREADS
+              value: "4"
+            - name: NUMEXPR_NUM_THREADS
+              value: "4"
+            - name: MAKEFLAGS
+              value: "-j4"
+            - name: CMAKE_BUILD_PARALLEL_LEVEL
+              value: "4"
           resources:
             requests:
               memory: 1Gi
@@ -59,6 +80,12 @@ data:
               # Caps a runaway student job. Two concurrent runners per set,
               # three sets, so the worst case stays well inside cirrus's RAM.
               memory: 8Gi
+              # No coursework needs more than a handful of cores, and an
+              # unbounded job on a 128-core box mostly converts cores into
+              # concurrent allocations -- which is how a single `pip install`
+              # of an unwheeled package reached the memory limit and was
+              # SIGKILLed (exit 137). Paired with the *_NUM_THREADS env above.
+              cpu: "4"
           securityContext:
             # 1001, NOT 0. The workspace (_work, mounted at /__w) is created by
             # the runner container, which runs as `runner` = uid 1001, so the job
