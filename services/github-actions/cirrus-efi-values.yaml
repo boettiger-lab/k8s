@@ -52,16 +52,15 @@ template:
     #   Access to the path '/home/runner/_work/_tool' is denied
     # JuiceFS volumes were permissive enough to hide this.
     #
-    # 1001, NOT 1000 as in the espm sets: this runner has no runAsUser, so it
-    # uses the actions-runner image default of uid 1001. fsGroup must match
-    # whoever creates _work. The job container here runs as root (see
-    # cirrus-efi-hook-template.yaml) and can write regardless.
+    # 1000, matching the runner's runAsUser below and the espm sets. fsGroup
+    # must match whoever creates _work; the job container here runs as root
+    # (see cirrus-efi-hook-template.yaml) and can write regardless.
     #
     # OnRootMismatch, not the default Always, which re-walks the entire volume
     # on every mount -- it matters more here, where _work is the largest in the
     # cluster.
     securityContext:
-      fsGroup: 1001
+      fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
     # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
     # but has unresolved disk health issues, and ARC's _work volumes are the
@@ -75,6 +74,17 @@ template:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        # Run as 1000, not the image's baked-in 1001, matching the espm sets.
+        # One uid across every scale set means one fsGroup, and no chance of the
+        # two drifting apart -- a mismatch fails every job at the first action
+        # with EACCES on /__w.
+        #
+        # Safe because /home/runner in the actions-runner image is mode 0777 and
+        # uid 1000 already exists there as "ubuntu", so run.sh can still write
+        # _work, _diag and .runner. Verified against the image.
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
         env:
           # Points the hooks at the merged job-pod spec (the ConfigMap).
           - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
