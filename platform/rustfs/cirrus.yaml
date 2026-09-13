@@ -95,11 +95,22 @@ spec:
               mountPath: /data
           resources:
             requests:
+              # Raised 1Gi -> 4Gi: the steady-state working set is ~3.4Gi, and a
+              # request below it invites eviction under node pressure.
               cpu: "500m"
-              memory: "1Gi"
+              memory: "4Gi"
             limits:
               cpu: "2000m"
-              memory: "4Gi"
+              # Raised 4Gi -> 8Gi after an OOM kill on 2026-09-13 (exit 137,
+              # 16:34:49Z, after 77 days up) during a 24-concurrent-mount burst.
+              # It returned to 3.4Gi/4Gi within 3h of restarting, so 4Gi was not
+              # merely a burst ceiling -- there was no steady-state headroom.
+              # RustFS is the object store under EVERY JuiceFS volume, including
+              # jupyter homes, and runs as a single replica: an OOM here stalls
+              # every mount, which is the documented trigger for FUSE clients
+              # going into uninterruptible D state (see cluster-ops
+              # thelio-host-maintenance.md, Fault 1).
+              memory: "8Gi"
       volumes:
         - name: data
           persistentVolumeClaim:

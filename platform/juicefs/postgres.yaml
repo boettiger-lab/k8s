@@ -89,7 +89,14 @@ spec:
               cpu: "250m"
               memory: "512Mi"
             limits:
-              cpu: "1000m"
+              # Raised 1000m -> 4000m on 2026-09-13. Observed pegged at 994m of
+              # its 1 CPU limit -- fully throttled -- while the log filled with
+              # `FATAL: sorry, too many clients already` and psql could not
+              # connect at all. The CPU cap, not memory, is what drives the
+              # connection pile-up: throttled queries are served slower, so
+              # clients accumulate against max_connections=200. Memory was only
+              # 706Mi of 3Gi throughout, so 3Gi stays.
+              cpu: "4000m"
               # 3Gi, raised alongside max_connections=200 above.
               memory: "3Gi"
       volumes:
