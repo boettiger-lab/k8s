@@ -62,7 +62,7 @@ single ~122 GiB pool. Two consequences worth internalising before deploying ther
 - `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
   concurrency cap. The vLLM deployment takes 6 and leaves 2 for small jobs.
 
-nimbus is also **arm64** and tainted `dedicated=nimbus:NoSchedule`, so its manifest uses
+nimbus is also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
 NGC's arm64 vLLM image and carries the toleration. See
 [Node placement]({{< relref "../infrastructure/node-placement" >}}).
 

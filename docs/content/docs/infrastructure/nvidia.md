@@ -100,7 +100,7 @@ Changing a node's mode restarts the plugin there and renames the product label
 (`NVIDIA-GeForce-RTX-2080` gains or loses a `-SHARED` suffix), so any pod pinning
 `nvidia.com/gpu.product` in a nodeSelector must be updated to match.
 
-nimbus additionally needs the `dedicated=nimbus:NoSchedule` toleration in the chart
+nimbus additionally needs the `dedicated=gb10:NoSchedule` toleration in the chart
 values, or the plugin will not run there and the node advertises no GPU at all.
 
 ### Applying changes

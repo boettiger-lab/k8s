@@ -54,7 +54,7 @@ gfd:
 # `tolerations:` key elsewhere in the file does not add to this one; YAML takes
 # the last and silently drops the first.
 #
-# nimbus is a worker tainted `dedicated=nimbus:NoSchedule` (see
+# nimbus is a worker tainted `dedicated=gb10:NoSchedule` (see
 # ../../cluster/nodes/nimbus/join/). thelio carries `hub.jupyter.org/dedicated=user:NoSchedule`
 # so it hosts jupyter user pods and nothing else. Without a matching toleration
 # the plugin never runs on that node, it advertises zero nvidia.com/gpu, and
@@ -84,6 +84,11 @@ tolerations:
   effect: NoSchedule
 - key: dedicated
   operator: Equal
+  value: gb10
+  effect: NoSchedule
+# TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
+- key: dedicated
+  operator: Equal
   value: nimbus
   effect: NoSchedule
 - key: hub.jupyter.org/dedicated
@@ -101,6 +106,11 @@ nfd:
     - key: nvidia.com/gpu
       operator: Exists
       effect: NoSchedule
+    - key: dedicated
+      operator: Equal
+      value: gb10
+      effect: NoSchedule
+    # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
     - key: dedicated
       operator: Equal
       value: nimbus

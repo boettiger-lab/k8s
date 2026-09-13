@@ -19,7 +19,7 @@ reasoning behind its taint are in
 |------|------|----------|
 | **cirrus** | control plane + data + GPU compute | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank`. **Never cordon it** — control plane, storage, and most services all live here. |
 | **thelio** | amd64 GPU worker | Ryzen 9 3900X, RTX 2080 8 GB. Tainted `hub.jupyter.org/dedicated=user:NoSchedule` — jupyter user pods only, with new homes on JuiceFS so a server can restart on cirrus if thelio is lost. Its GPU is one exclusive device, not time-sliced. |
-| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB **unified** memory. Tainted `dedicated=nimbus:NoSchedule` — only sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. |
+| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB **unified** memory. Tainted `dedicated=gb10:NoSchedule` — only sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. |
 
 The cluster is **mixed-architecture**: cirrus and thelio are amd64, nimbus is arm64, so
 an amd64-only image must never be allowed to schedule on nimbus — the taint is what

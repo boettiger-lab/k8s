@@ -12,7 +12,8 @@ The cluster has three nodes, and they are **not interchangeable**:
 |------|------|----------|-------|
 | **cirrus** | control plane + **primary data/compute node** | Threadripper 3990X, ECC RAM, 2× Quadro RTX 8000, NVMe, ZFS `tank` | none — always schedulable, **never cordon** |
 | **thelio** | jupyter user pods only | Ryzen 9 3900X, RTX 2080 8 GB | `hub.jupyter.org/dedicated=user:NoSchedule` |
-| **nimbus** | GPU worker, sanctioned workloads only | DGX Spark GB10, **arm64**, 121 GiB unified memory | `dedicated=nimbus:NoSchedule` |
+| **nimbus** | GPU worker, sanctioned workloads only | DGX Spark GB10, **arm64**, 121 GiB unified memory | `dedicated=gb10:NoSchedule` |
+| **nimbus2**, **nimbus3**, **nimbus4** *(planned)* | GPU workers, sanctioned workloads only | **Dell Pro Max GB10** — not DGX Sparks, same silicon — **arm64**, unified memory | `dedicated=gb10:NoSchedule` |
 
 Three constraints decide placement, and a pod must satisfy all of them:
 
@@ -97,10 +98,42 @@ upgrades and reboots.
 > delete-the-stale-job trick is the general remedy for a wedged k3s HelmChart
 > reconcile.
 
-### 4. nimbus is tainted, not cordoned
+### The GB10 taint is fleet-wide, not per-host
+
+`dedicated=gb10:NoSchedule` is carried by **every** GB10 node — nimbus today, nimbus2–4 as
+they join. It is deliberately not `dedicated=nimbus`, `dedicated=nimbus2`, and so on.
+
+**Why:** a per-host taint means editing every workload and every DaemonSet toleration once per
+node, and — the failure that actually bites — the k3s auto-upgrade plan **silently skips** any
+node whose taint it does not tolerate. That has already happened on both thelio and nimbus; the
+node is not reported as failed, it is simply passed over at the next channel bump.
+
+**Taint vs. nodeSelector — they answer different questions:**
+
+- The **taint** is about *exclusion*: keep general cluster load off GB10 hardware. That is a
+  property of the whole fleet, so the key is fleet-wide.
+- The **nodeSelector** is about *placement*: this particular pod must run on this particular
+  box. Workloads that genuinely pin to one machine (a single model endpoint, a host-path cache)
+  keep `kubernetes.io/hostname: <node>`. Anything happy on *any* GB10 node should select the
+  `node-class=gb10` label instead of naming a host.
+
+**Migration order matters** (a taint change is not disruptive by itself — `NoSchedule` does not
+evict running pods — but a pod that later restarts without a matching toleration will not be
+able to schedule):
+
+1. Deploy manifests that tolerate **both** `dedicated=gb10` and the legacy `dedicated=nimbus`.
+   Every affected manifest in this repo already does, each marked `TRANSITIONAL`.
+2. Retaint the node(s): add `dedicated=gb10:NoSchedule`, remove `dedicated=nimbus:NoSchedule`,
+   and label `node-class=gb10`.
+3. Drop the `TRANSITIONAL` tolerations in a follow-up change.
+
+New nodes register with the right taint and label directly, from
+`cluster/nodes/nimbus/k3s-agent-config.yaml` — steps 1–3 are only for migrating nimbus itself.
+
+### 4. the GB10 nodes are tainted, not cordoned
 
 nimbus is the one node that is deliberately *not* generally available. It
-registers with `node-taint: dedicated=nimbus:NoSchedule` set in
+registers with `node-taint: dedicated=gb10:NoSchedule` set in
 `/etc/rancher/k3s/config.yaml`, so it is never schedulable for general work —
 not even for the moment between joining and being configured.
 
@@ -134,7 +167,7 @@ nodeSelector:
 tolerations:
 - key: dedicated
   operator: Equal
-  value: nimbus
+  value: gb10
   effect: NoSchedule
 ```
 
@@ -181,16 +214,17 @@ Two things still hold now that it is schedulable again:
 - MinIO and Traefik stay on cirrus because they are pinned (items 2 & 3).
 - Do **not** cordon cirrus to move work onto thelio.
 
-### nimbus — sanctioned workloads only
+### GB10 nodes — sanctioned workloads only
 
-A workload meant for nimbus needs all three of an arm64 image,
-`nodeSelector: kubernetes.io/hostname: nimbus` (or the arch label), and:
+A workload meant for a GB10 node needs all three of an arm64 image, a placement rule
+(`nodeSelector: kubernetes.io/hostname: nimbus` to pin to one box, or `node-class: gb10`
+for any node in the fleet), and:
 
 ```yaml
 tolerations:
 - key: dedicated
   operator: Equal
-  value: nimbus
+  value: gb10
   effect: NoSchedule
 ```
 

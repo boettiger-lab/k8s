@@ -2,7 +2,7 @@
 # Install/upgrade the NVIDIA device plugin (+ node-feature-discovery subchart).
 #
 # nvidia-device-plugin-config.yaml carries the tolerations for BOTH tainted
-# nodes -- nimbus (dedicated=nimbus) and thelio (hub.jupyter.org/dedicated=user)
+# nodes -- the GB10 fleet (dedicated=gb10) and thelio (hub.jupyter.org/dedicated=user)
 # -- in a single list. Applying it against the wrong cluster, or with a stale
 # copy of that file, is how a GPU node stops advertising nvidia.com/gpu.
 set -euo pipefail
