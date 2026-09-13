@@ -17,9 +17,26 @@ alertmanager:
   persistence:
     storageClass: openebs-zfs
     size: 2Gi
+  # The Slack webhook URL is a CREDENTIAL and this repo is PUBLIC, so it is read
+  # from a Secret at runtime via slack_api_url_file -- it must never appear in
+  # this file. Create it out of band (documented in the private cluster-ops
+  # repo), with the URL as the single key `slack_api_url`:
+  #
+  #   kubectl create secret generic alertmanager-slack -n monitoring \
+  #     --from-literal=slack_api_url='https://hooks.slack.com/services/XXX/YYY/ZZZ'
+  #
+  # Rotating the webhook = recreate the Secret and restart the statefulset;
+  # no change to this file.
+  extraSecretMounts:
+    - name: slack-webhook
+      mountPath: /etc/alertmanager/secrets
+      secretName: alertmanager-slack
+      readOnly: true
   config:
     global:
       resolve_timeout: 5m
+      # Read from the mounted Secret, never from this file.
+      slack_api_url_file: /etc/alertmanager/secrets/slack_api_url
     route:
       group_by: ['alertname', 'node']
       group_wait: 30s
@@ -28,16 +45,18 @@ alertmanager:
       repeat_interval: 12h
       receiver: 'default'
     receivers:
-      # NO EXTERNAL DESTINATION YET. Alerts collect in the Alertmanager UI and
-      # nothing is emailed or posted. That is deliberate -- it makes alerting
-      # useful immediately without first deciding on email/Slack/ntfy, and
-      # without a misconfigured receiver silently swallowing everything.
-      #
-      # To wire a real destination later, replace this receiver, e.g.:
-      #   - name: 'default'
-      #     webhook_configs:
-      #       - url: 'https://ntfy.sh/<topic>'
       - name: 'default'
+        slack_configs:
+          - channel: '#cluster-alerts'
+            # Also post when a condition clears, so a firing alert that goes
+            # quiet is visibly resolved rather than just absent -- otherwise a
+            # node that comes back looks identical to an alert nobody noticed.
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ if .CommonLabels.node }} on {{ .CommonLabels.node }}{{ end }}'
+            text: >-
+              {{ range .Alerts }}{{ .Annotations.summary }}
+              {{ .Annotations.description }}
+              {{ end }}
 kube-state-metrics:
   enabled: false
 # node-exporter: ON, on the standard :9100. (Was briefly on :9101 to avoid the
