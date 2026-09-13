@@ -22,7 +22,7 @@ than fail cleanly.
 So nimbus registers with:
 
 ```
-node-taint: dedicated=nimbus:NoSchedule
+node-taint: dedicated=gb10:NoSchedule
 ```
 
 set in `/etc/rancher/k3s/config.yaml` **before the agent first starts**, so the
@@ -36,7 +36,7 @@ nodeSelector:
 tolerations:
 - key: dedicated
   operator: Equal
-  value: nimbus
+  value: gb10
   effect: NoSchedule
 ```
 

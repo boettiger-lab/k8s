@@ -34,7 +34,7 @@ echo " nimbus -> cirrus cluster join"
 echo "   control plane : $CIRRUS_URL"
 echo "   agent version : $CIRRUS_K3S_VERSION"
 echo "   node IP       : 128.32.85.239"
-echo "   taint         : dedicated=nimbus:NoSchedule (set at registration)"
+echo "   taint         : dedicated=gb10:NoSchedule (set at registration)"
 echo "=============================================================="
 echo
 

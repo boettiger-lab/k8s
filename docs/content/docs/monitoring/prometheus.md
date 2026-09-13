@@ -62,7 +62,7 @@ Chart `gpu-helm-charts/dcgm-exporter` 4.8.2, DaemonSet on every GPU node.
 
 **Tolerations are the whole trick.** The nodes are tainted differently — cirrus is the
 control plane, thelio is jupyter-only (`hub.jupyter.org/dedicated=user:NoSchedule`),
-nimbus is `dedicated=nimbus:NoSchedule` — and GPU telemetry is one of the few things we
+nimbus is `dedicated=gb10:NoSchedule` — and GPU telemetry is one of the few things we
 *do* want everywhere. This is **one YAML list**: a second `tolerations:` key does not
 append, it replaces. Miss one node and that node's GPU metrics silently never arrive;
 the dashboards still render and look fine.

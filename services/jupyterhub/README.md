@@ -145,7 +145,7 @@ oversubscription this default prevents.)
 ### Node placement
 
 Notebook pods land on **cirrus** or **thelio** (both amd64). **nimbus** is arm64 and
-carries `dedicated=nimbus:NoSchedule`, so nothing spawns there without an explicit
+carries `dedicated=gb10:NoSchedule`, so nothing spawns there without an explicit
 toleration — deliberate, since the profile images (`rocker/ml-verse` and friends)
 have no arm64 builds. If arm64 profiles are ever wanted, they need their own images,
 their own profile entries, and that toleration.

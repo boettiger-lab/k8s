@@ -99,7 +99,7 @@ spec:
 ---
 # nimbus (DGX Spark) --- one GB10, unified memory. Reached through Traefik on
 # cirrus and across flannel: k3s ServiceLB cannot hold an external IP here, because
-# svclb tolerates only control-plane/CriticalAddonsOnly taints, not `dedicated=nimbus`.
+# svclb tolerates only control-plane/CriticalAddonsOnly taints, not `dedicated=gb10`.
 # Negligible for token streaming.
 apiVersion: v1
 kind: Service

@@ -53,9 +53,14 @@ spec:
           operator: Equal
           value: user
           effect: NoSchedule
-        # nimbus is tainted dedicated=nimbus:NoSchedule for LLM inference. Without
+        # nimbus is tainted dedicated=gb10:NoSchedule for LLM inference. Without
         # this the DaemonSet quietly runs 2/3 nodes -- DESIRED just drops, nothing
         # errors, and nimbus's drive has no SMART history at all.
+        - key: dedicated
+          operator: Equal
+          value: gb10
+          effect: NoSchedule
+        # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
         - key: dedicated
           operator: Equal
           value: nimbus

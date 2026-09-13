@@ -28,7 +28,7 @@ spec:
       imagePullSecrets:
       - name: ngc-pull
       # nimbus is a worker in the cirrus cluster and is tainted
-      # `dedicated=nimbus:NoSchedule` at registration, so nothing lands here
+      # `dedicated=gb10:NoSchedule` at registration, so nothing lands here
       # unless it says so twice: the toleration gets it past the taint, and the
       # nodeSelector keeps it from drifting onto cirrus. Both are required --
       # a toleration alone does not *attract* a pod to the node, and this image
@@ -36,6 +36,11 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: nimbus
       tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
       - key: dedicated
         operator: Equal
         value: nimbus

@@ -27,6 +27,11 @@ spec:
       tolerations:
       - key: dedicated
         operator: Equal
+        value: gb10
+        effect: NoSchedule
+      # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
+      - key: dedicated
+        operator: Equal
         value: nimbus
         effect: NoSchedule
       runtimeClassName: nvidia

@@ -11,7 +11,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKUP="$REPO_ROOT/secrets/nimbus-join-backup"
-TAINT="dedicated=nimbus:NoSchedule"
+TAINT="dedicated=gb10:NoSchedule"
 
 say() { printf '\n==> %s\n' "$*"; }
 

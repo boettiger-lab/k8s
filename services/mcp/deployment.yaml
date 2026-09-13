@@ -27,13 +27,18 @@ spec:
         app: mcp-gpu-nimbus
     spec:
       runtimeClassName: nvidia
-      # nimbus is tainted `dedicated=nimbus:NoSchedule` as a worker in the
+      # nimbus is tainted `dedicated=gb10:NoSchedule` as a worker in the
       # cirrus cluster (see cluster/nodes/nimbus/join/). The toleration gets past the
       # taint; the nodeSelector is what actually pins it here. The image tag is
       # arm64-specific, so cirrus could not run it regardless.
       nodeSelector:
         kubernetes.io/hostname: nimbus
       tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
       - key: dedicated
         operator: Equal
         value: nimbus

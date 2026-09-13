@@ -9,7 +9,7 @@ Model Context Protocol servers exposed to agents and notebooks.
 ## nimbus
 
 Runs on the nimbus GB10 as one of its sanctioned workloads — it carries the
-`dedicated=nimbus` toleration and a `kubernetes.io/hostname: nimbus`
+`dedicated=gb10` toleration and a `kubernetes.io/hostname: nimbus`
 nodeSelector, and its image tag (`gpu-arm64`) is arm64-only. See
 [`../../cluster/nodes/nimbus/`](../../cluster/nodes/nimbus/) for why nimbus is tainted.
 

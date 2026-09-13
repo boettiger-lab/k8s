@@ -98,7 +98,7 @@ schedulable for workloads it cannot run:
 ```yaml
 # /etc/rancher/k3s/config.yaml on the agent
 node-taint:
-  - "dedicated=nimbus:NoSchedule"
+  - "dedicated=gb10:NoSchedule"
 ```
 
 Then install, pointing at the server and its token

@@ -23,7 +23,7 @@ podAnnotations:
 #
 # cirrus is the control plane. thelio is jupyter-only
 # (hub.jupyter.org/dedicated=user:NoSchedule) and hosts GPU notebook pods on its
-# RTX 2080. nimbus is a worker tainted `dedicated=nimbus:NoSchedule` (see
+# RTX 2080. nimbus is a worker tainted `dedicated=gb10:NoSchedule` (see
 # ../cluster/nodes/nimbus/join/); GPU telemetry is one of the few things we *do* want
 # there. Miss any one of them and that node's GPU utilisation never reaches
 # Prometheus -- the dashboard silently covers part of the fleet and looks fine.
@@ -39,6 +39,11 @@ tolerations:
     operator: Equal
     value: user
     effect: NoSchedule
+  - key: dedicated
+    operator: Equal
+    value: gb10
+    effect: NoSchedule
+  # TRANSITIONAL: drop once every GB10 node carries dedicated=gb10 (see cluster/nodes/nimbus/k3s-agent-config.yaml)
   - key: dedicated
     operator: Equal
     value: nimbus

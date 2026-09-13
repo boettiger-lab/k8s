@@ -34,17 +34,29 @@ server: https://128.32.85.8:6443     # cirrus.local -- the control plane
 # unroutable address and flannel silently blackholing cross-node traffic.
 node-ip: 128.32.85.239
 
-# Sanctioned tasks only. Anything that is meant to run here carries the matching
-# toleration *and* a `kubernetes.io/hostname: nimbus` nodeSelector:
+# Sanctioned tasks only. Anything meant to run here carries the matching
+# toleration; workloads that must live on one specific box *also* carry a
+# `kubernetes.io/hostname:` nodeSelector:
 #   services/vllm/qwen38-nimbus.yaml, services/mcp/deployment.yaml,
 #   platform/monitoring/dcgm-exporter-values.yaml, platform/nvidia/nvidia-device-plugin-config.yaml.
+#
+# The taint is FLEET-WIDE (`dedicated=gb10`), not per-host. nimbus2/3/4 are more
+# GB10 boxes managed identically, and a per-host `dedicated=nimbusN` would mean
+# editing every workload and every DaemonSet toleration once per node -- and the
+# k3s auto-upgrade plan SILENTLY SKIPS any node whose taint it does not tolerate
+# (already seen on both thelio and nimbus). Exclusion is a fleet property; use
+# the nodeSelector, not the taint, when placement must pin to one machine.
 #
 # Nothing storage-related tolerates this taint on purpose. All persistent
 # storage -- the `tank` zpool, OpenEBS ZFS-LocalPV, JuiceFS, RustFS -- lives on
 # cirrus. nimbus is compute only; its one stateful need is the read-only
 # hostPath HuggingFace cache at /home/cboettig/.cache/huggingface.
 node-taint:
-  - "dedicated=nimbus:NoSchedule"
+  - "dedicated=gb10:NoSchedule"
+
+# Fleet membership, for selecting "any GB10 node" without naming hosts.
+node-label:
+  - "node-class=gb10"
 
 kubelet-arg:
   # Reserve headroom for the OS and for k3s itself so the scheduler cannot
