@@ -42,7 +42,10 @@ alertmanager:
       group_wait: 30s
       group_interval: 5m
       # Long repeat: these are conditions someone must act on, not pages to ack.
-      repeat_interval: 12h
+      # 24h, not 12h: a known-bad box (thelio is expected to be down over a
+      # week) should be a once-a-day reminder, not twice. Anything needing
+      # faster attention than that needs a human watching, not a louder alert.
+      repeat_interval: 24h
       receiver: 'default'
     # A dead node makes every scrape against it fail, so ScrapeTargetMissing
     # fires alongside NodeDown for the same box -- two alerts, one cause, both
