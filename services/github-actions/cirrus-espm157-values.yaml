@@ -6,7 +6,20 @@ githubConfigUrl: "https://github.com/espm-157"
 # rotate, and no chance of a stale copy going unnoticed the next time the PAT
 # expires (which is what caused the 2026-07-19 outage).
 githubConfigSecret: github-runner-token
-maxRunners: 2
+# 4, not 2. Two concurrent runners meant a class-wide push -- 113 student
+# repos re-run at once -- drained at roughly 0.8 jobs/minute, well over an hour
+# of backlog during which a student's own push waited behind it. These jobs are
+# small (a few seconds of pytest each) and the job pod is capped at 4 CPU / 8Gi
+# in cirrus-espm-hook-template.yaml, so four concurrent costs at most 16 cores
+# and 32Gi of a 128-core, 256Gi node.
+#
+# Do NOT raise this much higher without checking JuiceFS CSI health first. Each
+# runner takes an ephemeral RWX _work PVC, and on 2026-09-13 a burst to 24 found
+# the CSI controller OOM-crashlooping (see platform/juicefs/csi-driver-values.yaml):
+# provisioning stopped, every runner pod went Pending, and jobs hung at
+# "Initialize containers" with no job pod ever created. Concurrency here is
+# bounded by volume provisioning, not by CPU or RAM.
+maxRunners: 4
 runnerGroup: "default"
 
 # containerMode: kubernetes — replaces the previous privileged docker:dind

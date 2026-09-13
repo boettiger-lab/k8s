@@ -2,7 +2,9 @@ githubConfigUrl: "https://github.com/espm-288"
 # Consolidated onto the single github-runner-token secret — see the note in
 # cirrus-espm157-values.yaml.
 githubConfigSecret: github-runner-token
-maxRunners: 2
+# 4, not 2 -- matches espm157; see the note there for why, and for the JuiceFS
+# provisioning limit that bounds how far this can safely go.
+maxRunners: 4
 runnerGroup: "default"
 
 # containerMode: kubernetes — replaces the previous privileged docker:dind
