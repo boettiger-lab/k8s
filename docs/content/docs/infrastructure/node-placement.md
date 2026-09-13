@@ -117,14 +117,45 @@ node is not reported as failed, it is simply passed over at the next channel bum
   keep `kubernetes.io/hostname: <node>`. Anything happy on *any* GB10 node should select the
   `node-class=gb10` label instead of naming a host.
 
+> ### ⚠️ Never swap a taint with two `kubectl taint` commands
+>
+> `kubectl taint node <n> key=value:Effect-` removes by **key and effect only — it ignores the
+> value.** So the obvious two-step swap:
+>
+> ```bash
+> kubectl taint node nimbus dedicated=gb10:NoSchedule      # add new
+> kubectl taint node nimbus dedicated=nimbus:NoSchedule-   # remove old  <-- REMOVES BOTH
+> ```
+>
+> deletes *every* `dedicated:NoSchedule` taint, including the one just added, and leaves the node
+> **completely untainted**. This happened on nimbus on 2026-09-13. Within seconds, DaemonSets that
+> carry no tolerations at all — `docker-api`, `continuous-image-puller`, `svclb-traefik`,
+> `zfs-localpv-node`, `juicefs-csi-node` — scheduled onto the GPU node for the first time. Because
+> `NoSchedule` does not evict, they then *stay* there after the taint is restored and must be
+> deleted by hand (they are not recreated once the taint is back).
+>
+> **Swap the whole taint list in one atomic write instead**, which never leaves an untainted
+> window:
+>
+> ```bash
+> kubectl patch node nimbus --type=merge \
+>   -p '{"spec":{"taints":[{"key":"dedicated","value":"gb10","effect":"NoSchedule"}]}}'
+> ```
+>
+> Include every taint the node should keep — this replaces the array wholesale. Verify with:
+> `kubectl get node nimbus -o jsonpath='{.spec.taints}'`
+>
+> If a node is ever left untainted by accident, check what landed before restoring the taint:
+> `kubectl get pods -A --field-selector spec.nodeName=<node>` — anything newer than the incident
+> does not belong there.
+
 **Migration order matters** (a taint change is not disruptive by itself — `NoSchedule` does not
 evict running pods — but a pod that later restarts without a matching toleration will not be
 able to schedule):
 
 1. Deploy manifests that tolerate **both** `dedicated=gb10` and the legacy `dedicated=nimbus`.
    Every affected manifest in this repo already does, each marked `TRANSITIONAL`.
-2. Retaint the node(s): add `dedicated=gb10:NoSchedule`, remove `dedicated=nimbus:NoSchedule`,
-   and label `node-class=gb10`.
+2. Retaint the node(s) **atomically** — see the warning below — and label `node-class=gb10`.
 3. Drop the `TRANSITIONAL` tolerations in a follow-up change.
 
 New nodes register with the right taint and label directly, from
