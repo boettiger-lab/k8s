@@ -47,7 +47,7 @@ alertmanager:
     receivers:
       - name: 'default'
         slack_configs:
-          - channel: '#cluster-alerts'
+          - channel: '#cirrus-cluster-alerts'
             # Also post when a condition clears, so a firing alert that goes
             # quiet is visibly resolved rather than just absent -- otherwise a
             # node that comes back looks identical to an alert nobody noticed.
