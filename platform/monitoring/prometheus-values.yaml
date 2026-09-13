@@ -42,8 +42,24 @@ alertmanager:
       group_wait: 30s
       group_interval: 5m
       # Long repeat: these are conditions someone must act on, not pages to ack.
-      repeat_interval: 12h
+      # 24h, not 12h: a known-bad box (thelio is expected to be down over a
+      # week) should be a once-a-day reminder, not twice. Anything needing
+      # faster attention than that needs a human watching, not a louder alert.
+      repeat_interval: 24h
       receiver: 'default'
+    # A dead node makes every scrape against it fail, so ScrapeTargetMissing
+    # fires alongside NodeDown for the same box -- two alerts, one cause, both
+    # repeating every 12h for as long as the node is down. Suppress the
+    # consequence while the cause is firing. thelio being down for a week would
+    # otherwise be ~28 messages, which is how a channel gets muted.
+    inhibit_rules:
+      - source_matchers:
+          - alertname = "NodeDown"
+        target_matchers:
+          - alertname = "ScrapeTargetMissing"
+        # Only inhibits on the SAME node -- a target failing on a healthy node
+        # is still real news and still alerts.
+        equal: ['node']
     receivers:
       - name: 'default'
         slack_configs:
