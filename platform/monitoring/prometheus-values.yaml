@@ -1,7 +1,43 @@
 # Prometheus metrics store for dcgm-exporter, vLLM /metrics, and smartctl-exporter.
-# Alertmanager, kube-state-metrics, Pushgateway stay off — not needed yet.
+#
+# Alertmanager is ON as of 2026-09-13. It was off ("not needed yet") until two
+# failures proved otherwise on the same day: the JuiceFS metadata database
+# refused connections at ~42/sec and was found by hand hours later, and the
+# JuiceFS CSI controller was found in CrashLoopBackOff with 480+ restarts over
+# SEVENTEEN DAYS, every one an OOMKill. Separately, thelio has died silently
+# four times and nothing ever reported it. See k8s issue #73.
+#
+# kube-state-metrics stays OFF for now: it is what most kube_* alert examples
+# need, but it adds real series volume and this Prometheus has had cardinality
+# trouble before (see the guards below). The rules in serverFiles are
+# deliberately built from metrics we ALREADY scrape, so alerting starts working
+# without that decision being forced.
 alertmanager:
-  enabled: false
+  enabled: true
+  persistence:
+    storageClass: openebs-zfs
+    size: 2Gi
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'node']
+      group_wait: 30s
+      group_interval: 5m
+      # Long repeat: these are conditions someone must act on, not pages to ack.
+      repeat_interval: 12h
+      receiver: 'default'
+    receivers:
+      # NO EXTERNAL DESTINATION YET. Alerts collect in the Alertmanager UI and
+      # nothing is emailed or posted. That is deliberate -- it makes alerting
+      # useful immediately without first deciding on email/Slack/ntfy, and
+      # without a misconfigured receiver silently swallowing everything.
+      #
+      # To wire a real destination later, replace this receiver, e.g.:
+      #   - name: 'default'
+      #     webhook_configs:
+      #       - url: 'https://ntfy.sh/<topic>'
+      - name: 'default'
 kube-state-metrics:
   enabled: false
 # node-exporter: ON, on the standard :9100. (Was briefly on :9101 to avoid the
@@ -74,8 +110,16 @@ scrapeConfigs:
         source_labels: [__meta_kubernetes_node_name]
         target_label: node
     metric_relabel_configs:
+      # spec_memory_limit_bytes and start_time_seconds added 2026-09-13 for the
+      # alert rules. THIS DOES NOT WEAKEN THE CARDINALITY GUARD: both are one
+      # series per container (not per cgroup), the `container=""` drop below
+      # still removes the node-level cgroups, and the id/name labeldrop still
+      # applies. Together they add on the order of a hundred series, against the
+      # ~2M this allowlist exists to prevent. They are what make
+      # ContainerRestartLoop and ContainerMemoryNearLimit possible without
+      # kube-state-metrics.
       - action: keep
-        regex: container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss|network_(receive|transmit)_bytes_total|fs_(reads|writes)_bytes_total)
+        regex: container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss|spec_memory_limit_bytes|start_time_seconds|network_(receive|transmit)_bytes_total|fs_(reads|writes)_bytes_total)
         source_labels: [__name__]
       # Node-level cgroups (systemd slices, kubepods roots) carry no container
       # label and are not worth a series each.
@@ -87,3 +131,84 @@ scrapeConfigs:
       # values — and both are redundant with namespace/pod/container.
       - action: labeldrop
         regex: (id|name)
+
+# ---------------------------------------------------------------------------
+# Alert rules — TIER 1: built only from metrics already scraped here, so this
+# needs no new exporters and no kube-state-metrics. See k8s issue #73 for the
+# tier-2 rules (Postgres connection saturation, Released-PV backlog) and the
+# exporters they require.
+# ---------------------------------------------------------------------------
+serverFiles:
+  alerting_rules.yml:
+    groups:
+      - name: nodes
+        rules:
+          # thelio has died silently FOUR times (2026-07-23, 09-11, 09-12, and
+          # the original disappearance). Nothing reported any of them, and its
+          # downtime is not contained: delvol Jobs pinned to a dead node strand
+          # forever and accumulate into a storage-layer outage.
+          - alert: NodeDown
+            expr: up{job="kubernetes-nodes"} == 0
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "Node {{ $labels.node }} has been unreachable for 10m"
+              description: "Prometheus cannot scrape {{ $labels.node }}. If it is also not answering ICMP, the box is wedged rather than the kubelet."
+
+      - name: workloads
+        rules:
+          # THE HIGHEST-VALUE RULE HERE. Generic, needs no knowledge of any
+          # particular service, and would have caught the 17-day JuiceFS CSI
+          # controller OOM loop on day one -- whose failures were misread as
+          # student CI bugs for weeks.
+          - alert: ContainerRestartLoop
+            expr: changes(container_start_time_seconds{container!=""}[1h]) > 5
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarting repeatedly"
+              description: "Container {{ $labels.container }} restarted more than 5 times in an hour, sustained for 30m. Check for OOMKill (exit 137) against its memory limit."
+
+          # rustfs was OOM-killed against a 4Gi limit after 77 days up, and was
+          # back at 84% of it within 3 hours. It is a single replica and the
+          # object store under every JuiceFS volume.
+          - alert: ContainerMemoryNearLimit
+            expr: |
+              container_memory_working_set_bytes{container!=""}
+                / on(namespace, pod, container) container_spec_memory_limit_bytes{container!=""} > 0.85
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.pod }} is near its memory limit"
+              description: "Container {{ $labels.container }} has held >85% of its memory limit for 15m. An OOMKill here restarts the pod with no warning."
+
+      - name: disks
+        rules:
+          # Alerts on GROWTH, not on a non-zero count: cirrus and thelio both
+          # carry long-standing flat pending-sector counts (sda 16, sdd 8, flat
+          # across 16k samples since 2025-07-23). A static count is a watch
+          # item; a rising one is a failing disk.
+          - alert: DiskPendingSectorsRising
+            expr: increase(smartctl_device_attribute{attribute_id="197",attribute_value_type="raw"}[24h]) > 0
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }} {{ $labels.device }}: pending sectors rising"
+              description: "Current_Pending_Sector increased in the last 24h. A flat count is normal wear; a rising one means the drive is failing."
+
+      - name: monitoring
+        rules:
+          # If a scrape target disappears the alerts above go quiet rather than
+          # firing -- absence of data must itself be visible. Several debugging
+          # queries during the 2026-09-13 incident returned empty and were
+          # nearly misread as evidence that the condition was absent.
+          - alert: ScrapeTargetMissing
+            # Excludes kubernetes-nodes: NodeDown already owns node-level
+            # failure, and without this a single dead node fires six alerts
+            # (one per job scraping it) for one root cause.
+            expr: up{job!="kubernetes-nodes"} == 0
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "Scrape target {{ $labels.job }} down for 30m"
+              description: "Alerts derived from this target are now silent, not passing."
