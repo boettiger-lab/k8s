@@ -27,16 +27,42 @@ runnerGroup: "default"
 containerMode:
   type: "kubernetes"
   kubernetesModeWorkVolumeClaim:
-    # MUST be RWX: the runner pod and each job pod both mount _work.
-    # juicefs-sc is the only RWX class here — openebs-zfs is node-local RWO.
-    accessModes: ["ReadWriteMany"]
-    storageClassName: "juicefs-sc"
+    # local-path, not juicefs-sc. See cirrus-espm288-values.yaml for the full
+    # reasoning and the negative results (openebs-zfs rejects the second mount,
+    # emptyDir is impossible because the job is a sibling pod).
+    #
+    # The requirement was never RWX -- it is "two pods on one node must both
+    # mount it", and both are pinned to cirrus below. local-path is a hostPath
+    # bind mount, so it satisfies that without a metadata service.
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: "local-path"
     resources:
       requests:
+        # NOMINAL: the local-path provisioner does not enforce this, and a job
+        # sees the whole root filesystem. Left at 100Gi rather than guessed
+        # downward -- the forecast jobs are the heaviest thing on this cluster
+        # and nobody has measured their peak _work usage. If this ever moves to
+        # a provisioner that DOES enforce quotas, measure before trusting it.
         storage: 100Gi
 
 template:
   spec:
+    # A fresh local volume is root:root 0755, so without this the runner cannot
+    # write it and every job dies at once with
+    #   Access to the path '/home/runner/_work/_tool' is denied
+    # JuiceFS volumes were permissive enough to hide this.
+    #
+    # 1001, NOT 1000 as in the espm sets: this runner has no runAsUser, so it
+    # uses the actions-runner image default of uid 1001. fsGroup must match
+    # whoever creates _work. The job container here runs as root (see
+    # cirrus-efi-hook-template.yaml) and can write regardless.
+    #
+    # OnRootMismatch, not the default Always, which re-walks the entire volume
+    # on every mount -- it matters more here, where _work is the largest in the
+    # cluster.
+    securityContext:
+      fsGroup: 1001
+      fsGroupChangePolicy: OnRootMismatch
     # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
     # but has unresolved disk health issues, and ARC's _work volumes are the
     # heaviest storage churn in the cluster -- a runner landing there is exactly
