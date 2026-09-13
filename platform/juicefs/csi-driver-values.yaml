@@ -55,3 +55,22 @@ controller:
       memory: 4Gi
     requests:
       memory: 1Gi
+
+  # The chart default is 100 provisioner worker threads. That is far too many
+  # for this cluster and is what turns a backlog into an outage.
+  #
+  # Each delvol Job mounts the filesystem and holds roughly 25 Postgres metadata
+  # connections. 100 workers therefore demands up to 2500 connections against a
+  # max_connections of 500 -- it cannot not saturate. On 2026-09-13 this logged
+  # ~42 "sorry, too many clients already" per SECOND and starved every other
+  # JuiceFS client; raising max_connections 200 -> 500 did not help, because no
+  # plausible ceiling absorbs 100 workers.
+  #
+  # 10 x 25 = ~250 connections, leaving ~250 for jupyter home mounts and
+  # anything else. Do not raise this above 12 without also raising
+  # max_connections: at 20 workers the cleanup storm alone can consume the
+  # entire budget and deny service to everything else.
+  #
+  # Cleanup is slower at 10 wide. That is the correct trade: cleanup of
+  # discarded CI scratch must never be able to deny metadata service to users.
+  provisionWorkerThreads: 10
