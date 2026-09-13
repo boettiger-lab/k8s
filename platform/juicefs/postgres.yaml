@@ -96,6 +96,23 @@ spec:
               # connection pile-up: throttled queries are served slower, so
               # clients accumulate against max_connections=200. Memory was only
               # 706Mi of 3Gi throughout, so 3Gi stays.
+              #
+              # THE HARDER CEILING, measured 2026-09-13: 201 connections across
+              # only 8 distinct client IPs -- roughly 25 metadata connections
+              # PER JuiceFS mount. So max_connections=200 supports about EIGHT
+              # concurrent mounts cluster-wide, counting delvol Jobs, ARC runner
+              # _work volumes and jupyter homes alike. That is the real limit on
+              # everything, and it is why 24 concurrent CI runners was
+              # catastrophic rather than merely slow. Raising CPU relieves the
+              # throttling but does not change the 25-per-mount arithmetic.
+              #
+              # Raising max_connections is therefore also warranted, but it is
+              # a startup argument (see args below), so it REQUIRES A RESTART --
+              # unlike these limits, which can be changed in place. Do it in a
+              # window with no active jupyter sessions. Budget memory with it:
+              # ~3.5Mi per connection observed, so 500 connections wants ~6Gi.
+              # The better long-term answer is a connection pooler (pgbouncer)
+              # in front of pg, so mounts stop holding 25 real backends each.
               cpu: "4000m"
               # 3Gi, raised alongside max_connections=200 above.
               memory: "3Gi"
