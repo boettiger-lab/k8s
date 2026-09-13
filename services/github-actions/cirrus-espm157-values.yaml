@@ -38,15 +38,37 @@ runnerGroup: "default"
 containerMode:
   type: "kubernetes"
   kubernetesModeWorkVolumeClaim:
-    # MUST be RWX — runner pod and job pod both mount _work.
-    accessModes: ["ReadWriteMany"]
-    storageClassName: "juicefs-sc"
+    # local-path, not juicefs-sc. See cirrus-espm288-values.yaml for the full
+    # reasoning and the negative results (openebs-zfs rejects the second mount,
+    # emptyDir is impossible because the job is a sibling pod).
+    #
+    # The requirement was never RWX -- it is "two pods on one node must both
+    # mount it", and both are pinned to cirrus below. local-path is a hostPath
+    # bind mount, so it satisfies that without a metadata service.
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: "local-path"
     resources:
       requests:
-        storage: 20Gi
+        # NOMINAL. The local-path provisioner does NOT enforce this -- a job
+        # sees the whole root filesystem (measured: 7.3T, 6.6T free, not a 20Gi
+        # slice). Kept small and honest so the manifest stops implying a quota
+        # that does not exist. The real bound is cirrus's root disk.
+        storage: 5Gi
 
 template:
   spec:
+    # A fresh local volume is root:root 0755 and the runner is uid 1000, so
+    # without this every job dies at once with
+    #   Access to the path '/home/runner/_work/_tool' is denied
+    # JuiceFS volumes were permissive enough to hide this. fsGroup makes the
+    # kubelet chown the volume to this gid and set g+rwxs, so both the runner
+    # and the job container can write it.
+    #
+    # OnRootMismatch, not the default Always, which re-walks the entire volume
+    # on every mount.
+    securityContext:
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
     # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
     # but has unresolved disk health issues, and ARC's _work volumes are the
     # heaviest storage churn in the cluster -- a runner landing there is exactly
