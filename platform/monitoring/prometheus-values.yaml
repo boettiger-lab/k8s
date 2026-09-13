@@ -173,9 +173,16 @@ serverFiles:
           # back at 84% of it within 3 hours. It is a single replica and the
           # object store under every JuiceFS volume.
           - alert: ContainerMemoryNearLimit
+            # The `> 0` on the denominator is load-bearing. A container with NO
+            # memory limit reports container_spec_memory_limit_bytes = 0, so the
+            # ratio is +Inf and trips any threshold. Without this guard the rule
+            # fired on 43 limitless containers on its first evaluation -- only 58
+            # containers in this cluster set a memory limit at all. Filtering to
+            # `> 0` makes the series absent rather than infinite, so those
+            # containers simply are not evaluated.
             expr: |
               container_memory_working_set_bytes{container!=""}
-                / on(namespace, pod, container) container_spec_memory_limit_bytes{container!=""} > 0.85
+                / on(namespace, pod, container) (container_spec_memory_limit_bytes{container!=""} > 0) > 0.85
             for: 15m
             labels: { severity: warning }
             annotations:
