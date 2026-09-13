@@ -38,6 +38,27 @@ template:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        # Run the runner as 1000, not the image's baked-in 1001.
+        #
+        # The runner container creates _work on the shared RWX volume, and the
+        # job pod mounts that same volume at /__w -- so whatever uid the runner
+        # uses dictates the uid every job must use. At the image default of
+        # 1001 that forced job pods to 1001 too, which is the WRONG user for
+        # rocker/ml: its /opt/venv and /home/jovyan both belong to 1000. The
+        # symptoms were a job that could not pip-install into its own
+        # interpreter (EACCES on /opt/venv/.../site-packages) and a HOME
+        # override to work around an unreadable /home/jovyan.
+        #
+        # Moving the runner to 1000 aligns both sides instead. Safe because
+        # /home/runner in the actions-runner image is mode 0777 and uid 1000
+        # already exists there as `ubuntu`, so run.sh can still write _work,
+        # _diag and .runner. Verified against the image before changing this.
+        #
+        # NOTE this pairs with runAsUser: 1000 in cirrus-espm-hook-template.yaml.
+        # The two MUST move together -- they are the two ends of one volume.
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
         env:
           - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
             value: /home/runner/pod-templates/default.yaml
