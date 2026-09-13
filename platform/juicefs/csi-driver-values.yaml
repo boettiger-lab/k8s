@@ -25,3 +25,33 @@ node:
       operator: Equal
       value: user
       effect: NoSchedule
+
+# WHY THIS BLOCK EXISTS: the chart ships controller.resources.limits.memory=1Gi,
+# and that is not enough for this cluster. On 2026-09-13 both controller
+# replicas were found in CrashLoopBackOff with 480+ restarts over 17 days, every
+# one of them OOMKilled (exit 137) against that 1Gi ceiling.
+#
+# The cause is a backlog the plugin re-enumerates on every start. ARC runners
+# use ephemeral _work PVCs, so a busy day leaves hundreds of Released PVs; each
+# one gets a "delvol" Job to remove its data. Those Jobs are pinned by
+# nodeAffinity to the node the volume lived on -- and when that node is down
+# (thelio, unreachable since 2026-09-12) they can never be scheduled. They pile
+# up, the plugin's working set grows with them, it OOMs, restarts, re-reads the
+# now-larger backlog, and OOMs again.
+#
+# While it is in that loop it provisions nothing: new PVCs sit Pending with
+# "waiting for the external provisioner". That is invisible at low volume
+# because provisioning still squeaks through between crashes -- it only became
+# obvious when a burst of 24 concurrent runners needed 24 volumes at once.
+#
+# Raising the ceiling does not fix the root cause (a dead node stranding delvol
+# Jobs) but it stops a recoverable backlog from becoming a crashloop. If this
+# OOMs again, look for stranded delvol Jobs before raising it further:
+#   kubectl get jobs -n kube-system | grep delvol
+controller:
+  resources:
+    limits:
+      # 4x the chart default.
+      memory: 4Gi
+    requests:
+      memory: 1Gi
