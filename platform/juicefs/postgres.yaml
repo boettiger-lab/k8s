@@ -65,7 +65,7 @@ spec:
           # The memory limit below is raised in step: Postgres reserves
           # per-connection memory, so lifting the ceiling without it just moves
           # the failure from connection exhaustion to an OOM kill.
-          args: ["-c", "max_connections=200"]
+          args: ["-c", "max_connections=500"]
           ports:
             - containerPort: 5432
               name: postgres
@@ -114,8 +114,11 @@ spec:
               # The better long-term answer is a connection pooler (pgbouncer)
               # in front of pg, so mounts stop holding 25 real backends each.
               cpu: "4000m"
-              # 3Gi, raised alongside max_connections=200 above.
-              memory: "3Gi"
+              # 6Gi, raised alongside max_connections=500 above. Sizing from
+              # measurement: ~3.5Mi per connection (775Mi at ~200 connections),
+              # so 500 connections wants ~1.75Gi of backends plus shared_buffers
+              # and base. 6Gi leaves real headroom; cirrus has 251Gi at 11% use.
+              memory: "6Gi"
       volumes:
         - name: data
           persistentVolumeClaim:
