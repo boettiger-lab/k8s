@@ -25,3 +25,52 @@ node:
       operator: Equal
       value: user
       effect: NoSchedule
+
+# WHY THIS BLOCK EXISTS: the chart ships controller.resources.limits.memory=1Gi,
+# and that is not enough for this cluster. On 2026-09-13 both controller
+# replicas were found in CrashLoopBackOff with 480+ restarts over 17 days, every
+# one of them OOMKilled (exit 137) against that 1Gi ceiling.
+#
+# The cause is a backlog the plugin re-enumerates on every start. ARC runners
+# use ephemeral _work PVCs, so a busy day leaves hundreds of Released PVs; each
+# one gets a "delvol" Job to remove its data. Those Jobs are pinned by
+# nodeAffinity to the node the volume lived on -- and when that node is down
+# (thelio, unreachable since 2026-09-12) they can never be scheduled. They pile
+# up, the plugin's working set grows with them, it OOMs, restarts, re-reads the
+# now-larger backlog, and OOMs again.
+#
+# While it is in that loop it provisions nothing: new PVCs sit Pending with
+# "waiting for the external provisioner". That is invisible at low volume
+# because provisioning still squeaks through between crashes -- it only became
+# obvious when a burst of 24 concurrent runners needed 24 volumes at once.
+#
+# Raising the ceiling does not fix the root cause (a dead node stranding delvol
+# Jobs) but it stops a recoverable backlog from becoming a crashloop. If this
+# OOMs again, look for stranded delvol Jobs before raising it further:
+#   kubectl get jobs -n kube-system | grep delvol
+controller:
+  resources:
+    limits:
+      # 4x the chart default.
+      memory: 4Gi
+    requests:
+      memory: 1Gi
+
+  # The chart default is 100 provisioner worker threads. That is far too many
+  # for this cluster and is what turns a backlog into an outage.
+  #
+  # Each delvol Job mounts the filesystem and holds roughly 25 Postgres metadata
+  # connections. 100 workers therefore demands up to 2500 connections against a
+  # max_connections of 500 -- it cannot not saturate. On 2026-09-13 this logged
+  # ~42 "sorry, too many clients already" per SECOND and starved every other
+  # JuiceFS client; raising max_connections 200 -> 500 did not help, because no
+  # plausible ceiling absorbs 100 workers.
+  #
+  # 10 x 25 = ~250 connections, leaving ~250 for jupyter home mounts and
+  # anything else. Do not raise this above 12 without also raising
+  # max_connections: at 20 workers the cleanup storm alone can consume the
+  # entire budget and deny service to everything else.
+  #
+  # Cleanup is slower at 10 wide. That is the correct trade: cleanup of
+  # discarded CI scratch must never be able to deny metadata service to users.
+  provisionWorkerThreads: 10
