@@ -19,15 +19,47 @@ runnerGroup: "default"
 containerMode:
   type: "kubernetes"
   kubernetesModeWorkVolumeClaim:
-    # MUST be RWX — runner pod and job pod both mount _work.
-    accessModes: ["ReadWriteMany"]
-    storageClassName: "juicefs-sc"
+    # RWO on node-local ZFS, NOT RWX on JuiceFS.
+    #
+    # RWX was never actually required. ReadWriteOnce means one NODE, not one
+    # pod -- several pods on the same node share an RWO volume fine -- and both
+    # the runner pod and the job pod are pinned to cirrus by the nodeSelector
+    # below, so they are always co-located. The chart's own example for
+    # containerMode kubernetes uses ReadWriteOnce with a local provisioner.
+    #
+    # WHY IT MATTERS: _work is per-runner and runners are single-use, so every
+    # CI job creates and destroys a volume. On juicefs-sc each one left a
+    # Released PV needing a JuiceFS delvol Job, and each such Job holds ~25
+    # Postgres metadata connections. A class-wide CI run generated hundreds,
+    # saturating max_connections and starving every other JuiceFS client.
+    # Scratch space for unpacking wheels has no business on a network
+    # filesystem with a shared metadata service behind it; a local ZFS dataset
+    # create/destroy is cheap and involves no metadata service at all.
+    #
+    # This also removes CI as JuiceFS's only significant workload.
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: "local-path"
     resources:
       requests:
         storage: 20Gi
 
 template:
   spec:
+    # The _work volume is a fresh ZFS dataset, created root:root 0755, so the
+    # runner (uid 1000) cannot write it and every job dies at once with
+    #   UnauthorizedAccessException: Access to the path
+    #   '/home/runner/_work/_tool' is denied
+    # JuiceFS volumes came out permissive enough that this never surfaced.
+    # fsGroup makes the kubelet chown the volume to gid 1000 and set g+rwxs, so
+    # both the runner and the job container (both uid/gid 1000) can write it.
+    #
+    # OnRootMismatch, not the default Always: the default re-walks the entire
+    # volume on every mount. Harmless on an empty 20Gi scratch dataset, but the
+    # default is how a large volume turns each mount into a multi-million-file
+    # chown, so make the cheap choice the habit.
+    securityContext:
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
     # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
     # but has unresolved disk health issues, and ARC's _work volumes are the
     # heaviest storage churn in the cluster -- a runner landing there is exactly
