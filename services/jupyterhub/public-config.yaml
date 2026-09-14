@@ -197,6 +197,23 @@ singleuser:
 
 hub:
   allowNamedServers: true
+  # Let Prometheus scrape /hub/metrics. The `hub` Service already carries
+  # prometheus.io/scrape=true (chart default), but the scrape has ALWAYS failed
+  # with "connection refused" -- the chart's NetworkPolicy admits only pods
+  # carrying hub.jupyter.org/network-access-hub=true, and that rule is a bare
+  # podSelector with no namespaceSelector, so it matches only pods INSIDE this
+  # namespace. Prometheus runs in `monitoring` and could never reach it. The
+  # annotation has been pointing at an endpoint it was structurally forbidden to
+  # read; the new ScrapeTargetMissing alert is what finally surfaced it.
+  networkPolicy:
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: monitoring
+        ports:
+          - port: http
+            protocol: TCP
   # Inject OAuth credentials and other secrets from K8s secret into environment
   # extraEnv uses dict format where key is env var name, value is valueFrom spec
   extraEnv:
@@ -283,6 +300,12 @@ hub:
         - read:org
       oauth_callback_url: https://jupyterhub.cirrus.carlboettiger.info/hub/oauth_callback
     JupyterHub:
+      # /hub/metrics requires an API token by default, which would turn the
+      # "connection refused" above into a 403 once the NetworkPolicy allows the
+      # scrape through. Unauthenticated here means unauthenticated to the
+      # monitoring namespace only: the Service is ClusterIP, and the
+      # NetworkPolicy above is the sole ingress path.
+      authenticate_prometheus: false
       authenticator_class: github
   services:
     binder:
