@@ -1,0 +1,152 @@
+# pgbouncer for the JuiceFS metadata database — DEPLOYED ALONGSIDE, NOT IN FRONT.
+#
+# WHY: each JuiceFS mount holds ~25 Postgres connections (measured 2026-09-13:
+# 201 connections across 8 client IPs). With max_connections=1000 that caps the
+# cluster at ~40 concurrent mounts. Each jupyter home is one mount, so that is
+# ~40 concurrent notebook users -- workable for now, tight for a large class.
+# Transaction pooling collapses the per-mount cost and takes the ceiling into
+# the hundreds.
+#
+# WHY NOT CUT OVER YET: transaction pooling breaks session-scoped state --
+# prepared statements, advisory locks, LISTEN/NOTIFY, temp tables. JuiceFS's
+# Postgres engine very likely uses prepared statements. A subtly broken metadata
+# engine CORRUPTS A FILESYSTEM rather than merely erroring, so this must be
+# proven before any real volume touches it.
+#
+# THE ARRANGEMENT: nothing uses this Service. JuiceFS keeps connecting directly
+# to juicefs-pg:5432 exactly as before. Only a throwaway TEST volume gets a
+# metaurl pointing at juicefs-pgbouncer:5432. If pgbouncer mangles something, it
+# mangles a disposable filesystem. Production metadata never passes through it
+# until the validation in docs/ is clean.
+#
+# VALIDATION GATE before cutting over -- all must pass:
+#   0. create the juicefs_test database FIRST -- never validate against dbname=juicefs
+#   1. mount / write / read / delete a test volume through the pooler
+#   2. several concurrent mounts against it
+#   3. restart pgbouncer mid-operation; metadata must stay consistent
+#   4. measure the ACTUAL connection collapse (25 -> 2 is worth it, 25 -> 15 is not)
+#   5. `juicefs fsck` clean on the test volume afterwards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: juicefs-pgbouncer-config
+  namespace: juicefs
+data:
+  pgbouncer.ini: |
+    [databases]
+    ; Same database name the direct metaurl uses, so only host:port changes.
+    juicefs = host=juicefs-pg port=5432 dbname=juicefs
+
+    ; DANGER, READ BEFORE VALIDATING: a JuiceFS volume's metadata IS the
+    ; database. One Postgres database holds exactly ONE filesystem. Pointing a
+    ; "test" volume at dbname=juicefs would have it format and write over the
+    ; PRODUCTION filesystem's metadata -- through an unproven pooler, which is
+    ; the precise accident this whole alongside-not-in-front arrangement exists
+    ; to prevent. The test volume MUST use this separate database:
+    ;     CREATE DATABASE juicefs_test OWNER juicefs;
+    juicefs_test = host=juicefs-pg port=5432 dbname=juicefs_test
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 5432
+    auth_type = scram-sha-256
+    auth_file = /etc/pgbouncer/userlist.txt
+
+    ; TRANSACTION pooling is the whole point -- session pooling would multiplex
+    ; almost nothing and leave the ~25-connections-per-mount cost intact.
+    pool_mode = transaction
+
+    ; Protocol-level prepared statements in transaction mode need pgbouncer
+    ; >= 1.21. This is the setting that decides whether JuiceFS works at all
+    ; through the pooler; if the validation fails, look here first.
+    max_prepared_statements = 200
+
+    ; Many clients, few server connections -- the entire benefit.
+    max_client_conn = 2000
+    default_pool_size = 25
+    min_pool_size = 5
+    reserve_pool_size = 5
+    reserve_pool_timeout = 3
+
+    server_idle_timeout = 600
+    ; Leave room under juicefs-pg's max_connections=1000 so a direct client can
+    ; always still connect -- the pooler must never monopolise the database.
+    max_db_connections = 200
+
+    ignore_startup_parameters = extra_float_digits,options
+    log_connections = 0
+    log_disconnections = 0
+    stats_period = 60
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juicefs-pgbouncer
+  namespace: juicefs
+  labels: { app: juicefs-pgbouncer }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: juicefs-pgbouncer }
+  template:
+    metadata:
+      labels: { app: juicefs-pgbouncer }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      initContainers:
+        # pgbouncer's auth_file cannot read env vars, so build userlist.txt from
+        # the same secret Postgres itself uses. Plaintext here is fine: pgbouncer
+        # authenticates clients with scram and re-authenticates to the server
+        # with scram; the file never leaves the pod's emptyDir.
+        - name: render-userlist
+          image: busybox:1.36
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              set -eu
+              printf '"juicefs" "%s"\n' "$POSTGRES_PASSWORD" > /shared/userlist.txt
+              # The image runs pgbouncer as uid 70 (postgres), but an initContainer
+              # writes as root -- so the file lands root:root and pgbouncer fails
+              # with "could not open auth_file: Permission denied". Same class of
+              # trap as a fresh volume arriving root:root 0755. Keep it 0600 and
+              # hand it to the uid that must read it.
+              chown 70:70 /shared/userlist.txt
+              chmod 0600 /shared/userlist.txt
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: juicefs-pg, key: password }
+          volumeMounts:
+            - { name: userlist, mountPath: /shared }
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:v1.23.1-p2
+          ports:
+            - { containerPort: 5432, name: pgbouncer }
+          volumeMounts:
+            - { name: config, mountPath: /etc/pgbouncer/pgbouncer.ini, subPath: pgbouncer.ini }
+            - { name: userlist, mountPath: /etc/pgbouncer/userlist.txt, subPath: userlist.txt }
+          resources:
+            requests: { cpu: "100m", memory: "64Mi" }
+            limits:   { cpu: "1",    memory: "512Mi" }
+          readinessProbe:
+            tcpSocket: { port: 5432 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap: { name: juicefs-pgbouncer-config }
+        - name: userlist
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: juicefs-pgbouncer
+  namespace: juicefs
+spec:
+  selector: { app: juicefs-pgbouncer }
+  ports:
+    - { port: 5432, targetPort: 5432, name: pgbouncer }
