@@ -61,6 +61,15 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001
+        # WITHOUT THIS, EVERY RESTART IS A MULTI-MINUTE OUTAGE. The default
+        # policy is Always, so kubelet recursively chowns the whole volume to
+        # fsGroup before the container starts. Measured 2026-09-13: a restart
+        # sat in ContainerCreating for ~20 minutes, logging
+        # "Setting volume ownership ... processed 2,493,444 files" -- on a 4Ti
+        # volume holding every JuiceFS object. OnRootMismatch chowns only when
+        # the volume ROOT has the wrong owner, which after the first pass it
+        # does not, so subsequent starts skip the walk entirely.
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: rustfs
           image: rustfs/rustfs:latest
