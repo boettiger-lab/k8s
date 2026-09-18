@@ -2,11 +2,14 @@
 # cluster as an AGENT. Generalised from ../nimbus/k3s-agent-config.yaml, which
 # remains the record for nimbus itself.
 #
-# __NODE_IP__ is substituted by join-gb10.sh from the address actually carried by
-# the campus interface. It is the ONLY field that differs between fleet members,
-# which is why this is one template rather than three near-identical files: three
-# copies of 60 lines of rationale drift, and the drift is invisible until a node
-# registers wrong.
+# The node-ip placeholder below is substituted by join-gb10.sh from the address
+# actually carried by the campus interface. (This sentence deliberately avoids
+# spelling the token, or the substitution would rewrite this comment too.)
+#
+# node-ip is the ONLY field that differs between fleet members, which is why this
+# is one template rather than three near-identical per-host files: three copies of
+# 60 lines of rationale drift, and the drift is invisible until a node registers
+# wrong.
 #
 # This is an AGENT config. Do not add `write-kubeconfig-mode` -- it is server-only
 # and `k3s agent` rejects unknown flags outright, so the agent would refuse to
