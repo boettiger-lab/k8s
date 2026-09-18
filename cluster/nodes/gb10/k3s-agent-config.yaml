@@ -1,0 +1,70 @@
+# /etc/rancher/k3s/config.yaml -- template for any GB10 node joining the cirrus
+# cluster as an AGENT. Generalised from ../nimbus/k3s-agent-config.yaml, which
+# remains the record for nimbus itself.
+#
+# __NODE_IP__ is substituted by join-gb10.sh from the address actually carried by
+# the campus interface. It is the ONLY field that differs between fleet members,
+# which is why this is one template rather than three near-identical files: three
+# copies of 60 lines of rationale drift, and the drift is invisible until a node
+# registers wrong.
+#
+# This is an AGENT config. Do not add `write-kubeconfig-mode` -- it is server-only
+# and `k3s agent` rejects unknown flags outright, so the agent would refuse to
+# start. An agent has no /etc/rancher/k3s/k3s.yaml to chmod anyway.
+#
+# Node *labels* beyond node-label below are deliberately NOT set here. k3s's
+# NodeRestriction admission only lets a kubelet self-assign labels from a small
+# allow-list, and `nvidia.com/device-plugin.config` is not on it. That label is
+# applied from the cirrus side by post-join-gb10.sh, same as cirrus and thelio.
+
+server: https://128.32.85.8:6443     # cirrus -- the control plane
+
+# Pin the node IP. Every GB10 has a docker0 and a wlP9s9 besides the campus NIC
+# (enP7s7 on both the DGX Spark and the Dell Pro Max); leaving this to
+# autodetection is how a node ends up registering an unroutable address and
+# flannel silently blackholing cross-node traffic.
+node-ip: __NODE_IP__
+
+# Sanctioned tasks only, and tainted at REGISTRATION -- not with a later
+# `kubectl taint`, which would leave a window in which cirrus's untainted
+# workloads could land here. On an arm64 node most of cirrus's amd64 images would
+# CrashLoopBackOff with an exec-format error rather than fail cleanly.
+#
+# The taint is FLEET-WIDE (`dedicated=gb10`), not per-host: exclusion is a
+# property of the whole fleet, and a per-host `dedicated=nimbusN` would mean
+# editing every workload and every DaemonSet toleration once per box. Placement
+# to one specific machine belongs in a `kubernetes.io/hostname` nodeSelector.
+#
+# The k3s auto-upgrade plan SILENTLY SKIPS any node whose taint it does not
+# tolerate -- already seen on thelio and nimbus. Check system-upgrade/agent-plan
+# tolerates `dedicated=gb10` before assuming a new node will ever be upgraded.
+#
+# Nothing storage-related tolerates this taint, on purpose. Per the fleet ruling
+# of 2026-09-13 the GB10s hold no cluster data: no JuiceFS, no RustFS, no
+# ZFS-LocalPV. Local NVMe and the unified memory pool are what these boxes bring.
+node-taint:
+  - "dedicated=gb10:NoSchedule"
+
+# Fleet membership, for selecting "any GB10 node" without naming hosts. Prefer
+# this over a hostname selector -- the fleet is a collective compute resource,
+# and every per-host pin is a place it stops behaving like a pool.
+node-label:
+  - "node-class=gb10"
+
+kubelet-arg:
+  # Reserve headroom for the OS and for k3s itself so the scheduler cannot
+  # commit the entire unified pool to pods.
+  - "system-reserved=cpu=1,memory=4Gi"
+  - "kube-reserved=cpu=1,memory=2Gi"
+  # Start evicting well before the driver has a chance to deadlock. The stock
+  # threshold is memory.available<100Mi, which on a 121 GiB unified-memory node
+  # means kubelet does nothing until the machine is already dead.
+  #
+  # NOTE: eviction is a backstop, not the primary control. Per
+  # ../../../services/vllm/dgx-spark-memory.md, cgroup limits do not constrain
+  # CUDA allocations on unified memory -- the real control is
+  # --kv-cache-memory-bytes in the vLLM manifest.
+  - "eviction-hard=memory.available<6Gi,nodefs.available<10%"
+  - "eviction-soft=memory.available<12Gi"
+  - "eviction-soft-grace-period=memory.available=90s"
+  - "eviction-max-pod-grace-period=30"
