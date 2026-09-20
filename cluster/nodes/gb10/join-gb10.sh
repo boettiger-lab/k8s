@@ -93,7 +93,34 @@ else
     echo "    no active ufw"
 fi
 
-# --- 7. the files we are about to install ------------------------------------
+# --- 7. the token must be plausible -----------------------------------------
+# Learned on nimbus3, 2026-09-20: a copy-paste that left the literal string
+# "<token>" in place sailed straight past the `${K3S_TOKEN:?}` guard above (which
+# only catches *empty*), the agent installed cleanly, and then k3s-agent --
+# Type=notify -- sat in `systemctl start` for twenty minutes while the agent
+# retried "not authorized" every few seconds. Nothing looked broken; the node
+# simply never appeared.
+echo "    token: ${#K3S_TOKEN} chars"
+case "$K3S_TOKEN" in
+    *"::server:"*) : ;;
+    *) echo "    FAIL: token has no '::server:'. Expected K10<hash>::server:<secret>." >&2
+       echo "          Got ${#K3S_TOKEN} chars -- a placeholder or a truncated paste?" >&2
+       echo "          On cirrus: sudo cat /var/lib/rancher/k3s/server/node-token" >&2
+       exit 1 ;;
+esac
+[ "${#K3S_TOKEN}" -ge 80 ] || {
+    echo "    FAIL: token is only ${#K3S_TOKEN} chars; a node-token is 100+." >&2
+    exit 1; }
+
+# A server-side check would be better -- a well-formed token from the wrong
+# cluster fails the same silent way -- but k3s's bootstrap endpoints use several
+# different credentials (node name + node password, not the token, for the
+# serving-kubelet.crt path), and a probe that returns 401 for a VALID token would
+# block every join. Not shipping a check whose passing case is unverified.
+# The shape checks above catch the failure actually seen; a wrong-cluster token
+# still shows up as "not authorized" in `journalctl -u k3s-agent`.
+
+# --- 8. the files we are about to install ------------------------------------
 for f in k3s-agent-config.yaml harden-gb10.sh gpu-hang-watchdog.sh 99-gb10-vm.conf; do
     [ -f "$HERE/$f" ] || { echo "    FAIL: $HERE/$f missing" >&2; exit 1; }
 done
