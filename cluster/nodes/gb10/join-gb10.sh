@@ -3,8 +3,8 @@
 #
 #   sudo -E CIRRUS_K3S_VERSION=vX.Y.Z+k3s1 K3S_TOKEN='<cirrus node-token>' ./join-gb10.sh
 #
-# Run ON the box being joined. Get the two required values on cirrus (which is
-# the workstation itself -- there is no ssh hop):
+# Run ON the box being joined. Get the two required values from the control-plane
+# host (cirrus):
 #   k3s --version | head -1
 #   sudo cat /var/lib/rancher/k3s/server/node-token
 #
