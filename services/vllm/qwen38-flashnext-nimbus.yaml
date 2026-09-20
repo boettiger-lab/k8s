@@ -176,7 +176,22 @@ spec:
             # two here: it repeatedly evicts the page cache the mmapped PLE
             # table reads through, so prefill degrades instead of failing
             # loudly. 8 GiB of KV gives back ~4 GiB and lands MemAvailable near
-            # ~11.7 GiB, clear of the floor.
+            # ~11.7 GiB at startup.
+            #
+            # THAT ~11.7 GiB IS A STARTUP FIGURE, NOT STEADY STATE. This model
+            # does not hold it and never has. MemAvailable drifts down as decode
+            # touches more of the mmapped 48 GiB PLE table -- MemAvailable
+            # discounts actively-mapped file pages -- and settles BELOW the 8 GiB
+            # floor. Measured on nimbus over the ten days to 2026-09-18:
+            # 5.27-10.35 GiB, mostly 5-7, while serving normally throughout.
+            #
+            # This is expected and is NOT a reason to lower the cap. Doing so
+            # costs ~70k tokens of KV and fixes nothing. The escalation signal is
+            # `direct_reclaim` in /proc/vmstat, not MemAvailable: since the
+            # 2026-09-09 fix the watchdog requires corroborating reclaim distress
+            # and logs "not escalating" while direct_reclaim stays at 0, which is
+            # exactly what it does here. See gpu-hang-watchdog.sh's header and
+            # cluster-ops nimbus-host-maintenance.md, 2026-09-18.
             #
             # 8 GiB still holds ~280k tokens. The "1.08x concurrency" vLLM
             # prints is the worst case for simultaneous *max-length* (262144)
@@ -239,8 +254,10 @@ spec:
         # At 0.82 -> 99.79 GiB budget -> ~13.6 GiB of KV, 1.8x the minimum for
         # full context. Node accounting for the rest:
         #   121.69 pool - 99.79 vLLM - ~9 host/k3s/pods = ~12.9 GiB left, which
-        # is the page cache the mmapped PLE table reads through, and is also the
-        # margin above the gpu-hang-watchdog's 8 GiB floor. Do not raise this
+        # is the page cache the mmapped PLE table reads through. Note this is
+        # startup accounting: in steady state MemAvailable sits below the 8 GiB
+        # floor as the PLE mapping grows (see the HARD KV CAP note above), so
+        # treat this as a budget check, not as a running margin. Do not raise this
         # much further: 0.86 leaves only ~8 GiB and lands on that floor, and
         # blazux reports 0.85 drifting into swap after a day on a *dedicated*
         # Spark with more slack than we have.
