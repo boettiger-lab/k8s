@@ -3,7 +3,8 @@
 #
 #   ./post-join-gb10.sh nimbus2
 #
-# Run on cirrus (which is the workstation itself). Idempotent.
+# Run from the control-plane host (cirrus), or anywhere with a kubeconfig for
+# this cluster. Idempotent.
 #
 # Much smaller than ../nimbus/join/03-post-join.sh, because that script also had
 # to restore secrets and recreate workloads destroyed by demoting a control
