@@ -22,8 +22,25 @@ spec:
         # 1 moves vllm-nimbus.carlboettiger.info with no ingress churn.
         vllm-endpoint: nimbus
     spec:
+      # Placement follows the WEIGHTS, not the box. The 126 GiB checkpoint is a
+      # hostPath (`type: Directory`, so a node without it fails to mount rather
+      # than downloading), and the GB10s may not mount cirrus-backed storage --
+      # no JuiceFS, no RustFS, no ZFS-LocalPV, per the 2026-09-13 fleet ruling.
+      # A shared cache is therefore ruled out by policy, and every box that
+      # serves this model holds its own local copy.
+      #
+      # Deliberately NOT `node-class: gb10`: that asserts "any GB10 works", which
+      # is false the moment a new box joins unstaged -- it would schedule there
+      # and fail to mount. This label is applied only to nodes actually carrying
+      # the checkpoint, so an unstaged node is never considered.
+      #
+      # Staged and labelled 2026-09-20 on nimbus, nimbus2, nimbus3, nimbus4 (all
+      # verified: rev 7b71922, 206 shards, 419 symlinks, 0 broken).
+      # To add a node: copy the repo dir, verify refs/main resolves, THEN
+      #   kubectl label node <n> vllm-cache/qwen38-flashnext=true
+      # Label after staging, never before.
       nodeSelector:
-        kubernetes.io/hostname: nimbus
+        vllm-cache/qwen38-flashnext: "true"
       tolerations:
       - key: dedicated
         operator: Equal
