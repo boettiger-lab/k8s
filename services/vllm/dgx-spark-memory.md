@@ -129,6 +129,46 @@ See `cluster/nodes/nimbus/README.md` for the incident and the node-level guards.
 
 ---
 
+## Which memory flag a model obeys is per model AND per build — measure it
+
+Two builds in this cluster behave oppositely, and neither is "the rule":
+
+| build / model | `--gpu-memory-utilization` |
+|---|---|
+| NGC 0.21 (recorded above) | **ignored** — the profiler took all free memory |
+| `vllm-qwen38-flash-dgx` (Flash-Next) | **honoured** — stayed inside its budget |
+
+So before trusting any memory flag on a newly introduced model, verify which one
+actually binds, from a real load:
+
+```
+kubectl logs <pod> | grep -iE "Model loading took|Available KV cache|Initial free memory|Replace gpu_memory"
+```
+
+vLLM announces it explicitly when an absolute cap wins, e.g.
+
+```
+reserved 8.0 GiB memory for KV Cache as specified by kv_cache_memory_bytes config
+and skipped memory profiling. This does not respect the gpu_memory_utilization config.
+```
+
+**Absolute caps (`--kv-cache-memory` / `--kv-cache-memory-bytes`) bypass the profiler
+and are the reliable control** where the build exposes them. A utilization fraction
+is a hint that some builds respect and others silently ignore — and on unified
+memory, "silently ignore" means it takes the pool the OS and every other pod live
+in. That is the 2026-08-24 wedge.
+
+Models can also introduce entirely separate consumers the flags do not cover:
+Flash-Next serves a 48 GiB PLE table by **mmap from NVMe**, which is host page cache
+rather than a CUDA allocation, so no `--gpu-memory-*` flag bounds it. Expect the
+next model to have its own such structure — DeepSeek-V4.1-Flash keeps 203 GiB of
+Engram n-gram tables in host memory, which is why it does not fit four GB10s despite
+its experts fitting comfortably.
+
+**Record what you measured** in the deployment manifest next to the flag, with the
+numbers it was derived from, so the next person can tell a derived value from a
+guess.
+
 ## Choosing `--gpu-memory-utilization`
 
 This flag tells vLLM to reserve `utilization × total_visible_GPU_memory` for weights + KV cache combined. On DGX Spark, `total_visible_GPU_memory` is the full unified pool (~121.69 GiB), not the cgroup limit.
