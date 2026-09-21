@@ -35,7 +35,7 @@ curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
 | Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml` |
 | Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~20–22 tok/s single stream |
 | Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
-| DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | Not yet a Deployment — see below |
+| DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. ~23 tok/s single stream with MTP |
 
 **Whisper** audio transcription is a separate, non-vLLM server on its own host
 (`whisper-cirrus.carlboettiger.info`, `whisper-cirrus.yaml`). It is not part of a
@@ -53,17 +53,26 @@ transport. Each model is a Deployment beside it carrying the pod label
 `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
 models is scaling one down and the next up: no new Ingress, DNS record or certificate.
 
-### Multi-node (TP2) is not yet a Deployment
+### Multi-node (TP2) endpoints
 
 DeepSeek-V4-Flash runs **tensor-parallel across nimbus2 and nimbus4** over the
-direct-attach ConnectX-7 fabric. It currently runs as hand-launched pods in the
-`default` namespace, not as a labelled Deployment behind an Ingress, so:
+direct-attach ConnectX-7 fabric, served at `https://vllm-nimbus2.carlboettiger.info`
+(the hostname names the node running the API server, as elsewhere).
 
-- it is **not** reachable at a `vllm-*.carlboettiger.info` hostname;
-- it is **not** counted by the carbon dashboard, which filters on namespace `vllm`.
+`deepseek-v4-flash-gb10pair.yaml` carries the Service, the Ingress and **two**
+Deployments. It is two rather than one with `replicas: 2` because TP ranks are not
+interchangeable: rank 0 runs the API server, rank 1 is `--headless`, and each needs a
+fixed `--node-rank` pinned to a fixed node. Only the head carries
+`vllm-endpoint: nimbus2`, so the Service never selects the worker.
 
-Promoting it means a Deployment pair in the `vllm` namespace plus an endpoint entry.
-Until then, treat it as an experiment you can bring up, not a service.
+The fabric must be up before either pod starts — NCCL *and* Gloo are pinned to
+`enp1s0f1np1` in the manifest. See the cluster-ops notes on the CX-7 fabric.
+
+Because this endpoint lives in the `vllm` namespace with the usual
+`prometheus.io/scrape` annotations, it is visible to the carbon dashboard — but note
+that dashboard currently assumes **one card per node**, and a TP2 model spans two.
+Its tokens are reported by one endpoint while its power is split across two nodes, so
+the per-token figure for this pair is not yet right.
 
 ### The nodes are not equivalent
 

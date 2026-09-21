@@ -1,0 +1,337 @@
+# DeepSeek-V4-Flash served tensor-parallel across nimbus2 + nimbus4.
+#
+# WHY THIS IS TWO DEPLOYMENTS AND NOT ONE WITH replicas: 2
+# TP ranks are not interchangeable: rank 0 runs the API server, rank 1 is
+# --headless, and each needs a fixed --node-rank and a fixed node. A Deployment
+# with two replicas would give two identical pods. LeaderWorkerSet is the
+# k8s-native answer but needs its controller installed; two Deployments need
+# nothing and are honest about the asymmetry.
+#
+# Only the HEAD carries `vllm-endpoint: nimbus2`, so the Service selects the
+# API server and never the worker.
+#
+# START ORDER: the worker tolerates the head being absent, but the head will
+# wait on the worker. Both are Deployments so ordering is eventual, not
+# guaranteed -- if the head crash-loops on startup, check the worker is up.
+#
+# MEMORY: see the GB10 notes in docs/services/vllm. `--kv-cache-memory` is the
+# binding control here and REPLACES the profiler; `--gpu-memory-utilization` is
+# still required for a startup free-memory assertion. Both values below were
+# measured on this pair, not chosen from first principles:
+#   free to CUDA at startup ~95-100 GiB of 121.63    (~18 GiB driver carveout)
+#   weights, TP2                        ~74.5 GiB/node
+#   KV at 6 GiB cap                      16,815 tokens, 2.05x at 8192 ctx
+# 0.80 (the upstream recipe's value) is REFUSED here -- it assumes a bare Spark.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-nimbus2-service
+  namespace: vllm
+  labels:
+    app: vllm-nimbus2
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '8000'
+    prometheus.io/path: /metrics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    vllm-endpoint: nimbus2
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-nimbus2-ingress
+  namespace: vllm
+  labels:
+    app: vllm-nimbus2
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: 'false'
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-nimbus2.carlboettiger.info
+    http:
+      paths:
+      - backend:
+          service:
+            name: vllm-nimbus2-service
+            port:
+              number: 8000
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - vllm-nimbus2.carlboettiger.info
+    secretName: vllm-nimbus2-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-v4-flash-head
+  namespace: vllm
+  labels:
+    app: deepseek-v4-flash-head
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: deepseek-v4-flash-head
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4-flash-head
+        vllm-endpoint: nimbus2
+    spec:
+      hostNetwork: true
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: nimbus2
+      tolerations:
+      - key: dedicated
+        value: gb10
+        effect: NoSchedule
+      hostAliases:
+      - ip: 192.168.200.12
+        hostnames:
+        - nimbus2
+      - ip: 192.168.200.13
+        hostnames:
+        - nimbus4
+      volumes:
+      - name: ib
+        hostPath:
+          path: /dev/infiniband
+      - name: hf
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+      - name: jit
+        hostPath:
+          path: /home/cboettig/.cache/dsv4
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 10Gi
+      containers:
+      - name: vllm
+        image: aidendle94/sparkrun-vllm-ds4-gb10:production-ready
+        command:
+        - dsv4-vllm-entrypoint
+        - serve
+        - deepseek-ai/DeepSeek-V4-Flash
+        args:
+        - --served-model-name
+        - deepseek-v4-flash
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8000'
+        - --trust-remote-code
+        - --tensor-parallel-size
+        - '2'
+        - --pipeline-parallel-size
+        - '1'
+        - --distributed-executor-backend
+        - mp
+        - --kv-cache-dtype
+        - fp8
+        - --block-size
+        - '256'
+        - --max-model-len
+        - '8192'
+        - --max-num-seqs
+        - '8'
+        - --max-num-batched-tokens
+        - '8192'
+        - --kv-cache-memory=6442450944
+        - --gpu-memory-utilization
+        - '0.76'
+        - --speculative-config
+        - '{"method":"mtp","num_speculative_tokens":1}'
+        - -cc.cudagraph_mode=PIECEWISE
+        - --enable-prefix-caching
+        - --tokenizer-mode
+        - deepseek_v4
+        - --nnodes
+        - '2'
+        - --node-rank
+        - '0'
+        - --master-addr
+        - 192.168.200.12
+        - --master-port
+        - '29501'
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+        env:
+        - name: NCCL_IB_HCA
+          value: rocep1s0f1,roceP2p1s0f1
+        - name: NCCL_SOCKET_IFNAME
+          value: enp1s0f1np1
+        - name: GLOO_SOCKET_IFNAME
+          value: enp1s0f1np1
+        - name: NCCL_IB_GID_INDEX
+          value: '3'
+        - name: VLLM_HOST_IP
+          value: 192.168.200.12
+        - name: HF_HOME
+          value: /hf
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        volumeMounts:
+        - name: ib
+          mountPath: /dev/infiniband
+        - name: hf
+          mountPath: /hf
+        - name: jit
+          mountPath: /cache
+        - name: shm
+          mountPath: /dev/shm
+        resources:
+          requests:
+            memory: 90Gi
+            cpu: 8
+          limits:
+            nvidia.com/gpu: 8
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-v4-flash-worker
+  namespace: vllm
+  labels:
+    app: deepseek-v4-flash-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: deepseek-v4-flash-worker
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4-flash-worker
+    spec:
+      hostNetwork: true
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: nimbus4
+      tolerations:
+      - key: dedicated
+        value: gb10
+        effect: NoSchedule
+      hostAliases:
+      - ip: 192.168.200.12
+        hostnames:
+        - nimbus2
+      - ip: 192.168.200.13
+        hostnames:
+        - nimbus4
+      volumes:
+      - name: ib
+        hostPath:
+          path: /dev/infiniband
+      - name: hf
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+      - name: jit
+        hostPath:
+          path: /home/cboettig/.cache/dsv4
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 10Gi
+      containers:
+      - name: vllm
+        image: aidendle94/sparkrun-vllm-ds4-gb10:production-ready
+        command:
+        - dsv4-vllm-entrypoint
+        - serve
+        - deepseek-ai/DeepSeek-V4-Flash
+        args:
+        - --served-model-name
+        - deepseek-v4-flash
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8000'
+        - --trust-remote-code
+        - --tensor-parallel-size
+        - '2'
+        - --pipeline-parallel-size
+        - '1'
+        - --distributed-executor-backend
+        - mp
+        - --kv-cache-dtype
+        - fp8
+        - --block-size
+        - '256'
+        - --max-model-len
+        - '8192'
+        - --max-num-seqs
+        - '8'
+        - --max-num-batched-tokens
+        - '8192'
+        - --kv-cache-memory=6442450944
+        - --gpu-memory-utilization
+        - '0.76'
+        - --speculative-config
+        - '{"method":"mtp","num_speculative_tokens":1}'
+        - -cc.cudagraph_mode=PIECEWISE
+        - --enable-prefix-caching
+        - --tokenizer-mode
+        - deepseek_v4
+        - --nnodes
+        - '2'
+        - --node-rank
+        - '1'
+        - --master-addr
+        - 192.168.200.12
+        - --master-port
+        - '29501'
+        - --headless
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+        env:
+        - name: NCCL_IB_HCA
+          value: rocep1s0f1,roceP2p1s0f1
+        - name: NCCL_SOCKET_IFNAME
+          value: enp1s0f1np1
+        - name: GLOO_SOCKET_IFNAME
+          value: enp1s0f1np1
+        - name: NCCL_IB_GID_INDEX
+          value: '3'
+        - name: VLLM_HOST_IP
+          value: 192.168.200.13
+        - name: HF_HOME
+          value: /hf
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        volumeMounts:
+        - name: ib
+          mountPath: /dev/infiniband
+        - name: hf
+          mountPath: /hf
+        - name: jit
+          mountPath: /cache
+        - name: shm
+          mountPath: /dev/shm
+        resources:
+          requests:
+            memory: 90Gi
+            cpu: 8
+          limits:
+            nvidia.com/gpu: 8
