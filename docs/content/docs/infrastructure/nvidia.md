@@ -31,20 +31,25 @@ pods can use a GPU at once.
 |------|--------|------|---------|--------|
 | `cirrus` | 2× Quadro RTX 8000 | 48 GB each | **time-slicing**, 8 replicas/GPU | 16 `nvidia.com/gpu` slices; no VRAM cap |
 | `nimbus` | 1× GB10 (DGX Spark) | 128 GB **unified** (shared with CPU) | **time-slicing**, 8 replicas | 8 slices of one GPU; a concurrency cap, not a memory split |
-| `thelio` | 1× GeForce RTX 2080 | 8 GB | **none** | 1 whole GPU per pod (8 GB is too small to slice) |
+| `nimbus2` | 1× GB10 (DGX Spark) | 128 GB **unified** | **time-slicing**, 8 replicas | as nimbus; QSFP-paired with nimbus4 |
+| `nimbus3` | 1× GB10 (DGX Spark) | 128 GB **unified** | **time-slicing**, 8 replicas | as nimbus |
+| `nimbus4` | 1× GB10 (DGX Spark) | 128 GB **unified** | **time-slicing**, 8 replicas | as nimbus; QSFP-paired with nimbus2 |
 
-The two time-sliced nodes are time-sliced for *different reasons*. On cirrus, slices let
-several pods share a 48 GB card. On nimbus there is no separate VRAM at all — CPU and GPU
-draw on one pool — so slicing cannot partition memory even in principle; the replica
-count is simply how many GPU pods the scheduler will place there. vLLM claims 6 of the 8
-and leaves 2 for small jobs.
+(`thelio`, an RTX 2080 node advertising one exclusive device, was **removed from the
+cluster 2026-09-18** after repeated unexplained lockups. Its entry is gone rather than
+marked down: it is not schedulable and manifests should not target it.)
 
-thelio is the counter-example: 8 GB split eight ways is ~1 GB a pod with no isolation, so
-it advertises **one exclusive device**. It inherited 8-way slicing by accident until
-2026-09-07, purely because the node carried no config label and fell through to
-`config.default`.
+The nodes are time-sliced for *different reasons*. On cirrus, slices let several pods
+share a 48 GB card. On the GB10s there is no separate VRAM at all — CPU and GPU draw on
+one pool — so slicing cannot partition memory even in principle; the replica count is
+simply how many GPU pods the scheduler will place there.
 
-No GPU here supports **MIG** (two Turing cards and a GB10; MIG needs A100/H100/A30-class
+**On a GB10, `nvidia.com/gpu` is not a memory budget.** A pod holding 8 slices can still
+be starved by another process on the node, and a pod holding 1 can exhaust the whole
+pool. Real memory control is vLLM's own flags plus a `MemAvailable` guard — see the
+[vLLM notes]({{< relref "../services/vllm" >}}).
+
+No GPU here supports **MIG** (Turing cards and GB10s; MIG needs A100/H100/A30-class
 hardware — `nvidia.com/mig.capable=false` on every node).
 
 ## GPU sharing: time-slicing vs MPS vs MIG
@@ -83,9 +88,10 @@ two entries — `timeslice` and `no-sharing` — and each node selects one via t
 `nvidia.com/device-plugin.config` label:
 
 ```bash
-kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
-kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
-kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
+kubectl label node cirrus  nvidia.com/device-plugin.config=timeslice --overwrite
+for n in nimbus nimbus2 nimbus3 nimbus4; do
+  kubectl label node "$n" nvidia.com/device-plugin.config=timeslice --overwrite
+done
 ```
 
 `config.default` is `timeslice`, so an **unlabelled** GPU node silently gets 8-way
@@ -125,7 +131,7 @@ spec:
     image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04
     resources:
       limits:
-        nvidia.com/gpu: 1   # one slice (full card VRAM on cirrus or thelio)
+        nvidia.com/gpu: 1   # one slice (a whole card's VRAM on cirrus)
 ```
 
 A large LLM can request several slices (e.g. `nvidia.com/gpu: 2`) — it still gets
@@ -145,7 +151,7 @@ kubectl get nodes -o custom-columns=\
 'NODE:.metadata.name,ALLOC:.status.allocatable.nvidia\.com/gpu,\
 STRATEGY:.metadata.labels.nvidia\.com/gpu\.sharing-strategy,\
 REPLICAS:.metadata.labels.nvidia\.com/gpu\.replicas'
-# cirrus -> 16 / time-slicing / 8 ;  nimbus -> 8 / time-slicing / 8 ;  thelio -> 1 / none
+# cirrus -> 16 / time-slicing / 8 ;  nimbus,nimbus2,nimbus3,nimbus4 -> 8 / time-slicing / 8
 
 # Plugin pods (expect all Running; no mps-control-daemon under time-slicing)
 kubectl get pods -n nvidia-device-plugin

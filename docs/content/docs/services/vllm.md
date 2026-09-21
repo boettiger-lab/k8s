@@ -17,52 +17,89 @@ Deploy vLLM for high-throughput LLM inference with GPU acceleration.
 - Optimized CUDA kernels
 - Support for popular models (Llama, Mistral, GPT, etc.)
 
-## Live deployments
+## Models we have running
 
-Each GPU node serves **one** LLM at a time, always at the same address. The URL names
-the machine, not the model — ask the endpoint which model is loaded rather than
-encoding it in a hostname:
-
-| Endpoint | Node | Model | Manifest |
-|---|---|---|---|
-| `https://vllm-cirrus.carlboettiger.info` | cirrus | Qwen3.8-27B (AWQ INT4, MTP), served as `qwen3-8` | `qwen3-8-cirrus.yaml` |
-| `https://vllm-nimbus.carlboettiger.info` | nimbus | Qwen3.8-27B (NVFP4), served as `qwen` / `qwen3.8` | `qwen3-8-nimbus.yaml` |
+**This is a catalogue of what we have working, not a fixed fleet.** What is actually
+up at any moment varies — models are scaled up and down as needed, and a node serves
+one model at a time. Ask the endpoint what it is serving rather than assuming:
 
 ```bash
 curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
   https://vllm-cirrus.carlboettiger.info/v1/models | jq '.data[].id'
 ```
 
-`services/vllm/endpoints.yaml` holds both endpoints — the Services, Ingresses, and the
-Traefik transport — and each model is a Deployment beside it. Every model Deployment
-carries the pod label `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service
-selects, so switching models is just scaling one down and the next up. No new Ingress,
-DNS record, or certificate is involved.
+### Working, with a manifest
 
-Also present: **Gemma 4** on cirrus (`gemma4-cirrus.yaml`, scaled to 0), and **Whisper**
-audio transcription — a separate, non-vLLM server on its own host
-`whisper-cirrus.carlboettiger.info` (`whisper-cirrus.yaml`), which is not part of the
-single-LLM slot and can run alongside it.
+| Model | Where it runs | Served as | Manifest / notes |
+|---|---|---|---|
+| Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml` |
+| Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~20–22 tok/s single stream |
+| Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
+| DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. ~23 tok/s single stream with MTP |
 
-All endpoints are OpenAI-compatible and **require an API key** (see
-[Authentication](#authentication)).
+**Whisper** audio transcription is a separate, non-vLLM server on its own host
+(`whisper-cirrus.carlboettiger.info`, `whisper-cirrus.yaml`). It is not part of a
+single-LLM slot and can run alongside one.
 
-### The two nodes are not equivalent
+### Endpoints are named for machines, not models
+
+| Endpoint | Node |
+|---|---|
+| `https://vllm-cirrus.carlboettiger.info` | cirrus |
+| `https://vllm-nimbus.carlboettiger.info` | nimbus |
+
+`services/vllm/endpoints.yaml` holds these — Services, Ingresses and the Traefik
+transport. Each model is a Deployment beside it carrying the pod label
+`vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
+models is scaling one down and the next up: no new Ingress, DNS record or certificate.
+
+### Multi-node (TP2) endpoints
+
+DeepSeek-V4-Flash runs **tensor-parallel across nimbus2 and nimbus4** over the
+direct-attach ConnectX-7 fabric, served at `https://vllm-nimbus2.carlboettiger.info`
+(the hostname names the node running the API server, as elsewhere).
+
+`deepseek-v4-flash-gb10pair.yaml` carries the Service, the Ingress and **two**
+Deployments. It is two rather than one with `replicas: 2` because TP ranks are not
+interchangeable: rank 0 runs the API server, rank 1 is `--headless`, and each needs a
+fixed `--node-rank` pinned to a fixed node. Only the head carries
+`vllm-endpoint: nimbus2`, so the Service never selects the worker.
+
+The fabric must be up before either pod starts — NCCL *and* Gloo are pinned to
+`enp1s0f1np1` in the manifest. See the cluster-ops notes on the CX-7 fabric.
+
+Because this endpoint lives in the `vllm` namespace with the usual
+`prometheus.io/scrape` annotations, it is visible to the carbon dashboard — but note
+that dashboard currently assumes **one card per node**, and a TP2 model spans two.
+Its tokens are reported by one endpoint while its power is split across two nodes, so
+the per-token figure for this pair is not yet right.
+
+### The nodes are not equivalent
 
 **cirrus** has two discrete Quadro RTX 8000s (48 GB each, Turing), time-sliced 8 ways —
 a slice is a co-tenancy slot, not a memory partition, and each pod sees a whole card.
 
-**nimbus** is a DGX Spark: one GB10 with **unified memory**, so CPU and GPU share a
-single ~122 GiB pool. Two consequences worth internalising before deploying there:
+**nimbus, nimbus2, nimbus3, nimbus4** are DGX Sparks: one GB10 each with **unified
+memory**, so CPU and GPU share a single ~122 GiB pool. Consequences worth internalising
+before deploying there:
 
 - A pod's `memory:` limit does **not** bound CUDA allocations — the cgroup controller
   cannot see them. It is scheduler accounting, and it must reflect real unified-memory
-  use or the scheduler will co-schedule something that OOMs the host. The real control
-  is `--gpu-memory-utilization`.
+  use or the scheduler will co-schedule something that OOMs the host.
+- **No memory flag is reliable across models.** Which of `--gpu-memory-utilization` and
+  `--kv-cache-memory` actually binds is a property of the *(model, build)* pair and must
+  be measured from a real load every time. When `--kv-cache-memory` is honoured it
+  *replaces* the memory profiler (vLLM says so on startup) — but it does **not** replace
+  `--gpu-memory-utilization`, which still governs a startup free-memory assertion. Set
+  both, and keep a `MemAvailable`-based guard: it is the only signal not fooled by
+  reclaimable page cache.
+- **~18 GiB of the ~122 GiB pool is unavailable before anything starts**, and it is not
+  Kubernetes — the whole k8s layer measures under 1 GiB RSS. It is driver carveout.
+  Budget from a measured `MemAvailable`, never from the nominal 128 GB.
 - `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
-  concurrency cap. The vLLM deployment takes 6 and leaves 2 for small jobs.
+  concurrency cap, not a memory partition.
 
-nimbus is also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
+The GB10s are also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
 NGC's arm64 vLLM image and carries the toleration. See
 [Node placement]({{< relref "../infrastructure/node-placement" >}}).
 

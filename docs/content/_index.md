@@ -11,13 +11,23 @@ lives in [boettiger-lab/k8s](https://github.com/boettiger-lab/k8s).
 
 ## The cluster
 
-**One cluster, three nodes.** cirrus is the control plane; thelio and nimbus are workers.
+**One cluster, five nodes.** cirrus is the control plane; four DGX Sparks are workers.
 
 | Node | Role | Hardware |
 |------|------|----------|
 | **cirrus** | control plane, storage, most services | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank` |
-| **thelio** | amd64 GPU worker | Ryzen 9 3900X, RTX 2080 8 GB, exposed as one exclusive GPU |
 | **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB unified memory; tainted for LLM inference only |
+| **nimbus2** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified; QSFP-paired with nimbus4 |
+| **nimbus3** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified |
+| **nimbus4** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified; QSFP-paired with nimbus2 |
+
+**thelio is not in the cluster.** It was removed 2026-09-18 after repeated unexplained
+lockups and has not been readmitted. Do not write manifests that target it.
+
+**nimbus2 and nimbus4 are cabled together** with direct-attach ConnectX-7 (200 GbE,
+~187 Gbps measured), which is what makes tensor-parallel serving across the pair
+possible. nimbus and nimbus3 are cabled to each other but that link is unconfigured —
+nimbus serves the production endpoint, so TP work there would disturb it.
 
 The nodes are not interchangeable — see
 [Node placement]({{< relref "docs/infrastructure/node-placement" >}}) before pinning a
@@ -27,7 +37,7 @@ workload to one.
 
 - [**JupyterHub**]({{< relref "docs/services/jupyterhub" >}}) — multi-user notebooks, CPU and GPU profiles
 - [**MinIO**]({{< relref "docs/services/minio" >}}) — S3-compatible object storage for research data
-- [**vLLM**]({{< relref "docs/services/vllm" >}}) — OpenAI-compatible LLM inference on both GPU nodes
+- [**vLLM**]({{< relref "docs/services/vllm" >}}) — OpenAI-compatible LLM inference on the GPU nodes
 - [**PostgreSQL**]({{< relref "docs/services/postgres" >}}) — relational database
 - [**GitHub Actions runners**]({{< relref "docs/services/github-actions" >}}) — self-hosted CI
 
