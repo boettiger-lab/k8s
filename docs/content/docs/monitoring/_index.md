@@ -24,7 +24,7 @@ reach it with a port-forward.
 
 ## What is collected
 
-- **GPU** — `dcgm-exporter` on every GPU node (cirrus, thelio, nimbus).
+- **GPU** — `dcgm-exporter` on every GPU node (cirrus, nimbus, nimbus2, nimbus3, nimbus4).
 - **Host** — `node-exporter` on every node: CPU, memory, load, filesystem, NIC.
 - **Drives** — `smartctl-exporter`, a privileged DaemonSet reading raw SMART data.
 - **vLLM** — each vLLM service exposes `/metrics`; Prometheus picks them up from

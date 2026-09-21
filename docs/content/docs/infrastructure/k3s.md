@@ -8,8 +8,9 @@ bookToc: true
 
 [K3s](https://docs.k3s.io/installation) is a lightweight, certified Kubernetes distribution designed for resource-constrained environments and edge computing. It's the best way to provide a self-hosted Kubernetes environment for a single node or small cluster.
 
-Our cluster is **one K3s cluster**: cirrus is the server (control plane), thelio and
-nimbus are agents. Node-level host config lives in
+Our cluster is **one K3s cluster**: cirrus is the server (control plane), and
+nimbus, nimbus2, nimbus3 and nimbus4 are agents. (thelio was an agent until it was
+removed from the cluster on 2026-09-18.) Node-level host config lives in
 [`cluster/nodes/`](https://github.com/boettiger-lab/k8s/tree/main/cluster/nodes).
 
 ## Overview
