@@ -17,37 +17,56 @@ Deploy vLLM for high-throughput LLM inference with GPU acceleration.
 - Optimized CUDA kernels
 - Support for popular models (Llama, Mistral, GPT, etc.)
 
-## Live deployments
+## Models we have running
 
-Each GPU node serves **one** LLM at a time, always at the same address. The URL names
-the machine, not the model — ask the endpoint which model is loaded rather than
-encoding it in a hostname:
-
-| Endpoint | Node | Model | Manifest |
-|---|---|---|---|
-| `https://vllm-cirrus.carlboettiger.info` | cirrus | Qwen3.8-27B (AWQ INT4, MTP), served as `qwen3-8` | `qwen3-8-cirrus.yaml` |
-| `https://vllm-nimbus.carlboettiger.info` | nimbus | Qwen3.8-27B (NVFP4), served as `qwen` / `qwen3.8` | `qwen3-8-nimbus.yaml` |
+**This is a catalogue of what we have working, not a fixed fleet.** What is actually
+up at any moment varies — models are scaled up and down as needed, and a node serves
+one model at a time. Ask the endpoint what it is serving rather than assuming:
 
 ```bash
 curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
   https://vllm-cirrus.carlboettiger.info/v1/models | jq '.data[].id'
 ```
 
-`services/vllm/endpoints.yaml` holds both endpoints — the Services, Ingresses, and the
-Traefik transport — and each model is a Deployment beside it. Every model Deployment
-carries the pod label `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service
-selects, so switching models is just scaling one down and the next up. No new Ingress,
-DNS record, or certificate is involved.
+### Working, with a manifest
 
-Also present: **Gemma 4** on cirrus (`gemma4-cirrus.yaml`, scaled to 0), and **Whisper**
-audio transcription — a separate, non-vLLM server on its own host
-`whisper-cirrus.carlboettiger.info` (`whisper-cirrus.yaml`), which is not part of the
-single-LLM slot and can run alongside it.
+| Model | Where it runs | Served as | Manifest / notes |
+|---|---|---|---|
+| Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml` |
+| Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~20–22 tok/s single stream |
+| Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
+| DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | Not yet a Deployment — see below |
 
-All endpoints are OpenAI-compatible and **require an API key** (see
-[Authentication](#authentication)).
+**Whisper** audio transcription is a separate, non-vLLM server on its own host
+(`whisper-cirrus.carlboettiger.info`, `whisper-cirrus.yaml`). It is not part of a
+single-LLM slot and can run alongside one.
+
+### Endpoints are named for machines, not models
+
+| Endpoint | Node |
+|---|---|
+| `https://vllm-cirrus.carlboettiger.info` | cirrus |
+| `https://vllm-nimbus.carlboettiger.info` | nimbus |
+
+`services/vllm/endpoints.yaml` holds these — Services, Ingresses and the Traefik
+transport. Each model is a Deployment beside it carrying the pod label
+`vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
+models is scaling one down and the next up: no new Ingress, DNS record or certificate.
+
+### Multi-node (TP2) is not yet a Deployment
+
+DeepSeek-V4-Flash runs **tensor-parallel across nimbus2 and nimbus4** over the
+direct-attach ConnectX-7 fabric. It currently runs as hand-launched pods in the
+`default` namespace, not as a labelled Deployment behind an Ingress, so:
+
+- it is **not** reachable at a `vllm-*.carlboettiger.info` hostname;
+- it is **not** counted by the carbon dashboard, which filters on namespace `vllm`.
+
+Promoting it means a Deployment pair in the `vllm` namespace plus an endpoint entry.
+Until then, treat it as an experiment you can bring up, not a service.
 
 ### The two nodes are not equivalent
+
 
 **cirrus** has two discrete Quadro RTX 8000s (48 GB each, Turing), time-sliced 8 ways —
 a slice is a co-tenancy slot, not a memory partition, and each pod sees a whole card.
