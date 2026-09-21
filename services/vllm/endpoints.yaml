@@ -7,6 +7,12 @@
 #   https://vllm-cirrus.carlboettiger.info   -> whatever is scaled up on cirrus
 #   https://vllm-nimbus.carlboettiger.info   -> whatever is scaled up on nimbus
 #
+# NOTE: as of 2026-09-21 nothing is scaled up on cirrus -- the node was given over to
+# speech-to-text (stt-cirrus.yaml) because Turing cards are no longer competitive with
+# the GB10s for LLM inference. The cirrus Service and Ingress below are deliberately
+# kept with no backend: they return 503, and scaling qwen3-8 back to 1 restores the
+# endpoint without a new DNS record or certificate.
+#
 # The model identifies itself via --served-model-name / GET /v1/models; it never
 # appears in the URL. Switching models therefore needs no new Ingress, DNS record or
 # certificate: every model Deployment carries the pod label `vllm-endpoint: <node>`,
@@ -14,8 +20,9 @@
 # one to 1, and the endpoint follows. (Two models on one node would split traffic; GPU
 # memory tends to enforce one-at-a-time anyway.)
 #
-# Whisper is not part of this: it is always-on with its own Service and Ingress in
-# whisper-cirrus.yaml.
+# Speech-to-text is not part of this: it has its own Service and Ingress in
+# stt-cirrus.yaml, and serves several models from one always-on Deployment rather than
+# one model per endpoint.
 #
 # The ServersTransport is defined ONCE below and referenced by both Ingresses as
 # `vllm-vllm-long-timeout@kubernetescrd`. Two copies would be a silent drift hazard the

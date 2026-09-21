@@ -1,0 +1,205 @@
+# Speech-to-text on cirrus --- https://whisper-cirrus.carlboettiger.info
+#
+# cirrus's two Quadro RTX 8000s are Turing (cc 7.5) and no longer competitive with
+# the GB10s for LLM inference, so the node was given over to ASR on 2026-09-21:
+# qwen3-8-cirrus.yaml is scaled to 0 and this is what cirrus runs.
+#
+# ONE server, SEVERAL models. speaches loads a model on first use and unloads it
+# after STT_MODEL_TTL seconds idle, so the model is chosen per request rather than
+# per deployment -- the opposite of the vLLM endpoints next door, and the reason
+# there is no "current model" here to scale between:
+#
+#   curl .../v1/audio/transcriptions -F file=@a.wav -F model=<id>
+#
+#   istupakov/parakeet-tdt-0.6b-v3-onnx   default. Best measured English WER, ~2x
+#                                         faster than whisper, 25 European langs.
+#                                         Hard limit ~6 min of speech (see below).
+#   Systran/faster-whisper-large-v3       99 langs, unlimited length, translation,
+#                                         timestamps/SRT/VTT, streaming. Use this
+#                                         for long recordings and non-English.
+#   istupakov/parakeet-tdt-0.6b-v2-onnx   English-only; the best English WER of the
+#                                         three. Not pre-fetched; downloads on use.
+#
+# Measured on this node 2026-09-21 -- 150 LibriSpeech test-other utterances, WER %:
+#
+#   parakeet-tdt-0.6b-v2   2.89      parakeet-tdt-0.6b-v3   3.17
+#   faster-whisper-large-v3 4.14     faster-whisper-large-v3-turbo 4.74
+#
+# ...but on 20 short de/es/fr/it/nl sentences whisper-large-v3 won, 3.8 % against
+# parakeet-v3's 8.7 %. Small sample, so treat it as a direction and not a number:
+# parakeet's multilingual training is 25 languages against whisper's 99, and the
+# clips are single sentences with no context. Do not assume parakeet wins outside
+# English.
+#
+# Long-form throughput on 12.7 min of concatenated LibriSpeech (real-time factor):
+# parakeet ~85x, whisper-large-v3-turbo ~75x, whisper-large-v3 ~45x.
+#
+# THE PARAKEET LENGTH CEILING IS A HARD 500, NOT A DEGRADATION. The ONNX export
+# bakes a 4558-frame cap into the encoder's relative-position attention; at 80 ms
+# per frame that is ~365 s of *speech* (silence is trimmed by Silero VAD first, so
+# wall-clock duration is not the limit -- a 400 s clip passed, 480 s did not). Over
+# it the request fails with
+#   right operand cannot broadcast on dim 3 LeftShape: {1,8,9558,9558} ...
+# Nothing chunks around this: speaches computes VAD speech segments but the parakeet
+# executor does not yet consume them (`TODO: Use request.speech_segments`). Send long
+# recordings to whisper, or split them client-side.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stt
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-stt
+spec:
+  replicas: 1
+  # GPU deployments must use Recreate: a rolling update would deadlock waiting for
+  # GPU capacity the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-cirrus-stt
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-cirrus-stt
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      # speaches' own model-download endpoint is broken for the onnx-asr models:
+      # it derives allow_patterns from the model's file list and drops the ONNX
+      # external-data sidecar, so a "downloaded" parakeet is 110 MB of graph with
+      # no weights and fails at load (speaches-ai/speaches#657, PR #670 unmerged).
+      # Fetch the snapshot ourselves instead. Also warms the whisper fallback, so a
+      # fresh pod is not a 3 GB download away from serving. Idempotent: with the
+      # hostPath cache populated this is a few seconds of hash checks.
+      initContainers:
+      - name: fetch-models
+        image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda-12.6.3
+        command:
+        - python
+        - -c
+        - |
+          import huggingface_hub as hf
+          hf.snapshot_download(
+              "istupakov/parakeet-tdt-0.6b-v3-onnx",
+              allow_patterns=["*.onnx", "*.onnx.data", "vocab.txt", "config.json", "README.md"],
+              ignore_patterns=["*.int8.*"],  # int8 is a separate 652 MB encoder we do not serve
+          )
+          hf.snapshot_download("Systran/faster-whisper-large-v3")
+          print("models present")
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /home/ubuntu/.cache/huggingface
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+      containers:
+      # Pinned, NOT `latest-cuda`: that tag still points at 0.8.3, which predates the
+      # onnx-asr executor and so cannot serve parakeet at all. The 0.9.0 line is only
+      # published as release candidates -- rc.3 is the newest image that exists.
+      - name: speaches
+        image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda-12.6.3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        # The 0.8-era WHISPER__MODEL / WHISPER__MODELS_DIR variables that used to be
+        # set here were never real config fields -- pydantic-settings ignored them.
+        # The model is a per-request argument; there is nothing to pin server-side.
+        - name: STT_MODEL_TTL
+          value: "3600"
+        # Drops the Gradio dependency tree; everything here is API traffic.
+        - name: ENABLE_UI
+          value: "false"
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /home/ubuntu/.cache/huggingface
+        # /health needs no auth. Models load lazily, so the server is ready in
+        # seconds -- unlike the vLLM deployments, this needs no long grace period.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12
+        resources:
+          requests:
+            cpu: 4
+            memory: 8Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 8
+            memory: 16Gi
+            nvidia.com/gpu: 1
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: DirectoryOrCreate
+---
+# Service and Ingress keep their original names and host. `whisper-cirrus` is now a
+# historical name -- the endpoint serves parakeet too -- but renaming the host would
+# cost a DNS record and a fresh Let's Encrypt issuance for cosmetics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-whisper-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-cirrus-stt
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    k8s-app: vllm-cirrus-stt
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-whisper-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-cirrus-stt
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: whisper-cirrus.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-whisper-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - whisper-cirrus.carlboettiger.info
+    secretName: vllm-whisper-tls
