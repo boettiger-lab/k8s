@@ -65,23 +65,32 @@ direct-attach ConnectX-7 fabric. It currently runs as hand-launched pods in the
 Promoting it means a Deployment pair in the `vllm` namespace plus an endpoint entry.
 Until then, treat it as an experiment you can bring up, not a service.
 
-### The two nodes are not equivalent
-
+### The nodes are not equivalent
 
 **cirrus** has two discrete Quadro RTX 8000s (48 GB each, Turing), time-sliced 8 ways —
 a slice is a co-tenancy slot, not a memory partition, and each pod sees a whole card.
 
-**nimbus** is a DGX Spark: one GB10 with **unified memory**, so CPU and GPU share a
-single ~122 GiB pool. Two consequences worth internalising before deploying there:
+**nimbus, nimbus2, nimbus3, nimbus4** are DGX Sparks: one GB10 each with **unified
+memory**, so CPU and GPU share a single ~122 GiB pool. Consequences worth internalising
+before deploying there:
 
 - A pod's `memory:` limit does **not** bound CUDA allocations — the cgroup controller
   cannot see them. It is scheduler accounting, and it must reflect real unified-memory
-  use or the scheduler will co-schedule something that OOMs the host. The real control
-  is `--gpu-memory-utilization`.
+  use or the scheduler will co-schedule something that OOMs the host.
+- **No memory flag is reliable across models.** Which of `--gpu-memory-utilization` and
+  `--kv-cache-memory` actually binds is a property of the *(model, build)* pair and must
+  be measured from a real load every time. When `--kv-cache-memory` is honoured it
+  *replaces* the memory profiler (vLLM says so on startup) — but it does **not** replace
+  `--gpu-memory-utilization`, which still governs a startup free-memory assertion. Set
+  both, and keep a `MemAvailable`-based guard: it is the only signal not fooled by
+  reclaimable page cache.
+- **~18 GiB of the ~122 GiB pool is unavailable before anything starts**, and it is not
+  Kubernetes — the whole k8s layer measures under 1 GiB RSS. It is driver carveout.
+  Budget from a measured `MemAvailable`, never from the nominal 128 GB.
 - `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
-  concurrency cap. The vLLM deployment takes 6 and leaves 2 for small jobs.
+  concurrency cap, not a memory partition.
 
-nimbus is also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
+The GB10s are also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
 NGC's arm64 vLLM image and carries the toleration. See
 [Node placement]({{< relref "../infrastructure/node-placement" >}}).
 
