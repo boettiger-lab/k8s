@@ -32,8 +32,9 @@ curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
 
 | Model | Where it runs | Served as | Manifest / notes |
 |---|---|---|---|
-| Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~20–22 tok/s single stream |
-| DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. ~23 tok/s single stream with MTP |
+| **DeepSeek-V4-Flash-DSpark** | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. **~70 tok/s** single stream, 350K context |
+| **Laguna S 2.1 NVFP4** | nimbus3 (1× GB10) | `laguna` | `laguna-nimbus3.yaml`. ~23–32 tok/s, 256K context, tool calling + reasoning |
+| Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~24 tok/s single stream, 256K context |
 | Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml`, **scaled to 0** since cirrus became an ASR node |
 | Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
 
@@ -49,6 +50,8 @@ scaling `qwen3-8` back to 1 restores it.
 | Endpoint | Node | Serving |
 |---|---|---|
 | `https://vllm-nimbus.carlboettiger.info` | nimbus | one LLM at a time |
+| `https://vllm-nimbus2.carlboettiger.info` | nimbus2 (+nimbus4) | the TP2 pair's API server |
+| `https://vllm-nimbus3.carlboettiger.info` | nimbus3 | one LLM at a time |
 | `https://whisper-cirrus.carlboettiger.info` | cirrus | speech-to-text, several models at once |
 | `https://vllm-cirrus.carlboettiger.info` | cirrus | nothing — kept for the rollback |
 
@@ -76,11 +79,102 @@ fixed `--node-rank` pinned to a fixed node. Only the head carries
 The fabric must be up before either pod starts — NCCL *and* Gloo are pinned to
 `enp1s0f1np1` in the manifest. See the cluster-ops notes on the CX-7 fabric.
 
+**Not Ray.** This pair uses vLLM's native multi-node path —
+`--distributed-executor-backend mp` with `--nnodes 2 --node-rank ${NODE_RANK}
+--master-addr/--master-port`. An earlier Ray-based attempt produced
+`collective_rpc should not be called on follower node`, which we wrongly read as "B12X
+multi-node is broken"; it was a Ray-path artifact. Dropping Ray also cut startup from
+30–80 minutes of FlashInfer autotune to about six minutes end to end.
+
+#### Restarting the pair
+
+**Start order is load-bearing**, and `kubectl apply` alone will not give it to you — an
+apply rolls *both* Deployments into new ReplicaSets simultaneously, which silently undoes
+any ordering. Scale *after* applying:
+
+```bash
+kubectl -n vllm scale deploy/deepseek-v4-flash-head   --replicas=0
+kubectl -n vllm scale deploy/deepseek-v4-flash-worker --replicas=0   # wait: both gone
+kubectl -n vllm scale deploy/deepseek-v4-flash-worker --replicas=1   # wait: rank=1 in its log
+kubectl -n vllm scale deploy/deepseek-v4-flash-head   --replicas=1
+```
+
+The ranks meet in a torch distributed store and a rank arriving alone waits there.
+
+**A healthy TP2 start drops BOTH nodes to single-digit GiB free** — each takes its
+~79 GiB shard. If one node stays near 90 GiB free, that rank never loaded, and the pair
+will sit there with no error at all: both pods `Running`, the head `0/1`, GPU 0% on both,
+logs stopping dead. Three distinct bugs produced exactly that signature, so check the
+*worker* log first:
+
+- a hardcoded `--node-rank` gave both pods rank 0 (use `${NODE_RANK}` from the env);
+- the worker's `--headless` sat after a line with **no trailing backslash**, so the
+  continued command ended early, `exec` replaced the shell and the flag never reached
+  vLLM — the worker then ran as a second non-headless head. Tell-tale: an
+  `(APIServer pid=1)` prefix in the *worker's* log;
+- a `#` comment *inside* a backslash-continued command splices in and truncates the rest.
+
+None of these raises an error. Verify the rendered `args`, not just that a flag appears
+somewhere in the file.
+
 Because this endpoint lives in the `vllm` namespace with the usual
 `prometheus.io/scrape` annotations, it is visible to the carbon dashboard — but note
 that dashboard currently assumes **one card per node**, and a TP2 model spans two.
 Its tokens are reported by one endpoint while its power is split across two nodes, so
 the per-token figure for this pair is not yet right.
+
+### Laguna on nimbus3
+
+`laguna-nimbus3.yaml`, served at `https://vllm-nimbus3.carlboettiger.info` as `laguna`,
+256K context, with **tool calling and reasoning both working**.
+
+**Use the `ennerd` checkpoint, not `poolside`.** poolside's official NVFP4 leaves 8 of 48
+layers' experts in bf16, so it is 93 GiB and leaves only ~4 GiB of KV — a 16K ceiling,
+and it fails to load at all at 32K. `ennerd/Laguna-S-2.1-NVFP4` packs all 48 layers and
+quantizes attention too: 65 GB, and 30 GiB of KV. It is explicitly built for this
+hardware (tagged `dgx-spark`, `gb10`, `blackwell`). Measured on nimbus3, same box:
+
+| | poolside | ennerd |
+|---|---|---|
+| single stream | 17.7 tok/s | **32.4 tok/s** |
+| aggregate @ c8 | 60.2 tok/s | **120.4 tok/s** |
+| max context | ~16K | **262,144** |
+| KV cache | ~4 GiB | **30 GiB / 1.1M tokens** |
+
+Two flags are non-obvious, and **both failed silently** rather than erroring:
+
+- `--tool-call-parser poolside_v1`. Laguna's format is GLM-style
+  (`<tool_call>NAME<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>`), not
+  Qwen/Hermes. The real template is `chat_template.jinja`; the `chat_template` field in
+  `tokenizer_config.json` is a 35-character stub, and reading that instead is how this
+  was first wrongly written off as having no tool support.
+- `--default-chat-template-kwargs '{"enable_thinking":true}'` is **required** for
+  reasoning to be separated. `DeepSeekV3ReasoningParser` picks its implementation from
+  the chat-template kwargs, which default to `false`, so without this it installs a
+  pass-through `IdentityReasoningParser`, reports success, and the whole chain-of-thought
+  lands in `content`. `--reasoning-config` silences the related warning but fixes nothing
+  on its own.
+
+**Client note:** reasoning arrives in `message.reasoning`, **not** `reasoning_content`.
+A client reading `reasoning_content` gets an empty string and will conclude the parser is
+broken.
+
+> **⚠ Pending adjustment — revisit after the current agent benchmark.** Laguna is running at
+> `--gpu-memory-utilization 0.80` rather than the measured-best `0.85`. This was an interim
+> mitigation on 2026-09-21, when the host `gpu-hang-watchdog` SIGKILLed it mid-serve: at
+> 0.85 the node's `MemAvailable` bottoms out near 940 MiB and the watchdog's CRITICAL path
+> escalated on that alone.
+>
+> The watchdog has since been fixed (CRITICAL now also requires reclaim distress or a
+> genuinely low `MemFree`) and deployed to all four GB10s, so **0.85 should be safe again
+> and is worth ~6 GiB of KV plus some decode speed** — under live traffic at 0.80 Laguna
+> probes at 23.1 tok/s against 32.4 measured at 0.85.
+>
+> Not yet done because (a) the patched CRITICAL branch has not been exercised at a low
+> `MemAvailable`, and (b) restarting discards a warm prefix cache — 85% hit rate over 13
+> hours of real traffic. Raise it, watch
+> `journalctl -u gpu-hang-watchdog` on nimbus3 for a CRITICAL line that now reports both
+> metrics and does *not* escalate, and re-measure.
 
 ### The nodes are not equivalent
 
@@ -99,11 +193,23 @@ before deploying there:
   be measured from a real load every time. When `--kv-cache-memory` is honoured it
   *replaces* the memory profiler (vLLM says so on startup) — but it does **not** replace
   `--gpu-memory-utilization`, which still governs a startup free-memory assertion. Set
-  both, and keep a `MemAvailable`-based guard: it is the only signal not fooled by
-  reclaimable page cache.
-- **~18 GiB of the ~122 GiB pool is unavailable before anything starts**, and it is not
-  Kubernetes — the whole k8s layer measures under 1 GiB RSS. It is driver carveout.
-  Budget from a measured `MemAvailable`, never from the nominal 128 GB.
+  both, and measure the result.
+- **Do NOT guard on `MemAvailable` alone.** On these nodes `cudaMemGetInfo` free equals
+  **`MemFree`** exactly, and `MemAvailable` runs roughly **7 GiB below `MemFree`** — so a
+  `MemAvailable` floor fires while CUDA still has GiBs to give. On 2026-09-21 that killed
+  a healthy Laguna mid-serve at 36.8 tok/s with `MemFree` at 7.7–8.2 GiB and
+  `direct_reclaim` at 0. The inverse also happens: just after loading a large checkpoint,
+  `MemFree` can sit at 5.7 GiB with 40 GiB of reclaimable page cache, and there
+  `MemAvailable` is the honest number. **No single metric is trustworthy.** The distress
+  predicate is `MemFree` low **and** `Cached` low — nothing free *and* nothing to
+  reclaim. `cluster/nodes/nimbus/gpu-hang-watchdog.sh` now applies this to both its
+  thresholds.
+- **The pool is ~121.6 GiB, not 128 GB.** Of the 127.6 GiB physical, **6.10 GiB** is
+  firmware/ACPI reservation (measured identical on the NVIDIA and Dell units), leaving
+  `MemTotal` 121.63 GiB. Kubernetes itself is under 2 GiB. Earlier notes here claimed
+  ~18 GiB of "driver carveout" — that was wrong: the rest of any apparent shortfall is
+  page cache, which is reclaimable. Budget from a measured figure, never the nominal
+  128 GB.
 - `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
   concurrency cap, not a memory partition.
 
