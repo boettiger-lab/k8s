@@ -1,14 +1,22 @@
 # vLLM — OpenAI-compatible LLM inference
 
-Two GPU nodes each serve one model at a time, at a fixed URL:
+Each GPU node serves one model at a time, at a fixed URL:
 
 | Endpoint | Node | Currently | Hardware |
 |---|---|---|---|
-| <https://vllm-cirrus.carlboettiger.info> | cirrus | `qwen3-8` — Qwen3.8-27B AWQ-INT4 | 2× Quadro RTX 8000 (48 GB each) |
 | <https://vllm-nimbus.carlboettiger.info> | nimbus | `qwen`/`qwen3.8` — Qwen3.8-**Flash-Next** NVFP4 | DGX Spark GB10, 128 GB unified |
-| <https://whisper-cirrus.carlboettiger.info> | cirrus | `whisper` — speech-to-text | scaled to 0 unless in use |
+| <https://whisper-cirrus.carlboettiger.info> | cirrus | **speech-to-text**, several models | 2× Quadro RTX 8000 (48 GB each) |
+| <https://vllm-cirrus.carlboettiger.info> | cirrus | *nothing* — see below | — |
 
-Both are OpenAI-compatible and require an API key:
+**cirrus is an ASR node now (2026-09-21).** Turing cards are not competitive with the
+GB10s for LLM inference, but they are excellent at speech recognition, so `qwen3-8` was
+scaled to 0 and cirrus was given over to speech-to-text — see
+[Speech-to-text on cirrus](#speech-to-text-on-cirrus). `vllm-cirrus.carlboettiger.info`
+therefore has no backend and returns 503; the Service, Ingress and certificate are kept
+so that scaling `qwen3-8` back to 1 restores it with no DNS or cert churn. Send LLM
+traffic to `vllm-nimbus`.
+
+All endpoints are OpenAI-compatible and require an API key:
 
 ```bash
 API_KEY=$(kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' | base64 -d)
@@ -20,7 +28,8 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | File | What |
 |---|---|
 | `endpoints.yaml` | The Services, Ingresses and Traefik `ServersTransport` — the *stable* half |
-| `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it), `whisper-cirrus.yaml` | Model Deployments on cirrus |
+| `stt-cirrus.yaml` | **Current cirrus workload**: the speaches speech-to-text server (parakeet + whisper) |
+| `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it) | LLM Deployments on cirrus, both scaled to 0 since cirrus became an ASR node |
 | `qwen38-flashnext-nimbus.yaml` | **Current** nimbus model: Qwen3.8-Flash-Next NVFP4, PLE table mmapped from NVMe |
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
@@ -43,6 +52,13 @@ kubectl scale -n vllm deployment/qwen3-8 --replicas=0
 kubectl scale -n vllm deployment/gemma4  --replicas=1
 ```
 
+This applies to the LLM endpoints. The speech-to-text server on cirrus works the other
+way round — one Deployment, many models, chosen per request — see
+[Speech-to-text on cirrus](#speech-to-text-on-cirrus). Scaling an LLM back up on cirrus
+means sharing the cards with `stt`, which is fine for a small model (`stt` holds ~7 GB
+of a 48 GB card while a model is resident) but not for `qwen3-8`, which asks for 95 %
+of both. Scale `stt` to 0 first in that case.
+
 On nimbus the swap back to the 27B model is the same two scales:
 
 ```bash
@@ -60,12 +76,185 @@ Don't run two models on one node at once — they would split traffic. GPU memor
 usually prevents it anyway. Model Deployments use `strategy: Recreate`: a rolling
 update deadlocks waiting for GPU the outgoing pod still holds.
 
+## Speech-to-text on cirrus
+
+`stt-cirrus.yaml` runs [speaches](https://speaches.ai/) — an OpenAI-compatible
+`/v1/audio/transcriptions` server — behind
+<https://whisper-cirrus.carlboettiger.info>. Unlike the vLLM endpoints, **one server
+holds several models and the model is a per-request argument**, because speaches loads
+a model on first use and unloads it after `STT_MODEL_TTL` (3600 s here) idle. There is
+no "current model" to scale between.
+
+```bash
+API_KEY=$(kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' | base64 -d)
+curl -s https://whisper-cirrus.carlboettiger.info/v1/audio/transcriptions \
+  -H "Authorization: Bearer $API_KEY" \
+  -F file=@recording.wav \
+  -F model=istupakov/parakeet-tdt-0.6b-v3-onnx \
+  -F response_format=text
+```
+
+`GET /v1/models` lists what is resident; `GET /v1/registry?task=automatic-speech-recognition`
+lists the ~590 models speaches could fetch.
+
+### How one endpoint serves several models
+
+**speaches is a multi-model engine. vLLM and SGLang are not.** That one difference is
+the whole architecture, and it is easy to miss if those two are the only inference
+servers you have run.
+
+A vLLM process builds its engine around a single checkpoint at startup and pins the card
+for its lifetime. Serving several models therefore *requires* several processes — so on
+Kubernetes it means several Deployments, several GPU claims, and something model-aware
+in front of them: LiteLLM or a similar proxy. That is the shape to reach for with vLLM,
+and roughly what the LLM side here does, except that routing is by hostname (one model
+scaled up per node) rather than by a proxy. There is no LiteLLM in this cluster.
+
+speaches is built the other way round. It describes itself as "Ollama, but for TTS/STT":
+holding several models, loading them lazily and unloading them when idle is its *native*
+mode, not something layered on top of it. So there is no router and no fleet. Everything
+behind `whisper-cirrus` is:
+
+```
+Ingress ─→ Service ─→ Deployment `stt` (1 replica) ─→ 1 pod ─→ 1 container (speaches)
+```
+
+That is the same object count as the whisper-only Deployment it replaced: going from one
+model to three added no Kubernetes resources at all. Nothing in the cluster is
+model-aware — Traefik just forwards to the one Service. The multiplexing lives inside
+the process, where the model id is a form field on the request (the OpenAI schema
+already has one; vLLM simply ignores its value) and the server dispatches on it:
+
+```
+POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
+  │
+  ├─ read the HF model card for that id out of the local cache
+  ├─ find_executor_for_model_or_raise(...) over the transcription executors
+  │     whisper   ← HfModelFilter: Systran/faster-whisper*, task=automatic-speech-recognition
+  │     parakeet  ← HfModelFilter: istupakov/parakeet-tdt*,  task=automatic-speech-recognition
+  ├─ Silero VAD runs first, always, whichever executor won
+  └─ executor.model_manager.handle_transcription_request(...)
+```
+
+Four pieces make that work:
+
+- **An `Executor` per model family** — `(name, model_manager, model_registry, task)`.
+  `ExecutorRegistry.transcription` is just `(whisper, parakeet)`; TTS, VAD, diarization
+  and speaker embedding are sibling tuples. Adding a family is adding an `Executor`,
+  not editing the router.
+- **Dispatch by model-card metadata, not a hardcoded table.** Each executor owns an
+  `HfModelFilter` (repo-name prefix plus HF task tag) and the router asks which filter
+  the requested id passes. That is also what makes
+  `GET /v1/registry?task=automatic-speech-recognition` able to enumerate ~590 models
+  from the Hub: each registry lists its own matching repos.
+- **A common handler protocol.** Both executors implement
+  `handle_transcription_request`, so the router never learns that whisper is CTranslate2
+  and parakeet is ONNX Runtime. Both runtimes live in one process and share one
+  `nvidia.com/gpu: 1` claim — ~7.4 GB of a 48 GB card with models resident.
+- **Refcounted lazy loading with an idle timer.** `BaseModelManager` keeps an
+  `OrderedDict[model_id, SelfDisposingModel]`. `SelfDisposingModel` is a context
+  manager: entering loads the weights if absent and increments a refcount, exiting
+  decrements it, and at zero it arms a `threading.Timer(ttl, unload)` that the next
+  request cancels. `STT_MODEL_TTL` is that ttl — 3600 here; `0` unloads immediately
+  after each request and `-1` never unloads.
+
+**What this buys and what it costs.** No second Deployment, Service, Ingress, DNS record
+or certificate per model, and no proxy to run and keep in sync; switching is a changed
+form field rather than two `kubectl scale`s; several models stay resident at once, which
+suits ASR — these are 0.6–1.5 B checkpoints of 2–3 GB against an
+LLM that wants the whole card pinned forever. Against that:
+
+- **No isolation between models.** One process, one cgroup, one GPU claim, one shared
+  VRAM pool. A crash or a leak in one family takes every model down with it, and there
+  are no per-model limits, quotas or metrics.
+- **The endpoint's capabilities are the union, not the intersection.** `srt` works on
+  whisper and 500s on parakeet; streaming is whisper-only; the ~6 minute ceiling applies
+  to one of the two. `GET /v1/models` does not express any of this, so clients have to
+  know which model they picked. This is the real tax for the design, and it is why the
+  table below exists.
+- **Cold start becomes request latency, not deploy latency.** Measured here: 8.2 s for
+  the first request after a restart against 0.67 s warm. `STT_MODEL_TTL` is the dial
+  between holding VRAM and paying that again.
+
+### Which model
+
+| Model | Use it for | Don't |
+|---|---|---|
+| `istupakov/parakeet-tdt-0.6b-v3-onnx` | the default: English, 25 European languages, bulk transcription | audio over ~6 min, `srt`/`vtt`/`verbose_json`, streaming |
+| `Systran/faster-whisper-large-v3` | long recordings, the other 74 languages, translation, timestamps, subtitles, streaming | nothing — it is the safe fallback, just slower |
+| `istupakov/parakeet-tdt-0.6b-v2-onnx` | English-only work where WER matters most | anything non-English. Not pre-fetched; first use downloads it |
+
+Only the first two are pre-fetched by the init container; any other registry model is
+one `POST /v1/models/{id}` away (but see the parakeet download bug below).
+
+### Measured on cirrus, 2026-09-21
+
+150 randomly chosen LibriSpeech **test-other** utterances (2,805 reference words),
+scored with a light normaliser (uppercase, strip punctuation, spell out digits), so
+these are comparable to each other but not to published leaderboard numbers:
+
+| Model | WER | Notes |
+|---|---:|---|
+| `parakeet-tdt-0.6b-v2` | **2.89 %** | English only |
+| `parakeet-tdt-0.6b-v3` | **3.17 %** | 25 languages |
+| `faster-whisper-large-v3` | 4.14 % | 99 languages |
+| `faster-whisper-large-v3-turbo` | 4.74 % | fastest whisper |
+
+Long-form throughput, 12.7 min of concatenated LibriSpeech, one request, warm model:
+
+| Model | wall | real-time factor |
+|---|---:|---:|
+| `parakeet-tdt-0.6b-v3` | 9.0 s | **~85×** |
+| `faster-whisper-large-v3-turbo` | 10.2 s | ~75× |
+| `faster-whisper-large-v3` | 16.8 s | ~45× |
+
+Warm latency on an 11 s clip is ~0.7 s for either family, over the public endpoint —
+so for short clips the choice is accuracy, not speed.
+
+**Parakeet is not uniformly better.** On 20 short de/es/fr/it/nl sentences (Tatoeba,
+with reference text) whisper-large-v3 scored 3.8 % against parakeet-v3's 8.7 %. That is
+a small sample of single sentences with no surrounding context, so treat it as a
+direction rather than a number — but it is enough to say: parakeet wins on English,
+whisper is the safer choice everywhere else.
+
+### Things that are easy to get wrong
+
+- **`speaches:latest-cuda` cannot serve parakeet.** That tag is still 0.8.3, which
+  predates the `onnx-asr` executor; the container has no `onnx_asr` module and no
+  parakeet entries in its registry. The 0.9.0 line exists only as release candidates,
+  so the manifest pins `0.9.0-rc.3-cuda-12.6.3`, the newest image published.
+- **speaches' own download endpoint produces a broken parakeet.** It derives
+  `allow_patterns` from the model's file list and omits `encoder-model.onnx.data` —
+  a "successful" download is 110 MB of ONNX graph with 2.4 GB of weights missing
+  ([#657](https://github.com/speaches-ai/speaches/issues/657); PR #670 unmerged). The
+  init container calls `huggingface_hub.snapshot_download` with explicit patterns
+  instead. Don't replace it with `PRELOAD_MODELS`, which goes through the broken path.
+- **Parakeet has a hard ~6 minute ceiling, and it fails with a 500.** The ONNX export
+  bakes a 4558-frame cap into the encoder's relative-position attention — at 80 ms per
+  frame, ~365 s of *speech*. Silero VAD trims silence first, so wall-clock duration is
+  not the limit: a 400 s clip passed here and a 480 s one did not. Over the line you get
+  `right operand cannot broadcast on dim 3 LeftShape: {1,8,9558,9558}`. speaches
+  computes VAD speech segments but the parakeet executor does not yet consume them
+  (`TODO: Use request.speech_segments`), so nothing chunks around it. Split long audio
+  client-side, or send it to whisper.
+- **Parakeet only speaks `text` and `json`.** Ask it for `srt`, `vtt` or
+  `verbose_json` and you get a 500, not a 400. Streaming is `NotImplementedError`.
+  Subtitles and word timestamps mean whisper.
+- **The old `WHISPER__MODEL` / `WHISPER__MODELS_DIR` env vars did nothing.** They were
+  never fields in speaches' settings model, so pydantic ignored them — the deployment
+  that looked pinned to `faster-whisper-large-v3` was in fact serving whatever each
+  request asked for. They are gone.
+- **`whisper-cirrus` is a historical name.** The endpoint serves parakeet too. Renaming
+  the host would cost a DNS record and a fresh Let's Encrypt issuance, so it stays.
+
 ## The two nodes are not interchangeable
 
-**cirrus** — two discrete 48 GB cards. Requesting `nvidia.com/gpu: 2` gets two
-*distinct* physical GPUs, and cgroup `memory:` is a genuine limit on host RAM, with
-VRAM tracked separately. TP=2 was measured on 2026-08-18 and is a net loss for a
-27B model here; keep TP=1 (the reasoning is in the manifest).
+**cirrus** — two discrete 48 GB cards, Turing (cc 7.5). Requesting `nvidia.com/gpu: 2`
+gets two *distinct* physical GPUs, and cgroup `memory:` is a genuine limit on host RAM,
+with VRAM tracked separately. Since 2026-09-21 it runs speech-to-text rather than an
+LLM; the notes below are what the LLM deployments here learned, kept because
+`qwen3-8-cirrus.yaml` is still the rollback. TP=2 was measured on 2026-08-18 and is a
+net loss for a 27B model here; keep TP=1 (the reasoning is in the manifest).
 
 **nimbus** — one GB10 with no discrete VRAM: CPU and GPU share a single ~122 GiB
 LPDDR5X pool. Two consequences that repeatedly surprise people:

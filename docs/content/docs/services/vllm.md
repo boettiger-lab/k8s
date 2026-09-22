@@ -25,33 +25,41 @@ one model at a time. Ask the endpoint what it is serving rather than assuming:
 
 ```bash
 curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
-  https://vllm-cirrus.carlboettiger.info/v1/models | jq '.data[].id'
+  https://vllm-nimbus.carlboettiger.info/v1/models | jq '.data[].id'
 ```
 
 ### Working, with a manifest
 
 | Model | Where it runs | Served as | Manifest / notes |
 |---|---|---|---|
-| Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml` |
 | Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~20–22 tok/s single stream |
-| Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
 | DeepSeek-V4-Flash | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. ~23 tok/s single stream with MTP |
+| Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml`, **scaled to 0** since cirrus became an ASR node |
+| Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
 
-**Whisper** audio transcription is a separate, non-vLLM server on its own host
-(`whisper-cirrus.carlboettiger.info`, `whisper-cirrus.yaml`). It is not part of a
-single-LLM slot and can run alongside one.
+**cirrus serves speech-to-text now, not an LLM.** Since 2026-09-21 the two Quadro
+RTX 8000s — Turing cards that the GB10s comfortably beat at LLM inference, but that are
+very good at speech recognition — run the ASR server described in
+[Speech-to-text](#speech-to-text-on-cirrus) instead. `vllm-cirrus.carlboettiger.info`
+has no backend and returns 503; its Service, Ingress and certificate are kept so
+scaling `qwen3-8` back to 1 restores it.
 
 ### Endpoints are named for machines, not models
 
-| Endpoint | Node |
-|---|---|
-| `https://vllm-cirrus.carlboettiger.info` | cirrus |
-| `https://vllm-nimbus.carlboettiger.info` | nimbus |
+| Endpoint | Node | Serving |
+|---|---|---|
+| `https://vllm-nimbus.carlboettiger.info` | nimbus | one LLM at a time |
+| `https://whisper-cirrus.carlboettiger.info` | cirrus | speech-to-text, several models at once |
+| `https://vllm-cirrus.carlboettiger.info` | cirrus | nothing — kept for the rollback |
 
 `services/vllm/endpoints.yaml` holds these — Services, Ingresses and the Traefik
 transport. Each model is a Deployment beside it carrying the pod label
 `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
 models is scaling one down and the next up: no new Ingress, DNS record or certificate.
+
+The speech-to-text endpoint is the exception: it routes on the request's `model` field
+inside one process rather than on a label selector, and holds several models at once.
+See [One endpoint, several models](#one-endpoint-several-models).
 
 ### Multi-node (TP2) endpoints
 
@@ -103,6 +111,159 @@ The GB10s are also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its man
 NGC's arm64 vLLM image and carries the toleration. See
 [Node placement]({{< relref "../infrastructure/node-placement" >}}).
 
+## Speech-to-text on cirrus
+
+`services/vllm/stt-cirrus.yaml` runs [speaches](https://speaches.ai/), an
+OpenAI-compatible `/v1/audio/transcriptions` server, at
+`https://whisper-cirrus.carlboettiger.info`. It replaced the LLM on cirrus on
+2026-09-21.
+
+It works differently from the vLLM endpoints: **one server holds several models and the
+model is a per-request argument.** speaches loads a model on first use and unloads it
+after an hour idle, so there is no "current model" to scale between.
+
+```bash
+export VLLM_API_KEY=$(kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' | base64 -d)
+
+curl -s https://whisper-cirrus.carlboettiger.info/v1/audio/transcriptions \
+  -H "Authorization: Bearer $VLLM_API_KEY" \
+  -F file=@recording.wav \
+  -F model=istupakov/parakeet-tdt-0.6b-v3-onnx \
+  -F response_format=text
+```
+
+Any OpenAI SDK works against it:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="https://whisper-cirrus.carlboettiger.info/v1",
+                api_key=os.environ["VLLM_API_KEY"])
+
+with open("recording.wav", "rb") as f:
+    print(client.audio.transcriptions.create(
+        model="istupakov/parakeet-tdt-0.6b-v3-onnx", file=f).text)
+```
+
+### One endpoint, several models
+
+This is the one place in the cluster where model routing does **not** happen in
+Kubernetes, so it is worth understanding before extending it.
+
+**speaches is a multi-model engine; vLLM and SGLang are not.** A vLLM process builds its
+engine around one checkpoint at startup and pins the card for its lifetime, so serving
+several models *requires* several processes — several Deployments, several GPU claims,
+and a model-aware proxy such as LiteLLM in front. That is the correct shape for vLLM, and
+close to what the LLM endpoints here do, except that routing is by hostname (one model
+scaled up per node) instead of a proxy. **There is no LiteLLM in this cluster.**
+
+speaches works the other way round: it calls itself "Ollama, but for TTS/STT", and
+holding several models with lazy loading and idle unloading is its native mode rather
+than something built around it. So the speech-to-text endpoint has no router and no
+fleet behind it — it is a single ordinary Deployment:
+
+```
+Ingress ─→ Service ─→ Deployment `stt` (1 replica) ─→ 1 pod ─→ 1 container (speaches)
+```
+
+Exactly the object count of the whisper-only Deployment it replaced. Going from one
+model to three added no Kubernetes resources, because the multiplexing is inside the
+process: the model id is a form field on the request, and the server dispatches on it.
+Nothing in the cluster is model-aware; Traefik just forwards to the one Service.
+
+```
+POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
+  │
+  ├─ read that id's Hugging Face model card from the local cache
+  ├─ pick the executor whose filter the card passes
+  │     whisper   ← Systran/faster-whisper*,  task=automatic-speech-recognition
+  │     parakeet  ← istupakov/parakeet-tdt*,  task=automatic-speech-recognition
+  ├─ Silero VAD runs first, always, whichever executor won
+  └─ executor.model_manager.handle_transcription_request(...)
+```
+
+The pieces:
+
+- **One `Executor` per model family**, each a `(name, model_manager, model_registry,
+  task)` tuple. Transcription is `(whisper, parakeet)`; text-to-speech, VAD, diarization
+  and speaker embedding are sibling tuples on the same registry. A new family is a new
+  `Executor`, not a change to the router.
+- **Dispatch on model-card metadata rather than a hardcoded list.** Each executor owns a
+  filter — a repo-name prefix plus a Hugging Face task tag — and the router asks which
+  filter the requested id passes. The same filters let
+  `GET /v1/registry?task=automatic-speech-recognition` enumerate roughly 590 fetchable
+  models straight from the Hub.
+- **A shared handler protocol**, so the router never learns that whisper runs on
+  CTranslate2 and parakeet on ONNX Runtime. Both runtimes live in a single process and
+  share one `nvidia.com/gpu: 1` claim — about 7.4 GB of a 48 GB card with models
+  resident.
+- **Refcounted lazy loading.** Each model is a self-disposing object: the first request
+  loads the weights and takes a reference, the last one to finish arms an idle timer,
+  and the next request cancels it. `STT_MODEL_TTL` (3600 s here) is that timer; `0`
+  unloads after every request, `-1` never unloads.
+
+**The trade-off.** No extra Deployment, Service, Ingress, DNS record or certificate per
+model and no proxy to operate, switching is a changed form field instead of two
+`kubectl scale`s, and several models stay warm at once — which suits ASR, where checkpoints are 2–3 GB rather than an LLM's whole card.
+What you give up:
+
+- **No isolation.** One process, one cgroup, one GPU claim, one VRAM pool. A crash in
+  one model family takes the rest with it, and there are no per-model limits or metrics.
+- **Capabilities are the union, not the intersection.** `srt` works on whisper and
+  returns a 500 on parakeet; streaming is whisper-only; the ~6 minute ceiling applies to
+  one of the two. `GET /v1/models` does not express any of that, so the caller has to
+  know what it picked — hence the table below.
+- **Cold start is request latency, not deploy latency** — 8.2 s for the first request
+  after a restart here, against 0.7 s warm. `STT_MODEL_TTL` trades held VRAM against
+  paying that again.
+
+### Which model to ask for
+
+| Model | Use it for | Avoid it for |
+|---|---|---|
+| `istupakov/parakeet-tdt-0.6b-v3-onnx` | the default — English and 25 European languages, ~85× real time | audio over ~6 minutes, subtitles, streaming |
+| `Systran/faster-whisper-large-v3` | long recordings, the other 74 languages, translation, word timestamps, SRT/VTT, streaming | nothing; it is the safe fallback |
+| `istupakov/parakeet-tdt-0.6b-v2-onnx` | English-only work where accuracy matters most | anything non-English |
+
+`GET /v1/models` lists what is loaded locally;
+`GET /v1/registry?task=automatic-speech-recognition` lists everything speaches could
+fetch, and `POST /v1/models/{id}` fetches one.
+
+### How the models compare, measured on cirrus
+
+150 random LibriSpeech **test-other** utterances (2,805 reference words), scored with a
+light normaliser — comparable to each other, not to published leaderboard figures:
+
+| Model | WER | Languages |
+|---|---:|---|
+| `parakeet-tdt-0.6b-v2` | **2.89 %** | English |
+| `parakeet-tdt-0.6b-v3` | **3.17 %** | 25 |
+| `faster-whisper-large-v3` | 4.14 % | 99 |
+| `faster-whisper-large-v3-turbo` | 4.74 % | 99 |
+
+Throughput on 12.7 minutes of speech in one request: parakeet-v3 ~85× real time,
+whisper-large-v3-turbo ~75×, whisper-large-v3 ~45×. Warm latency on an 11 s clip is
+about 0.7 s either way, so for short audio the choice is accuracy, not speed.
+
+Parakeet does **not** win everywhere. On 20 short German, Spanish, French, Italian and
+Dutch sentences, whisper-large-v3 scored 3.8 % against parakeet-v3's 8.7 %. That is a
+small sample of isolated sentences, so read it as a direction: parakeet for English,
+whisper for everything else.
+
+### Limits to know about
+
+- **Parakeet fails hard at roughly 6 minutes.** The ONNX encoder has a 4558-frame cap
+  baked into its relative-position attention — about 365 s of speech once silence is
+  trimmed — and beyond it the request returns a 500, not a shorter transcript. Nothing
+  chunks around it yet. Split long audio client-side or use whisper.
+- **Parakeet only returns `text` and `json`.** `srt`, `vtt` and `verbose_json` return a
+  500; streaming is unimplemented. Subtitles and timestamps mean whisper.
+- The image is pinned to `speaches:0.9.0-rc.3-cuda-12.6.3`. `latest-cuda` is still
+  0.8.3, which has no parakeet support at all.
+- speaches' own model-download endpoint silently omits the ONNX external-weights file
+  for parakeet models, so an init container fetches the snapshot directly instead. See
+  the comments in `stt-cirrus.yaml`.
+
 ## Prerequisites
 
 1. [K3s installed]({{< relref "../infrastructure/k3s" >}})
@@ -121,14 +282,15 @@ cd services/vllm
 # Create the namespace + secrets (HF token, API key) and deploy a model
 ./up.sh
 
-# Or apply a single model manifest directly
-kubectl apply -f qwen3-8-cirrus.yaml
+# Or apply a single manifest directly
+kubectl apply -f stt-cirrus.yaml                 # cirrus: speech-to-text
+kubectl apply -f qwen38-flashnext-nimbus.yaml    # nimbus: an LLM
 
 # Check status
 kubectl get pods -n vllm
 
-# View logs (use the deployment name for the model, e.g. qwen3-8)
-kubectl logs -n vllm deployment/qwen3-8 -f
+# View logs (use the deployment name, e.g. stt or qwen38-flashnext)
+kubectl logs -n vllm deployment/stt -f
 
 # List the model endpoints
 kubectl get ingress -n vllm
@@ -138,8 +300,9 @@ kubectl get ingress -n vllm
 
 Under `services/vllm/`:
 
-- `endpoints.yaml` - the Services, Ingresses, certs and Traefik transport for both nodes
-- `<model>-<node>.yaml` - a Deployment only, labelled `vllm-endpoint: <node>`
+- `endpoints.yaml` - the Services, Ingresses, certs and Traefik transport for the LLM endpoints
+- `stt-cirrus.yaml` - the speech-to-text server on cirrus, with its own Service and Ingress
+- `<model>-<node>.yaml` - an LLM Deployment only, labelled `vllm-endpoint: <node>`
 - `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets (git-ignored)
 - `up.sh` / `down.sh` - deploy / cleanup scripts
 
@@ -203,11 +366,11 @@ Avoid hard-coding it — read it from an environment variable, e.g.
 Using curl:
 
 ```bash
-curl https://vllm-cirrus.carlboettiger.info/v1/chat/completions \
+curl https://vllm-nimbus.carlboettiger.info/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $VLLM_API_KEY" \
   -d '{
-    "model": "qwen3-8",
+    "model": "qwen3.8",
     "messages": [{"role": "user", "content": "San Francisco is a"}],
     "max_tokens": 50,
     "temperature": 0.7
@@ -221,12 +384,12 @@ import os
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://vllm-cirrus.carlboettiger.info/v1",
+    base_url="https://vllm-nimbus.carlboettiger.info/v1",
     api_key=os.environ["VLLM_API_KEY"],
 )
 
 response = client.chat.completions.create(
-    model="qwen3-8",
+    model="qwen3.8",
     messages=[{"role": "user", "content": "What is the capital of France?"}],
     max_tokens=100,
 )
@@ -234,14 +397,14 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-> `qwen3-8` is a reasoning model: in streamed responses the chain-of-thought
+> The Qwen3.8 models are reasoning models: in streamed responses the chain-of-thought
 > arrives in `delta.reasoning` and the final answer in `delta.content`.
 
 ### Streaming Responses
 
 ```python
 response = client.chat.completions.create(
-    model="qwen3-8",
+    model="qwen3.8",
     messages=[{"role": "user", "content": "Tell me a story"}],
     max_tokens=200,
     stream=True,
@@ -355,7 +518,7 @@ kubectl exec -n vllm deployment/qwen3-8 -- nvidia-smi
 vLLM exposes metrics at `/metrics`:
 
 ```bash
-curl https://vllm-cirrus.carlboettiger.info/metrics
+curl https://vllm-nimbus.carlboettiger.info/metrics
 ```
 
 ## Troubleshooting
