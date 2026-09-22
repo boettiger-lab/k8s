@@ -27,10 +27,22 @@
 # establish the store (15 min silent, GPU 0% on both nodes). The symptom is NOT an
 # error: both pods read Running, the head reads 0/1, and the log simply stops.
 #
-# --distributed-timeout-seconds / --cpu-distributed-timeout-seconds are set to 7200
-# below because the DEFAULT IS 1800 s and that default is what bit us:
-#   Error: wait timeout after 1800000ms, keys: /default_pg/0//2//cpu//0/1
-# 30 min is not enough slack for a pair of independently-scheduled Deployments.
+# THE `\` ON THE --jit-monitor-mode LINE ABOVE THE WORKER'S --headless IS LOAD-BEARING.
+# Without it the continued command ENDS at --jit-monitor-mode, `exec vllm serve` replaces
+# the shell, and the bare `--headless` line is never reached. The worker then starts as a
+# SECOND NON-HEADLESS HEAD: its log carries an `(APIServer pid=1)` prefix, it runs a full
+# engine init, and it dies with exit 1 "Engine core initialization failed" while the real
+# head waits forever. Tell-tale: `(APIServer pid=1)` in the WORKER log, and nimbus4
+# sitting near 90+ GiB free while nimbus2 drops to single digits.
+#
+# This cost several restarts on 2026-09-21, partly because a `'--headless' in text` check
+# passes on the broken form -- the string is present, just not inside the command. Check
+# the rendered `args` and confirm the PRECEDING line ends with a backslash.
+#
+# --distributed-timeout-seconds / --cpu-distributed-timeout-seconds are deliberately
+# absent, but they were never shown to be harmful -- they were removed on a wrong
+# inference while this truncation was the actual fault. The default 1800 s window is
+# adequate once the ranks are correct; add them only with evidence.
 #
 # ---------------------------------------------------------------------------------
 # MEASURED on this pair 2026-09-21. This config is a replication of
@@ -335,8 +347,6 @@ spec:
           --master-addr 192.168.200.12 \
           --master-port 25000 \
           --jit-monitor-mode warn \
-          --distributed-timeout-seconds 7200 \
-          --cpu-distributed-timeout-seconds 7200
           --headless
         resources:
           requests:
@@ -580,9 +590,7 @@ spec:
           --node-rank ${NODE_RANK} \
           --master-addr 192.168.200.12 \
           --master-port 25000 \
-          --jit-monitor-mode warn \
-          --distributed-timeout-seconds 7200 \
-          --cpu-distributed-timeout-seconds 7200
+          --jit-monitor-mode warn
         resources:
           requests:
             cpu: 8
