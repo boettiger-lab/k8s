@@ -165,3 +165,64 @@ spec:
   - hosts:
     - vllm-nimbus.carlboettiger.info
     secretName: vllm-nimbus-tls
+
+---
+# nimbus3 (DGX Spark) --- one GB10, unified memory. Same shape as the nimbus endpoint
+# above: the Service selects `vllm-endpoint: nimbus3`, so whatever model is scaled up on
+# that node answers here, and swapping models needs no DNS record or certificate.
+# Currently laguna-nimbus3.yaml (Laguna S 2.1 NVFP4, 256K context, tool calling).
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-nimbus3-service
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus3
+  annotations:
+    # Scraped by the monitoring stack's Prometheus for the carbon/perf dashboard.
+    # vLLM's /metrics is unauthenticated. On the endpoint Service, not a per-model one,
+    # so metrics survive a model switch and nothing double-scrapes the same pod.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    vllm-endpoint: nimbus3
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-nimbus3-ingress
+  namespace: vllm
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
+    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit (524s).
+    # Origin serves its own Let's Encrypt cert, so TLS is intact.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+  labels:
+    app: vllm-nimbus3
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: vllm-nimbus3.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-nimbus3-service
+            port:
+              number: 8000
+  tls:
+  - hosts:
+    - vllm-nimbus3.carlboettiger.info
+    secretName: vllm-nimbus3-tls
