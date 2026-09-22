@@ -57,6 +57,10 @@ transport. Each model is a Deployment beside it carrying the pod label
 `vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
 models is scaling one down and the next up: no new Ingress, DNS record or certificate.
 
+The speech-to-text endpoint is the exception: it routes on the request's `model` field
+inside one process rather than on a label selector, and holds several models at once.
+See [One endpoint, several models](#one-endpoint-several-models).
+
 ### Multi-node (TP2) endpoints
 
 DeepSeek-V4-Flash runs **tensor-parallel across nimbus2 and nimbus4** over the
@@ -140,6 +144,65 @@ with open("recording.wav", "rb") as f:
     print(client.audio.transcriptions.create(
         model="istupakov/parakeet-tdt-0.6b-v3-onnx", file=f).text)
 ```
+
+### One endpoint, several models
+
+This is the one place in the cluster where model routing does **not** happen in
+Kubernetes, so it is worth understanding before extending it.
+
+The vLLM endpoints route with a label selector: the model is a property of the
+*Deployment*, every model pod carries `vllm-endpoint: <node>`, and the Service picks
+whichever one is scaled up. One model per endpoint follows from that, and from vLLM
+itself — a vLLM process loads one checkpoint and pins the card for its lifetime.
+
+speaches moves that decision inside the process. The model id is a form field on the
+request, and the server dispatches on it:
+
+```
+POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
+  │
+  ├─ read that id's Hugging Face model card from the local cache
+  ├─ pick the executor whose filter the card passes
+  │     whisper   ← Systran/faster-whisper*,  task=automatic-speech-recognition
+  │     parakeet  ← istupakov/parakeet-tdt*,  task=automatic-speech-recognition
+  ├─ Silero VAD runs first, always, whichever executor won
+  └─ executor.model_manager.handle_transcription_request(...)
+```
+
+The pieces:
+
+- **One `Executor` per model family**, each a `(name, model_manager, model_registry,
+  task)` tuple. Transcription is `(whisper, parakeet)`; text-to-speech, VAD, diarization
+  and speaker embedding are sibling tuples on the same registry. A new family is a new
+  `Executor`, not a change to the router.
+- **Dispatch on model-card metadata rather than a hardcoded list.** Each executor owns a
+  filter — a repo-name prefix plus a Hugging Face task tag — and the router asks which
+  filter the requested id passes. The same filters let
+  `GET /v1/registry?task=automatic-speech-recognition` enumerate roughly 590 fetchable
+  models straight from the Hub.
+- **A shared handler protocol**, so the router never learns that whisper runs on
+  CTranslate2 and parakeet on ONNX Runtime. Both runtimes live in a single process and
+  share one `nvidia.com/gpu: 1` claim — about 7.4 GB of a 48 GB card with models
+  resident.
+- **Refcounted lazy loading.** Each model is a self-disposing object: the first request
+  loads the weights and takes a reference, the last one to finish arms an idle timer,
+  and the next request cancels it. `STT_MODEL_TTL` (3600 s here) is that timer; `0`
+  unloads after every request, `-1` never unloads.
+
+**The trade-off.** No Ingress, DNS record or certificate per model, switching is a
+changed form field instead of two `kubectl scale`s, and several models stay warm at
+once — which suits ASR, where checkpoints are 2–3 GB rather than an LLM's whole card.
+What you give up:
+
+- **No isolation.** One process, one cgroup, one GPU claim, one VRAM pool. A crash in
+  one model family takes the rest with it, and there are no per-model limits or metrics.
+- **Capabilities are the union, not the intersection.** `srt` works on whisper and
+  returns a 500 on parakeet; streaming is whisper-only; the ~6 minute ceiling applies to
+  one of the two. `GET /v1/models` does not express any of that, so the caller has to
+  know what it picked — hence the table below.
+- **Cold start is request latency, not deploy latency** — 8.2 s for the first request
+  after a restart here, against 0.7 s warm. `STT_MODEL_TTL` trades held VRAM against
+  paying that again.
 
 ### Which model to ask for
 

@@ -7,7 +7,9 @@
 # ONE server, SEVERAL models. speaches loads a model on first use and unloads it
 # after STT_MODEL_TTL seconds idle, so the model is chosen per request rather than
 # per deployment -- the opposite of the vLLM endpoints next door, and the reason
-# there is no "current model" here to scale between:
+# there is no "current model" here to scale between. The dispatch mechanism, and
+# what it costs in isolation and in ragged per-model capabilities, is written up
+# under "How one endpoint serves several models" in README.md.
 #
 #   curl .../v1/audio/transcriptions -F file=@a.wav -F model=<id>
 #

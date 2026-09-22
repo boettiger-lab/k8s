@@ -97,6 +97,67 @@ curl -s https://whisper-cirrus.carlboettiger.info/v1/audio/transcriptions \
 `GET /v1/models` lists what is resident; `GET /v1/registry?task=automatic-speech-recognition`
 lists the ~590 models speaches could fetch.
 
+### How one endpoint serves several models
+
+The vLLM endpoints route in Kubernetes: the model is a property of the *Deployment*,
+every model pod carries `vllm-endpoint: <node>`, and the Service's label selector is the
+router. One model per endpoint falls out of that — and out of the fact that a vLLM
+process loads exactly one checkpoint and pins the card for its lifetime.
+
+speaches moves the same decision from the cluster into the process. The model id is a
+form field on the request (the OpenAI schema already has one; vLLM just ignores its
+value), and the server dispatches on it:
+
+```
+POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
+  │
+  ├─ read the HF model card for that id out of the local cache
+  ├─ find_executor_for_model_or_raise(...) over the transcription executors
+  │     whisper   ← HfModelFilter: Systran/faster-whisper*, task=automatic-speech-recognition
+  │     parakeet  ← HfModelFilter: istupakov/parakeet-tdt*,  task=automatic-speech-recognition
+  ├─ Silero VAD runs first, always, whichever executor won
+  └─ executor.model_manager.handle_transcription_request(...)
+```
+
+Four pieces make that work:
+
+- **An `Executor` per model family** — `(name, model_manager, model_registry, task)`.
+  `ExecutorRegistry.transcription` is just `(whisper, parakeet)`; TTS, VAD, diarization
+  and speaker embedding are sibling tuples. Adding a family is adding an `Executor`,
+  not editing the router.
+- **Dispatch by model-card metadata, not a hardcoded table.** Each executor owns an
+  `HfModelFilter` (repo-name prefix plus HF task tag) and the router asks which filter
+  the requested id passes. That is also what makes
+  `GET /v1/registry?task=automatic-speech-recognition` able to enumerate ~590 models
+  from the Hub: each registry lists its own matching repos.
+- **A common handler protocol.** Both executors implement
+  `handle_transcription_request`, so the router never learns that whisper is CTranslate2
+  and parakeet is ONNX Runtime. Both runtimes live in one process and share one
+  `nvidia.com/gpu: 1` claim — ~7.4 GB of a 48 GB card with models resident.
+- **Refcounted lazy loading with an idle timer.** `BaseModelManager` keeps an
+  `OrderedDict[model_id, SelfDisposingModel]`. `SelfDisposingModel` is a context
+  manager: entering loads the weights if absent and increments a refcount, exiting
+  decrements it, and at zero it arms a `threading.Timer(ttl, unload)` that the next
+  request cancels. `STT_MODEL_TTL` is that ttl — 3600 here; `0` unloads immediately
+  after each request and `-1` never unloads.
+
+**What this buys and what it costs.** No Ingress, DNS record or certificate per model;
+switching is a changed form field rather than two `kubectl scale`s; several models stay
+resident at once, which suits ASR — these are 0.6–1.5 B checkpoints of 2–3 GB against an
+LLM that wants the whole card pinned forever. Against that:
+
+- **No isolation between models.** One process, one cgroup, one GPU claim, one shared
+  VRAM pool. A crash or a leak in one family takes every model down with it, and there
+  are no per-model limits, quotas or metrics.
+- **The endpoint's capabilities are the union, not the intersection.** `srt` works on
+  whisper and 500s on parakeet; streaming is whisper-only; the ~6 minute ceiling applies
+  to one of the two. `GET /v1/models` does not express any of this, so clients have to
+  know which model they picked. This is the real tax for the design, and it is why the
+  table below exists.
+- **Cold start becomes request latency, not deploy latency.** Measured here: 8.2 s for
+  the first request after a restart against 0.67 s warm. `STT_MODEL_TTL` is the dial
+  between holding VRAM and paying that again.
+
 ### Which model
 
 | Model | Use it for | Don't |
