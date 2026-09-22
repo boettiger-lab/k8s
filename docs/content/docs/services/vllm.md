@@ -150,13 +150,26 @@ with open("recording.wav", "rb") as f:
 This is the one place in the cluster where model routing does **not** happen in
 Kubernetes, so it is worth understanding before extending it.
 
-The vLLM endpoints route with a label selector: the model is a property of the
-*Deployment*, every model pod carries `vllm-endpoint: <node>`, and the Service picks
-whichever one is scaled up. One model per endpoint follows from that, and from vLLM
-itself — a vLLM process loads one checkpoint and pins the card for its lifetime.
+**speaches is a multi-model engine; vLLM and SGLang are not.** A vLLM process builds its
+engine around one checkpoint at startup and pins the card for its lifetime, so serving
+several models *requires* several processes — several Deployments, several GPU claims,
+and a model-aware proxy such as LiteLLM in front. That is the correct shape for vLLM, and
+close to what the LLM endpoints here do, except that routing is by hostname (one model
+scaled up per node) instead of a proxy. **There is no LiteLLM in this cluster.**
 
-speaches moves that decision inside the process. The model id is a form field on the
-request, and the server dispatches on it:
+speaches works the other way round: it calls itself "Ollama, but for TTS/STT", and
+holding several models with lazy loading and idle unloading is its native mode rather
+than something built around it. So the speech-to-text endpoint has no router and no
+fleet behind it — it is a single ordinary Deployment:
+
+```
+Ingress ─→ Service ─→ Deployment `stt` (1 replica) ─→ 1 pod ─→ 1 container (speaches)
+```
+
+Exactly the object count of the whisper-only Deployment it replaced. Going from one
+model to three added no Kubernetes resources, because the multiplexing is inside the
+process: the model id is a form field on the request, and the server dispatches on it.
+Nothing in the cluster is model-aware; Traefik just forwards to the one Service.
 
 ```
 POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
@@ -189,9 +202,9 @@ The pieces:
   and the next request cancels it. `STT_MODEL_TTL` (3600 s here) is that timer; `0`
   unloads after every request, `-1` never unloads.
 
-**The trade-off.** No Ingress, DNS record or certificate per model, switching is a
-changed form field instead of two `kubectl scale`s, and several models stay warm at
-once — which suits ASR, where checkpoints are 2–3 GB rather than an LLM's whole card.
+**The trade-off.** No extra Deployment, Service, Ingress, DNS record or certificate per
+model and no proxy to operate, switching is a changed form field instead of two
+`kubectl scale`s, and several models stay warm at once — which suits ASR, where checkpoints are 2–3 GB rather than an LLM's whole card.
 What you give up:
 
 - **No isolation.** One process, one cgroup, one GPU claim, one VRAM pool. A crash in

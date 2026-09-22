@@ -99,14 +99,31 @@ lists the ~590 models speaches could fetch.
 
 ### How one endpoint serves several models
 
-The vLLM endpoints route in Kubernetes: the model is a property of the *Deployment*,
-every model pod carries `vllm-endpoint: <node>`, and the Service's label selector is the
-router. One model per endpoint falls out of that — and out of the fact that a vLLM
-process loads exactly one checkpoint and pins the card for its lifetime.
+**speaches is a multi-model engine. vLLM and SGLang are not.** That one difference is
+the whole architecture, and it is easy to miss if those two are the only inference
+servers you have run.
 
-speaches moves the same decision from the cluster into the process. The model id is a
-form field on the request (the OpenAI schema already has one; vLLM just ignores its
-value), and the server dispatches on it:
+A vLLM process builds its engine around a single checkpoint at startup and pins the card
+for its lifetime. Serving several models therefore *requires* several processes — so on
+Kubernetes it means several Deployments, several GPU claims, and something model-aware
+in front of them: LiteLLM or a similar proxy. That is the shape to reach for with vLLM,
+and roughly what the LLM side here does, except that routing is by hostname (one model
+scaled up per node) rather than by a proxy. There is no LiteLLM in this cluster.
+
+speaches is built the other way round. It describes itself as "Ollama, but for TTS/STT":
+holding several models, loading them lazily and unloading them when idle is its *native*
+mode, not something layered on top of it. So there is no router and no fleet. Everything
+behind `whisper-cirrus` is:
+
+```
+Ingress ─→ Service ─→ Deployment `stt` (1 replica) ─→ 1 pod ─→ 1 container (speaches)
+```
+
+That is the same object count as the whisper-only Deployment it replaced: going from one
+model to three added no Kubernetes resources at all. Nothing in the cluster is
+model-aware — Traefik just forwards to the one Service. The multiplexing lives inside
+the process, where the model id is a form field on the request (the OpenAI schema
+already has one; vLLM simply ignores its value) and the server dispatches on it:
 
 ```
 POST /v1/audio/transcriptions   model=istupakov/parakeet-tdt-0.6b-v3-onnx
@@ -141,9 +158,10 @@ Four pieces make that work:
   request cancels. `STT_MODEL_TTL` is that ttl — 3600 here; `0` unloads immediately
   after each request and `-1` never unloads.
 
-**What this buys and what it costs.** No Ingress, DNS record or certificate per model;
-switching is a changed form field rather than two `kubectl scale`s; several models stay
-resident at once, which suits ASR — these are 0.6–1.5 B checkpoints of 2–3 GB against an
+**What this buys and what it costs.** No second Deployment, Service, Ingress, DNS record
+or certificate per model, and no proxy to run and keep in sync; switching is a changed
+form field rather than two `kubectl scale`s; several models stay resident at once, which
+suits ASR — these are 0.6–1.5 B checkpoints of 2–3 GB against an
 LLM that wants the whole card pinned forever. Against that:
 
 - **No isolation between models.** One process, one cgroup, one GPU claim, one shared

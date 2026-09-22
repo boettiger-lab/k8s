@@ -4,10 +4,12 @@
 # the GB10s for LLM inference, so the node was given over to ASR on 2026-09-21:
 # qwen3-8-cirrus.yaml is scaled to 0 and this is what cirrus runs.
 #
-# ONE server, SEVERAL models. speaches loads a model on first use and unloads it
-# after STT_MODEL_TTL seconds idle, so the model is chosen per request rather than
-# per deployment -- the opposite of the vLLM endpoints next door, and the reason
-# there is no "current model" here to scale between. The dispatch mechanism, and
+# ONE Deployment, ONE pod, SEVERAL models -- there is no router and no fleet here.
+# speaches is a multi-model engine (unlike vLLM or SGLang, which bind one checkpoint
+# per process and would need a Deployment each plus a LiteLLM-style proxy). It loads
+# a model on first use and unloads it after STT_MODEL_TTL seconds idle, so the model
+# is chosen per request rather than per deployment, and there is no "current model"
+# here to scale between. The dispatch mechanism, and
 # what it costs in isolation and in ragged per-model capabilities, is written up
 # under "How one endpoint serves several models" in README.md.
 #
