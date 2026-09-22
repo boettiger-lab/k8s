@@ -95,7 +95,22 @@ spec:
             #   ValueError: Free memory on device cuda:0 (105.03/121.63 GiB) on startup
             #   is less than desired GPU memory utilization (0.9, 109.46 GiB)
             # This is a startup check, not an OOM. 0.85 measured: 32.51 GiB of KV.
-            --gpu-memory-utilization 0.85
+            # 0.80, NOT 0.85. At 0.85 the node's MemAvailable bottoms out near 940 MiB
+            # and the HOST gpu-hang-watchdog's CRITICAL path SIGKILLs vLLM: it escalates
+            # on MemAvailable alone, without requiring reclaim distress. Measured
+            # 2026-09-21 -- it killed this model mid-serve at 36.8 tok/s, exit 137:
+            #   04:54 CRITICAL: MemAvailable 1178 MiB below 1536 MiB (consecutive: 3)
+            #   04:54 ESCALATION: killing vLLM  ->  killed VLLM::EngineCore
+            # while MemFree sat at 7.7-8.2 GiB and direct_reclaim was 0 the whole time.
+            #
+            # MemAvailable runs ~7 GiB BELOW MemFree on these nodes, so budget against
+            # MemAvailable, not MemFree, for as long as that watchdog path is unguarded.
+            # 0.80 gives back ~6 GiB and leaves MemAvailable near 7 GiB.
+            #
+            # A fix for the watchdog is in cluster/nodes/nimbus/gpu-hang-watchdog.sh
+            # (CRITICAL now also requires reclaim distress or a genuinely low MemFree).
+            # Once that is DEPLOYED to nimbus3, 0.85 is safe again and worth ~6 GiB of KV.
+            --gpu-memory-utilization 0.80
             # 262144 is the checkpoint's native max_position_embeddings, and it costs
             # NOTHING extra in memory. --max-model-len caps per-REQUEST length; it does
             # not size the KV pool. The pool is 835,785 tokens either way, so this only
