@@ -26,7 +26,20 @@ metadata:
   labels:
     k8s-app: vllm-nimbus3
 spec:
-  replicas: 1
+  # SCALED TO 0 2026-09-24. Laguna is not ready for production use here: it enters
+  # non-terminating reasoning loops on agentic tool-calling traffic (31 aborted requests
+  # against zero on the other two models). The cause is upstream and unresolved -- see
+  # cluster-ops tp2-benchmark.md and k8s issue #95.
+  #
+  # Everything below is correct and was measured; this is a fitness decision, not a
+  # broken config. Scale to 1 to bring it back.
+  #
+  # NOTE ON THE FIX: poolside's RC2 (2026-08-01) mitigates looping by de-quantizing 8
+  # layers' experts back to bf16, growing 67.0 GiB/15 shards -> 92.9 GiB/49 shards. The
+  # fix IS the size, so no compact requant can carry it, and at 92.9 GiB a single GB10
+  # holds only ~115k KV tokens -- under one 200k request. Reviving this with the fix
+  # means TP2 on the nimbus2+nimbus4 pair (46.5 GiB/node -> ~1.31M KV tokens).
+  replicas: 0
   # Recreate, as with every model Deployment here: a rolling update deadlocks
   # waiting for GPU the outgoing pod still holds.
   strategy:
@@ -75,6 +88,21 @@ spec:
           value: /hf
         - name: HF_HUB_OFFLINE
           value: "1"
+        # NOTE: there is NO env var that skips vLLM's startup free-memory assertion.
+        # `VLLM_SKIP_INIT_MEMORY_CHECK` was tried here and is a NO-OP -- the string does
+        # not appear anywhere in the vllm package in either the stock 0.25.1 or the
+        # Anemll 0.25.2.dev image, and `request_memory()` in v1/worker/utils.py raises
+        # unconditionally.
+        #
+        # That assertion compares MemFree against the requested budget BEFORE allocating,
+        # so page cache left by the previous pod makes a restart fail transiently:
+        #   ValueError: Free memory on device cuda:0 (102.06/121.63 GiB) on startup is
+        #   less than desired GPU memory utilization (0.85, 103.38 GiB)
+        # It crash-looped four times on 2026-09-23 and only started once caches were
+        # dropped. RESTARTING THIS DEPLOYMENT AT 0.85 NEEDS A CACHE DROP FIRST:
+        #   kubectl create -f cluster/nodes/nimbus/drop-caches-nimbus.yaml   (edit node)
+        # Restarts alone do not clear it. Lower the utilization instead if that is not
+        # acceptable.
         command: ["/bin/bash", "-c"]
         args:
         - |
@@ -95,22 +123,22 @@ spec:
             #   ValueError: Free memory on device cuda:0 (105.03/121.63 GiB) on startup
             #   is less than desired GPU memory utilization (0.9, 109.46 GiB)
             # This is a startup check, not an OOM. 0.85 measured: 32.51 GiB of KV.
-            # 0.80, NOT 0.85. At 0.85 the node's MemAvailable bottoms out near 940 MiB
-            # and the HOST gpu-hang-watchdog's CRITICAL path SIGKILLs vLLM: it escalates
-            # on MemAvailable alone, without requiring reclaim distress. Measured
-            # 2026-09-21 -- it killed this model mid-serve at 36.8 tok/s, exit 137:
+            # 0.85 is the measured best. It was temporarily 0.80 between 2026-09-21 and
+            # 2026-09-22 because the host gpu-hang-watchdog's CRITICAL path escalated on
+            # MemAvailable ALONE and SIGKILLed this model mid-serve at 36.8 tok/s:
             #   04:54 CRITICAL: MemAvailable 1178 MiB below 1536 MiB (consecutive: 3)
-            #   04:54 ESCALATION: killing vLLM  ->  killed VLLM::EngineCore
-            # while MemFree sat at 7.7-8.2 GiB and direct_reclaim was 0 the whole time.
+            #   04:54 ESCALATION: killing vLLM
+            # while MemFree sat at 7.7-8.2 GiB and direct_reclaim was 0 throughout.
             #
-            # MemAvailable runs ~7 GiB BELOW MemFree on these nodes, so budget against
-            # MemAvailable, not MemFree, for as long as that watchdog path is unguarded.
-            # 0.80 gives back ~6 GiB and leaves MemAvailable near 7 GiB.
-            #
-            # A fix for the watchdog is in cluster/nodes/nimbus/gpu-hang-watchdog.sh
-            # (CRITICAL now also requires reclaim distress or a genuinely low MemFree).
-            # Once that is DEPLOYED to nimbus3, 0.85 is safe again and worth ~6 GiB of KV.
-            --gpu-memory-utilization 0.80
+            # That watchdog is fixed (CRITICAL now also requires reclaim distress or a
+            # genuinely low MemFree) and deployed to all four GB10s, so 0.85 is safe
+            # again and is worth ~6 GiB of KV. Do NOT raise beyond 0.85: vLLM asserts
+            # against free memory BEFORE allocating, and reading 65 GB of shards leaves
+            # ~9 GiB of page cache behind, so 0.90 fails a pre-flight check on a
+            # freshly-dropped node. Note 0.85 ALSO trips that assertion after a restart
+            # if page cache has not been reclaimed -- see the note in env: above; there
+            # is no env var that skips it, so drop caches before restarting.
+            --gpu-memory-utilization 0.85
             # 262144 is the checkpoint's native max_position_embeddings, and it costs
             # NOTHING extra in memory. --max-model-len caps per-REQUEST length; it does
             # not size the KV pool. The pool is 835,785 tokens either way, so this only
@@ -190,6 +218,25 @@ spec:
             # Laguna's template names the kwarg `enable_thinking` (Anemll's DeepSeek-V4
             # recipe passes `{"thinking": false}` for the opposite reason -- to turn
             # thinking off).
+            # SERVER-WIDE OUTPUT CEILING. vLLM: "If max_new_tokens is specified in
+            # generation config, then it sets a server-wide limit on the number of
+            # output tokens for all requests." This is defence-in-depth, not the primary
+            # fix -- clients should send max_tokens.
+            #
+            # WHY: a client sending `max_tokens: null` gets max_model_len minus the
+            # prompt substituted -- observed here as max_tokens=239013 / 262099. At
+            # ~30 tok/s that is hours of licence to generate. On 2026-09-22 that produced
+            # 31 aborted requests (and zero on the other two models): the agent's 1200 s
+            # ceiling fired first, e.g. chatcmpl-bfbac6c3d6add990 ran exactly
+            # 21:54:31 -> 22:14:31. By contrast the same client caps qwen at 16000, which
+            # is most of why qwen "finished within budget" on the same prompts.
+            #
+            # TEMPERATURE: this checkpoint's generation_config.json ships temperature 1.0,
+            # which is wrong for agentic tool-calling -- the same variance that made
+            # qwen's tool-calls flip between answering and calling run to run (see
+            # qwen38-flashnext-nimbus.yaml). 0.0 for determinism. These are DEFAULTS; a
+            # client that sends its own temperature still wins.
+            --override-generation-config '{"max_new_tokens": 16000, "temperature": 0.0}'
             --default-chat-template-kwargs '{"enable_thinking":true}'
             #
             # VERIFIED 2026-09-21: reasoning 2,287 chars / content 1,279 chars, no stray
