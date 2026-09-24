@@ -12,6 +12,18 @@ runtimeClassName: nvidia
 serviceMonitor:
   enabled: false
 
+# The chart default (512Mi limit) is too tight on the discrete-GPU hosts: the
+# exporter holds a flat ~410-465Mi working set on cirrus and thelio (no growth,
+# not a leak), which pins the >85%-of-limit alert on permanently. The GB10
+# nodes sit around 60Mi.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 768Mi
+
 # Picked up by Prometheus's built-in kubernetes-pods scrape job
 # (enabled by default in the prometheus-community/prometheus chart).
 podAnnotations:
