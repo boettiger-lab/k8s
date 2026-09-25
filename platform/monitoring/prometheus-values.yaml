@@ -221,6 +221,24 @@ serverFiles:
                 not, and the FCH is implicated. Count falls with
                 `journalctl --list-boots`, never `uptime`. See cluster-ops#1, #23.
 
+          # thelio only. ThelioFall cannot tell a fall from a network drop: the
+          # 10G switch swap on 2026-09-25 produced two gaps with no reboot. A
+          # changed boot time is unambiguous, and it catches a watchdog reset
+          # fast enough to slip between two scrapes, which ThelioFall misses.
+          # Also fires on deliberate reboots; check for an operator shutdown
+          # in `journalctl -b -1` before counting it as a fall.
+          - alert: ThelioReboot
+            expr: changes(node_boot_time_seconds{node="thelio"}[30m]) > 0
+            for: 0m
+            labels: { severity: warning }
+            annotations:
+              summary: "thelio rebooted — watchdog reset unless someone rebooted it"
+              description: >-
+                node_boot_time_seconds changed in the last 30 min. If
+                `journalctl -b -1` on thelio ends without a shutdown sequence,
+                this is a fall. Duration is in /var/log/thelio-deathwatch.log
+                on cirrus. See cluster-ops#1, #23.
+
       - name: workloads
         rules:
           # THE HIGHEST-VALUE RULE HERE. Generic, needs no knowledge of any
