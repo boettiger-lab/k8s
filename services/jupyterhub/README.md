@@ -17,7 +17,7 @@ inference and does not run notebooks.
 
 ### 1. Secrets Setup
 
-We use Kubernetes Secrets to manage sensitive information (OAuth credentials, API keys, MinIO credentials, Image Registry tokens). **Do not store secrets in plaintext config files.**
+We use Kubernetes Secrets to manage sensitive information (OAuth credentials, Image Registry tokens). **Do not store secrets in plaintext config files.**
 
 Run the interactive setup script to create the necessary secrets:
 
@@ -27,13 +27,11 @@ Run the interactive setup script to create the necessary secrets:
 
 This will prompt for:
 - **GitHub OAuth Client ID & Secret**: For user authentication.
-- **NRP API Key**: For AI features via the NRP ellm endpoint (goose, OpenAI-compatible).
-- **MinIO Access Key & Secret**: For S3-compatible object storage.
 - **GitHub Container Registry (GHCR) Username & Token**: For pulling private/custom images.
 
 It creates the following secrets in the `jupyter` namespace:
 - `jupyter-oauth-secret`: Contains `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
-- `jupyter-secrets`: Contains `OPENAI_API_KEY`, `MINIO_KEY`, `MINIO_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, and `GHCR_PASSWORD`.
+- `jupyter-secrets`: Contains `GHCR_USERNAME` and `GHCR_PASSWORD`. User servers get no preset S3 or LLM credentials; users configure their own.
 - `ghcr-pull-secret`: Docker registry secret for authenticating with GHCR.
 
 #### Updating a Single Secret Key
@@ -47,9 +45,6 @@ To rotate or update one key without recreating all secrets, use the `--update-ke
 You will be prompted securely if `VALUE` is omitted. Examples:
 
 ```bash
-# Update just the OpenAI/NRP API key (prompted):
-./setup-secrets.sh --update-key jupyter-secrets OPENAI_API_KEY
-
 # Update GitHub OAuth secret (value from env var):
 ./setup-secrets.sh --update-key jupyter-oauth-secret GITHUB_CLIENT_SECRET "$GITHUB_CLIENT_SECRET"
 
@@ -107,10 +102,8 @@ The `singleuser.networkPolicy` in `public-config.yaml` allows:
 
 ### User Environment
 
-User pods automatically receive environment variables for MinIO access (via `KubeSpawner.environment`):
-- `AWS_S3_ENDPOINT: "minio.carlboettiger.info"`
-- `AWS_HTTPS: "true"`
-- `AWS_VIRTUAL_HOSTING: "FALSE"`
+User pods get no preset S3 (`AWS_*`, `MINIO_*`) or LLM (`OPENAI_*`) settings, and no
+default opencode / jupyter-ai provider. Users configure their own endpoints and keys.
 
 #### CPU thread defaults (BLAS / OpenMP / PyTorch)
 
