@@ -56,7 +56,7 @@ workload to one.
 
 - [**Prometheus & exporters**]({{< relref "docs/monitoring/prometheus" >}}) — the metrics store, GPU/host/drive exporters
 - [**Grafana**]({{< relref "docs/monitoring/grafana" >}}) — drive health, node health, GPU dashboards
-- [**Carbon dashboard**]({{< relref "docs/monitoring/carbon" >}}) — power draw and CO₂ per token for LLM inference, per node
+- [**Carbon dashboard**]({{< relref "docs/monitoring/carbon" >}}) — power, CO₂ per token and service quality for LLM inference, per model, live or aggregated
 
 ## Administration
 
