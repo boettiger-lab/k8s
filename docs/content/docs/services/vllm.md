@@ -33,7 +33,7 @@ curl -s -H "Authorization: Bearer $VLLM_API_KEY" \
 | Model | Where it runs | Served as | Manifest / notes |
 |---|---|---|---|
 | **DeepSeek-V4-Flash-DSpark** | nimbus2 + nimbus4 (**2× GB10, TP2**) | `deepseek-v4-flash` | `deepseek-v4-flash-gb10pair.yaml`. **~70 tok/s** single stream, 350K context |
-| **Laguna S 2.1 NVFP4** | nimbus3 (1× GB10) | `laguna` | `laguna-nimbus3.yaml`. ~23–32 tok/s, 256K context, tool calling + reasoning |
+| Laguna S 2.1 NVFP4 | nimbus3 (1× GB10) | `laguna` | `laguna-nimbus3.yaml`, **scaled to 0** since 2026-09-24 — loops on agentic traffic, see [below](#laguna-on-nimbus3). ~23–32 tok/s, 256K context |
 | Qwen3.8-Flash-Next NVFP4 | nimbus (1× GB10) | `qwen`, `qwen3.8` | `qwen38-flashnext-nimbus.yaml`. ~24 tok/s single stream, 256K context |
 | Qwen3.8-27B AWQ INT4, MTP | cirrus (2× Quadro RTX 8000) | `qwen3-8` | `qwen3-8-cirrus.yaml`, **scaled to 0** since cirrus became an ASR node |
 | Gemma 4 | cirrus | — | `gemma4-cirrus.yaml`, normally scaled to 0 |
@@ -51,13 +51,15 @@ scaling `qwen3-8` back to 1 restores it.
 |---|---|---|
 | `https://vllm-nimbus.carlboettiger.info` | nimbus | one LLM at a time |
 | `https://vllm-nimbus2.carlboettiger.info` | nimbus2 (+nimbus4) | the TP2 pair's API server |
-| `https://vllm-nimbus3.carlboettiger.info` | nimbus3 | one LLM at a time |
+| `https://vllm-nimbus3.carlboettiger.info` | nimbus3 | nothing since Laguna was scaled to 0 (503) |
 | `https://whisper-cirrus.carlboettiger.info` | cirrus | speech-to-text, several models at once |
 | `https://vllm-cirrus.carlboettiger.info` | cirrus | nothing — kept for the rollback |
 
 `services/vllm/endpoints.yaml` holds these — Services, Ingresses and the Traefik
 transport. Each model is a Deployment beside it carrying the pod label
-`vllm-endpoint: cirrus` (or `nimbus`), which the matching Service selects. Switching
+`vllm-endpoint: <node>` (`cirrus`, `nimbus`, `nimbus3`), which the matching Service
+selects. The exceptions carry their own Service and Ingress:
+`deepseek-v4-flash-gb10pair.yaml` (`vllm-nimbus2`) and `stt-cirrus.yaml` (`whisper-cirrus`). Switching
 models is scaling one down and the next up: no new Ingress, DNS record or certificate.
 
 The speech-to-text endpoint is the exception: it routes on the request's `model` field
@@ -128,6 +130,14 @@ the per-token figure for this pair is not yet right.
 `laguna-nimbus3.yaml`, served at `https://vllm-nimbus3.carlboettiger.info` as `laguna`,
 256K context, with **tool calling and reasoning both working**.
 
+> **Scaled to 0 on 2026-09-24 — not fit for agentic traffic.** Under real agent load it
+> enters non-terminating reasoning loops: 31 aborted requests against zero on
+> `deepseek-v4-flash` and `qwen3.8-flashnext`. The cause is upstream and unresolved
+> (issue #95). The manifest is kept correct and measured; this is a fitness decision,
+> not a broken config. poolside's RC2 mitigation de-quantizes 8 layers' experts back to
+> bf16 (92.9 GiB), which leaves one GB10 only ~115K KV tokens — so reviving Laguna *with*
+> the fix means TP2 on the nimbus2+nimbus4 pair, not nimbus3.
+
 **Use the `ennerd` checkpoint, not `poolside`.** poolside's official NVFP4 leaves 8 of 48
 layers' experts in bf16, so it is 93 GiB and leaves only ~4 GiB of KV — a 16K ceiling,
 and it fails to load at all at 32K. `ennerd/Laguna-S-2.1-NVFP4` packs all 48 layers and
@@ -159,22 +169,14 @@ Two flags are non-obvious, and **both failed silently** rather than erroring:
 A client reading `reasoning_content` gets an empty string and will conclude the parser is
 broken.
 
-> **⚠ Pending adjustment — revisit after the current agent benchmark.** Laguna is running at
-> `--gpu-memory-utilization 0.80` rather than the measured-best `0.85`. This was an interim
-> mitigation on 2026-09-21, when the host `gpu-hang-watchdog` SIGKILLed it mid-serve: at
-> 0.85 the node's `MemAvailable` bottoms out near 940 MiB and the watchdog's CRITICAL path
-> escalated on that alone.
->
-> The watchdog has since been fixed (CRITICAL now also requires reclaim distress or a
-> genuinely low `MemFree`) and deployed to all four GB10s, so **0.85 should be safe again
-> and is worth ~6 GiB of KV plus some decode speed** — under live traffic at 0.80 Laguna
-> probes at 23.1 tok/s against 32.4 measured at 0.85.
->
-> Not yet done because (a) the patched CRITICAL branch has not been exercised at a low
-> `MemAvailable`, and (b) restarting discards a warm prefix cache — 85% hit rate over 13
-> hours of real traffic. Raise it, watch
-> `journalctl -u gpu-hang-watchdog` on nimbus3 for a CRITICAL line that now reports both
-> metrics and does *not* escalate, and re-measure.
+**Restarting it at `--gpu-memory-utilization 0.85` needs a cache drop first.** vLLM's
+startup assertion compares `MemFree` against the requested budget before allocating, so
+page cache left by the previous pod makes a restart crash-loop
+(`Free memory on device ... is less than desired GPU memory utilization`). There is no env
+var that skips it — `VLLM_SKIP_INIT_MEMORY_CHECK` is a no-op. Run
+`drop-caches-nimbus.yaml` (edit its `kubernetes.io/hostname` to `nimbus3`) before scaling back to 1. The watchdog fix
+described [below](#the-nodes-are-not-equivalent) is what made 0.85 safe again after the
+interim 0.80.
 
 ### The nodes are not equivalent
 
@@ -213,8 +215,8 @@ before deploying there:
 - `nvidia.com/gpu: 8` is 8 time-slices of one GPU sharing one pool, so the count is a
   concurrency cap, not a memory partition.
 
-The GB10s are also **arm64** and tainted `dedicated=gb10:NoSchedule`, so its manifest uses
-NGC's arm64 vLLM image and carries the toleration. See
+The GB10s are also **arm64** and tainted `dedicated=gb10:NoSchedule`, so their manifests
+use arm64 vLLM images and carry the toleration. See
 [Node placement]({{< relref "../infrastructure/node-placement" >}}).
 
 ## Speech-to-text on cirrus
@@ -378,7 +380,7 @@ whisper for everything else.
 
 ## Deployment
 
-The `services/vllm/` directory contains the manifests for both endpoints.
+The `services/vllm/` directory contains the manifests for every endpoint.
 
 ### Quick Start
 
@@ -391,6 +393,7 @@ cd services/vllm
 # Or apply a single manifest directly
 kubectl apply -f stt-cirrus.yaml                 # cirrus: speech-to-text
 kubectl apply -f qwen38-flashnext-nimbus.yaml    # nimbus: an LLM
+kubectl apply -f deepseek-v4-flash-gb10pair.yaml # nimbus2+4: TP2 -- see "Restarting the pair"
 
 # Check status
 kubectl get pods -n vllm
@@ -408,6 +411,7 @@ Under `services/vllm/`:
 
 - `endpoints.yaml` - the Services, Ingresses, certs and Traefik transport for the LLM endpoints
 - `stt-cirrus.yaml` - the speech-to-text server on cirrus, with its own Service and Ingress
+- `deepseek-v4-flash-gb10pair.yaml` - the TP2 pair: head + worker Deployments, with their own Service and Ingress
 - `<model>-<node>.yaml` - an LLM Deployment only, labelled `vllm-endpoint: <node>`
 - `secrets.sh` - creates the `vllm-huggingface-token` and `vllm-api-key` secrets (git-ignored)
 - `up.sh` / `down.sh` - deploy / cleanup scripts

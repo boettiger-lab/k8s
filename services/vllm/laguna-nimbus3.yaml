@@ -100,7 +100,7 @@ spec:
         #   less than desired GPU memory utilization (0.85, 103.38 GiB)
         # It crash-looped four times on 2026-09-23 and only started once caches were
         # dropped. RESTARTING THIS DEPLOYMENT AT 0.85 NEEDS A CACHE DROP FIRST:
-        #   kubectl create -f cluster/nodes/nimbus/drop-caches-nimbus.yaml   (edit node)
+        #   kubectl create -f services/vllm/drop-caches-nimbus.yaml   (edit the hostname)
         # Restarts alone do not clear it. Lower the utilization instead if that is not
         # acceptable.
         command: ["/bin/bash", "-c"]

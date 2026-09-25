@@ -5,6 +5,8 @@ Each GPU node serves one model at a time, at a fixed URL:
 | Endpoint | Node | Currently | Hardware |
 |---|---|---|---|
 | <https://vllm-nimbus.carlboettiger.info> | nimbus | `qwen`/`qwen3.8` — Qwen3.8-**Flash-Next** NVFP4 | DGX Spark GB10, 128 GB unified |
+| <https://vllm-nimbus2.carlboettiger.info> | nimbus2 + nimbus4 | `deepseek-v4-flash` — DeepSeek-V4-Flash-DSpark, **TP2**, ~70 tok/s | 2× Dell Pro Max GB10 over CX-7 |
+| <https://vllm-nimbus3.carlboettiger.info> | nimbus3 | *nothing* — `laguna` scaled to 0 (loops on agentic traffic) | Dell Pro Max GB10 |
 | <https://whisper-cirrus.carlboettiger.info> | cirrus | **speech-to-text**, several models | 2× Quadro RTX 8000 (48 GB each) |
 | <https://vllm-cirrus.carlboettiger.info> | cirrus | *nothing* — see below | — |
 
@@ -32,6 +34,8 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it) | LLM Deployments on cirrus, both scaled to 0 since cirrus became an ASR node |
 | `qwen38-flashnext-nimbus.yaml` | **Current** nimbus model: Qwen3.8-Flash-Next NVFP4, PLE table mmapped from NVMe |
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
+| `deepseek-v4-flash-gb10pair.yaml` | **Current** nimbus2+nimbus4 model: DeepSeek-V4-Flash-DSpark, TP2 head + worker, with its own Service/Ingress. Start order matters — see the docs page |
+| `laguna-nimbus3.yaml` | Laguna S 2.1 NVFP4 on nimbus3 — **scaled to 0** 2026-09-24 (upstream reasoning loops, issue #95) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |
 | `bench-flashnext-nimbus.py` | Prefill/decode + concurrency benchmark, cold vs warm prefix (run inside the pod) |
@@ -44,7 +48,7 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 ## Switching models
 
 The URL belongs to the node, not the model. Every model Deployment carries the pod
-label `vllm-endpoint: cirrus` (or `nimbus`), which is what the Service selects, so a
+label `vllm-endpoint: <node>` (`cirrus`, `nimbus`, `nimbus3`), which is what the Service selects, so a
 switch is two scales and no ingress/DNS/cert churn:
 
 ```bash

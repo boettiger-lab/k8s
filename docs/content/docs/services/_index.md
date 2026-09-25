@@ -15,7 +15,7 @@ What the cluster provides to the people using it. Repo directory:
 |---|---|---|
 | [**JupyterHub**](jupyterhub) | Multi-user notebooks, CPU and GPU profiles | [jupyterhub.cirrus.carlboettiger.info](https://jupyterhub.cirrus.carlboettiger.info) |
 | [**MinIO**](minio) | S3-compatible object storage for research data | [minio.carlboettiger.info](https://minio.carlboettiger.info) |
-| [**vLLM**](vllm) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
+| [**vLLM**](vllm) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [**PostgreSQL**](postgres) | Relational database | in-cluster |
 | [**GitHub Actions runners**](github-actions) | Self-hosted CI for lab repositories | — |
 
