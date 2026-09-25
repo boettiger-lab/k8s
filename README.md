@@ -45,7 +45,7 @@ themselves.
 | [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [`titiler/`](services/titiler/) | Dynamic tile server for cloud-optimized rasters | [titiler](https://titiler.carlboettiger.info) |
 | [`hash-archive/`](services/hash-archive/) | Content-hash registry for data provenance | [hash-archive](https://hash-archive.carlboettiger.info) |
-| [`mcp/`](services/mcp/) | GPU MCP data server (cudf/polars over the STAC catalogue), on nimbus | [gpu-mcp-nimbus](https://gpu-mcp-nimbus.carlboettiger.info) |
+| [`mcp/`](services/mcp/) | GPU MCP data server (cudf/polars over the STAC catalogue), on nimbus | parked (`replicas: 0`, no ingress) |
 | [`postgres/`](services/postgres/) | PostgreSQL for research use (**not currently deployed**) | — |
 | [`github-actions/`](services/github-actions/) | Self-hosted CI runners for lab repos | — |
 | [`openshell/`](services/openshell/) | Sandboxed AI-agent runtime (**not yet deployed**) | — |

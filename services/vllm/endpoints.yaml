@@ -4,14 +4,13 @@
 # essentially a whole RTX 8000; on nimbus it wants most of the unified pool), so an
 # endpoint is a property of the machine, not of the model:
 #
-#   https://vllm-cirrus.carlboettiger.info   -> whatever is scaled up on cirrus
 #   https://vllm-nimbus.carlboettiger.info   -> whatever is scaled up on nimbus
 #
 # NOTE: as of 2026-09-21 nothing is scaled up on cirrus -- the node was given over to
 # speech-to-text (stt-cirrus.yaml) because Turing cards are no longer competitive with
-# the GB10s for LLM inference. The cirrus Service and Ingress below are deliberately
-# kept with no backend: they return 503, and scaling qwen3-8 back to 1 restores the
-# endpoint without a new DNS record or certificate.
+# the GB10s for LLM inference. The cirrus Ingress (vllm-cirrus.carlboettiger.info) was
+# removed 2026-09-25; the in-cluster Service below is kept, so scaling qwen3-8 back to 1
+# restores it for cluster clients. A public endpoint would need the Ingress back.
 #
 # The model identifies itself via --served-model-name / GET /v1/models; it never
 # appears in the URL. Switching models therefore needs no new Ingress, DNS record or
@@ -70,38 +69,6 @@ spec:
       name: http
   selector:
     vllm-endpoint: cirrus
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: vllm-ingress
-  namespace: vllm
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
-    # DNS-only (grey cloud): bypass Cloudflare's proxy so long-running / bursty
-    # completions aren't cut off by CF's fixed ~100s time-to-first-byte limit
-    # (524 errors). Origin serves its own Let's Encrypt cert, so TLS is intact.
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-    traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
-  labels:
-    app: vllm-cirrus
-spec:
-  ingressClassName: traefik
-  rules:
-  - host: vllm-cirrus.carlboettiger.info
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: vllm-service
-            port:
-              number: 8000
-  tls:
-  - hosts:
-    - vllm-cirrus.carlboettiger.info
-    secretName: vllm-cirrus-tls
 
 ---
 # nimbus (DGX Spark) --- one GB10, unified memory. Reached through Traefik on

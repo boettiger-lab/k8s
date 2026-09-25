@@ -30,7 +30,6 @@ else
     kubectl delete -f "$MODEL_MANIFEST" --ignore-not-found
   fi
   echo "Endpoints kept:"
-  echo "  https://vllm-cirrus.carlboettiger.info"
   echo "  https://vllm-nimbus.carlboettiger.info"
   echo "  https://vllm-nimbus2.carlboettiger.info"
   echo "  https://vllm-nimbus3.carlboettiger.info"
