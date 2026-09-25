@@ -37,7 +37,14 @@ spec:
         kubernetes.io/hostname: cirrus
       containers:
       - name: minio
-        image: quay.io/minio/minio:latest
+        # Pinned to the digest cached on cirrus, and NEVER pulled. MinIO made
+        # quay.io/minio/minio private (401, even by digest) and minio/minio on
+        # Docker Hub is gone, so the node's local copy is the only one left.
+        # `:latest` defaulted to imagePullPolicy Always, which took MinIO down
+        # at the 2026-09-25 cirrus reboot. Do not prune this image from
+        # cirrus's containerd. MinIO is EOL; RustFS is the successor.
+        image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+        imagePullPolicy: IfNotPresent
         args:
         - server
         - /data1
