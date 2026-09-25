@@ -1,32 +1,33 @@
 # carbon-api -- the cluster's LLM carbon/performance dashboard.
 #
-# ONE deployment for the whole cluster, one card per GPU node, live at
-# https://carbon.carlboettiger.info (carbon-cirrus.carlboettiger.info still
-# resolves here so older links keep working).
+# ONE deployment for the whole cluster, live at https://carbon.carlboettiger.info
+# (carbon-cirrus.carlboettiger.info still resolves here so older links keep
+# working). One card per SERVED MODEL, with a Live / Aggregate (24h/7d/15d)
+# toggle; a model scaled to 0 keeps its card and its record for as long as
+# Prometheus retains its series (15d).
 #
-# This replaces the previous shape -- one Deployment and one hostname per
-# machine (cirrus-carbon-api.yaml + the archived nimbus-carbon-api.yaml),
-# which broke down as soon as the machines became one cluster: nimbus's
-# footprint went unreported, and because both models serve out of the `vllm`
-# namespace, nimbus's tokens were being summed into cirrus's row while
-# cirrus's watts stayed node-scoped -- understating cirrus's CO2/token.
+# Models are DISCOVERED from vLLM's metrics -- nothing below lists them for the
+# service to find. What is configured is data, not code:
 #
-# Which nodes are reported is data, not code: edit the ConfigMap below and
-# restart. Every vLLM query is filtered by BOTH node and namespace.
+#   nodes.json   every node that serves (or has served) models. Power is the
+#                node's TOTAL GPU power, attributed to a model only while that
+#                model is serving there, so GPU time serving no LLM (cirrus's
+#                speech-to-text) is counted nowhere.
+#                power_hosts: every DCGM host whose watts belong to that node's
+#                models. A tensor-parallel model lists every rank -- only the
+#                head exports vLLM metrics, but the worker draws half the
+#                power. A host may be claimed once.
+#   models.json  optional display names, keyed by served model name, or
+#                "model@node" where a name is reused on two nodes ("qwen" has
+#                been more than one checkpoint on nimbus).
 #
-#   node_power: true   attribute TOTAL node GPU power to this node's model.
-#                      Required on any node whose GPUs are shared, and on
-#                      nimbus regardless: DCGM attributes the GB10's watts to
-#                      whichever pod its pod-resources mapping picked (an MCP
-#                      pod in `default`), so a namespace-scoped power query
-#                      there returns nothing at all. Flagged in the API as
-#                      power_is_node_total and labelled on the card.
-#
-# thelio has a GPU but serves no LLM, so it has no entry.
+# Both are read once at start: edit, then bump checksum/config below (or
+# `kubectl -n monitoring rollout restart deployment/carbon-api`).
 #
 # Requires the monitoring stack (Prometheus + dcgm-exporter) from ./install.sh
 # and the prometheus.io/scrape annotations on the vLLM services
-# (services/vllm/endpoints.yaml), which follow whichever model is live.
+# (services/vllm/endpoints.yaml, and the TP2 pair's own Service in
+# services/vllm/deepseek-v4-flash-gb10pair.yaml).
 #
 # Source: https://github.com/boettiger-lab/nimbus-carbon-api
 apiVersion: v1
@@ -37,21 +38,31 @@ metadata:
 data:
   nodes.json: |
     [
-      {
-        "name": "cirrus",
-        "namespace": "vllm",
-        "gpu_hardware": "Quadro RTX 8000",
-        "gpu_count": 2,
-        "node_power": true
-      },
-      {
-        "name": "nimbus",
-        "namespace": "vllm",
-        "gpu_hardware": "NVIDIA GB10",
-        "gpu_count": 1,
-        "node_power": true
-      }
+      {"name": "cirrus",  "gpu_hardware": "Quadro RTX 8000", "gpu_count": 2},
+      {"name": "nimbus",  "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1},
+      {"name": "nimbus2", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 2,
+       "power_hosts": ["nimbus2", "nimbus4"]},
+      {"name": "nimbus3", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1}
     ]
+  models.json: |
+    {
+      "deepseek-v4-flash": {
+        "display_name": "DeepSeek-V4-Flash-DSpark",
+        "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s"
+      },
+      "qwen@nimbus": {
+        "display_name": "Qwen3.8-Flash-Next NVFP4",
+        "description": "MoE, PLE table mmapped from NVMe, MTP speculative decoding"
+      },
+      "laguna": {
+        "display_name": "Laguna S 2.1 NVFP4",
+        "description": "ennerd all-48-layer NVFP4 checkpoint; scaled to 0 (loops on agentic traffic)"
+      },
+      "qwen3-8": {
+        "display_name": "Qwen3.8-27B AWQ INT4",
+        "description": "Dense, MTP speculative decoding; scaled to 0 since cirrus became an ASR node"
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -68,8 +79,8 @@ spec:
       labels:
         app: carbon-api
       annotations:
-        # Roll the pod when the node list changes -- it is read once at start.
-        checksum/nodes: "cirrus-2gpu-nodepower,nimbus-1gpu-nodepower"
+        # Roll the pod when the config changes -- it is read once at start.
+        checksum/config: "2026-09-24-per-model-4nodes"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -89,6 +100,8 @@ spec:
               value: ":8080"
             - name: NODES_FILE
               value: /etc/carbon-api/nodes.json
+            - name: MODELS_FILE
+              value: /etc/carbon-api/models.json
           volumeMounts:
             - name: nodes
               mountPath: /etc/carbon-api

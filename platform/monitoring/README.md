@@ -5,10 +5,12 @@ carbon/performance dashboard; **extended 2026-07-11** with `smartctl-exporter`
 (per-drive SMART), `node-exporter` (host CPU/mem/disk), and **Grafana** for
 drive-health / node / GPU dashboards.
 
-Carbon dashboard: **one deployment for the whole cluster**, one card per GPU node,
-live at <https://carbon.carlboettiger.info> (`carbon-cirrus.carlboettiger.info` still
-resolves there). `carbon-api.yaml` here; the node list is the `carbon-api-nodes`
-ConfigMap, read once at startup -- edit it and `rollout restart`.
+Carbon dashboard: **one deployment for the whole cluster**, one card per served model
+(live, or aggregated over 24h/7d/15d), live at <https://carbon.carlboettiger.info>
+(`carbon-cirrus.carlboettiger.info` still resolves there). `carbon-api.yaml` here; the
+node list and model display names are the `carbon-api-nodes` ConfigMap, read once at
+startup -- edit it and `rollout restart`. Models themselves are discovered from vLLM's
+metrics, so a new model on a known node needs no config.
 
 This replaced the per-node deployments (`cirrus-carbon-api.yaml` and the archived
 `nimbus-carbon-api.yaml`) on 2026-09-08. They keyed state by namespace, which was fine
@@ -25,11 +27,13 @@ and grouped by node AND namespace (issue #60).
 The dashboard also needs the `prometheus.io/scrape` annotations on the vLLM services
 (see `../../services/vllm/endpoints.yaml`) so Prometheus scrapes vLLM's `/metrics`.
 
-## Shared-GPU power attribution
+## Power attribution
 
-Nodes with `node_power: true` report TOTAL node GPU power, attributed to that node's
-model as an explicit upper bound (`power_is_node_total=true` in the API, labelled on
-the card). Both current nodes need it:
+Power is always TOTAL node GPU power, attributed to a model only while that model is
+serving on the node (so GPU time serving no LLM is counted nowhere). A tensor-parallel
+model lists every rank's host in `power_hosts` -- the nimbus2+nimbus4 pair's worker
+exports no vLLM metrics but draws half the power. Per-pod DCGM attribution is not used,
+because:
 
 - **cirrus**: two GPUs time-sliced across vllm/jupyter/mcp -- per-tenant power is not
   measurable.
