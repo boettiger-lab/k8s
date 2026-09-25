@@ -41,7 +41,6 @@ kubectl apply -f "$MODEL_MANIFEST"
 kubectl -n vllm get pods -o wide
 echo
 echo "cirrus (speech-to-text): https://whisper-cirrus.carlboettiger.info/v1/models"
-echo "cirrus (LLM, unbacked):   https://vllm-cirrus.carlboettiger.info/v1/models"
 echo "nimbus:                   https://vllm-nimbus.carlboettiger.info/v1/models"
 echo "nimbus2+4 (TP2):          https://vllm-nimbus2.carlboettiger.info/v1/models"
 echo "nimbus3:                  https://vllm-nimbus3.carlboettiger.info/v1/models"

@@ -1,5 +1,5 @@
 # mcp-gpu-nimbus -- GPU-backed MCP data server (cudf/polars query engine over
-# the public STAC catalogue), live at https://gpu-mcp-nimbus.carlboettiger.info
+# the public STAC catalogue), parked; its public ingress was removed 2026-09-25
 #
 # This manifest was reconstructed from the running object on 2026-08-24. It had
 # only ever been `kubectl apply`d by hand and existed nowhere but nimbus's

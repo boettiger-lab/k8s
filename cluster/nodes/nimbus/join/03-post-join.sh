@@ -106,4 +106,3 @@ echo
 echo "DNS will move these to cirrus's IP within a few minutes (external-dns"
 echo "runs on a 1m interval), then cert-manager issues the certs:"
 echo "  vllm-nimbus.carlboettiger.info"
-echo "  gpu-mcp-nimbus.carlboettiger.info"

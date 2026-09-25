@@ -4,7 +4,7 @@ Model Context Protocol servers exposed to agents and notebooks.
 
 | Directory | Service | Host |
 |---|---|---|
-| this directory | `mcp-data-server`, GPU query engine (cudf/polars) over the public STAC catalogue, on **nimbus** | <https://gpu-mcp-nimbus.carlboettiger.info> |
+| this directory | `mcp-data-server`, GPU query engine (cudf/polars) over the public STAC catalogue, on **nimbus** | parked: `replicas: 0`, public ingress removed 2026-09-25 |
 
 ## nimbus
 
@@ -16,7 +16,8 @@ nodeSelector, and its image tag (`gpu-arm64`) is arm64-only. See
 ```bash
 kubectl apply -f services/mcp/
 kubectl -n default rollout status deploy/mcp-gpu-nimbus
-curl -s https://gpu-mcp-nimbus.carlboettiger.info/healthz
+kubectl -n default port-forward svc/mcp-gpu-nimbus 8080:80 &
+curl -s localhost:8080/healthz
 ```
 
 It claims **1** of nimbus's 8 `nvidia.com/gpu` time-slices; vLLM claims 6. A
