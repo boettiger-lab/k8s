@@ -7,11 +7,9 @@
 # SEVENTEEN DAYS, every one an OOMKill. Separately, thelio has died silently
 # four times and nothing ever reported it. See k8s issue #73.
 #
-# kube-state-metrics stays OFF for now: it is what most kube_* alert examples
-# need, but it adds real series volume and this Prometheus has had cardinality
-# trouble before (see the guards below). The rules in serverFiles are
-# deliberately built from metrics we ALREADY scrape, so alerting starts working
-# without that decision being forced.
+# kube-state-metrics is ON since 2026-09-25, but ALLOWLISTED to five metrics
+# (see its block below). Unrestricted it adds real series volume, and this
+# Prometheus has had cardinality trouble before (see the guards below).
 alertmanager:
   enabled: true
   persistence:
@@ -73,8 +71,25 @@ alertmanager:
               {{ range .Alerts }}{{ .Annotations.summary }}
               {{ .Annotations.description }}
               {{ end }}
+# kube-state-metrics: ON, allowlisted. Enabled 2026-09-25 after a cirrus reboot
+# left MinIO in ImagePullBackOff for ~40 min with nothing alerting: a container
+# that never starts emits no cAdvisor series, so ContainerRestartLoop cannot see
+# it, and nothing else here saw Deployment status at all. Only the collectors
+# and metrics the workload rules read are exported -- one series per
+# Deployment/StatefulSet (x2 each) plus one per currently-WAITING container, a
+# few hundred series in total. Add to the allowlist deliberately, not wholesale.
 kube-state-metrics:
-  enabled: false
+  enabled: true
+  collectors: [deployments, statefulsets, pods]
+  metricAllowlist:
+    - kube_deployment_spec_replicas
+    - kube_deployment_status_replicas_available
+    - kube_statefulset_replicas
+    - kube_statefulset_status_replicas_ready
+    - kube_pod_container_status_waiting_reason
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }
 # node-exporter: ON, on the standard :9100. (Was briefly on :9101 to avoid the
 # armada-pulsar node-exporter that owned :9100; armada was torn down 2026-07-11,
 # so :9100 is free again and ours uses the default.)
@@ -272,6 +287,39 @@ serverFiles:
             annotations:
               summary: "{{ $labels.namespace }}/{{ $labels.pod }} is near its memory limit"
               description: "Container {{ $labels.container }} has held >85% of its memory limit for 15m. An OOMKill here restarts the pod with no warning."
+
+          # The following three need kube-state-metrics (allowlisted above).
+          #
+          # `for: 20m`, not 15: qwen38-flashnext is `strategy: Recreate` with a
+          # ~13 min 126 GiB reload, so an intentional rollout sits below spec
+          # that long. Intentional `replicas: 0` has spec 0 and never fires.
+          - alert: DeploymentUnavailable
+            expr: kube_deployment_status_replicas_available < kube_deployment_spec_replicas
+            for: 20m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.deployment }} has fewer available replicas than desired"
+              description: "Below spec for 20m. Check the pods for ImagePullBackOff, CrashLoopBackOff, or Pending. For the vLLM TP2 pair, a head waiting at world_size=2 rank=0 means the worker needs restarting first."
+
+          - alert: StatefulSetUnavailable
+            expr: kube_statefulset_status_replicas_ready < kube_statefulset_replicas
+            for: 20m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.statefulset }} has fewer ready replicas than desired"
+              description: "Below spec for 20m."
+
+          # Catches what ContainerRestartLoop structurally cannot: a container
+          # that never starts (image pull failures, bad config) or dies too fast
+          # to be scraped between restarts. MinIO sat in ImagePullBackOff, and
+          # high-seas crashlooped 11 times, both unalerted, on 2026-09-25.
+          - alert: ContainerStuckWaiting
+            expr: kube_pod_container_status_waiting_reason{reason=~"ImagePullBackOff|ErrImagePull|CrashLoopBackOff|CreateContainerConfigError|InvalidImageName"} == 1
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.pod }} stuck in {{ $labels.reason }}"
+              description: "Container {{ $labels.container }} has been waiting with reason {{ $labels.reason }} for 15m."
 
       - name: disks
         rules:
