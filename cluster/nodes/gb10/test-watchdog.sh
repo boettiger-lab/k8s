@@ -89,11 +89,19 @@ reset; mkmeminfo 8100000 8200000; mkvmstat 1000 10; tick >/dev/null
 mkvmstat 1000 20000; o1="$(tick)"; mkvmstat 1000 40000; o2="$(tick)"; mkvmstat 1000 60000; o3="$(tick)"
 check "swap distress escalates" "ESCALATION: killing vLLM" "$o3"
 
-echo "== 5. critically low memory -- kills without waiting for distress =="
+echo "== 5. critically low MemFree too -- kills without waiting for distress =="
 reset; mkmeminfo 1000000 1000000; mkvmstat 1000 10; tick >/dev/null
 mkvmstat 1000 10; o1="$(tick)"; mkvmstat 1000 10; o2="$(tick)"; mkvmstat 1000 10; o3="$(tick)"
 check "flags CRITICAL"    "CRITICAL" "$o1"
 check "kills by 3rd tick" "ESCALATION: killing vLLM" "$o3"
+
+echo "== 5b. 2026-09-21: MemAvailable critical, MemFree healthy, no distress -- must NOT kill =="
+# The nimbus3 Laguna kill: MemAvailable ~1 GiB, MemFree ~8 GiB, direct_reclaim 0. On
+# GB10 cudaMemGetInfo free == MemFree, so CUDA still had ~8 GiB to give.
+reset; mkmeminfo 8000000 1000000; mkvmstat 1000 10; tick >/dev/null
+for i in 1 2 3 4; do mkvmstat 1000 10; out="$(tick)"; done
+check "does not escalate" "!ESCALATION" "$out"
+check "does not kill"     "!STUB-KILL" "$out"
 
 echo "== 6. distress counter resets when pressure clears =="
 reset; mkmeminfo 8100000 8200000; mkvmstat 1000 10; tick >/dev/null

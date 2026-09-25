@@ -63,7 +63,11 @@ VMSTAT_PREV="$STATE_DIR/vmstat_prev"
 
 SMI_TIMEOUT=20          # seconds to wait for nvidia-smi before calling it hung
 MEM_MIN_KIB=$((8*1024*1024))     # 8 GiB: "worth watching", NOT on its own a kill
-MEM_CRIT_KIB=$((1536*1024))      # 1.5 GiB: kill without waiting for corroboration.
+MEM_CRIT_KIB=$((1536*1024))      # 1.5 GiB of MemAvailable: the CRITICAL threshold.
+# MemAvailable alone is NEVER sufficient -- see the CRITICAL branch. A kill needs either
+# reclaim distress or MemFree itself below this floor. On GB10 `cudaMemGetInfo` free ==
+# MemFree, so MemFree is the number that says whether CUDA can still allocate.
+FREE_CRIT_KIB=$((1536*1024))     # 1.5 GiB of MemFree: the corroborating condition.
                                  # The 2026-08-24 wedge bottomed out at 2.2 GiB.
 # Reclaim distress, measured per tick (the timer runs every 60s). Both are page
 # counts, so at 4 KiB/page: 51200 pages ~= 200 MiB/min of direct reclaim, and
@@ -199,11 +203,26 @@ fi
 if pgrep -f 'VLLM::EngineCore' >/dev/null 2>&1; then
     avail=$(awk '/^MemAvailable:/ {print $2}' "$PROC/meminfo")
     avail=${avail:-0}
-    if [ "$avail" -lt "$MEM_CRIT_KIB" ]; then
-        # Far past arguing about metrics -- act.
+    free=$(awk '/^MemFree:/ {print $2}' "$PROC/meminfo")
+    free=${free:-0}
+    if [ "$avail" -lt "$MEM_CRIT_KIB" ] && { [ "$DISTRESS" = 1 ] || [ "$free" -lt "$FREE_CRIT_KIB" ]; }; then
+        # Corroboration is required HERE TOO, not only on the MEM_MIN path below.
+        #
+        # 2026-09-21: this branch SIGKILLed a healthy Laguna on nimbus3 serving at
+        # 36.8 tok/s:
+        #   04:52 CRITICAL: MemAvailable  944 MiB below 1536 MiB (consecutive: 1)
+        #   04:53 dropped clean page cache: MemFree 7737 -> 8219 MiB
+        #   04:54 CRITICAL: MemAvailable 1178 MiB (consecutive: 3) -> ESCALATION
+        # direct_reclaim was 0 p/tick throughout; MemFree never left 7.7-8.2 GiB.
+        #
+        # On GB10 `cudaMemGetInfo` free == MemFree EXACTLY (measured), so ~8 GiB was
+        # genuinely allocatable. MemAvailable runs ~7 GiB BELOW MemFree on these nodes,
+        # so it alone crosses a 1.5 GiB floor while nothing is wrong. The header above
+        # already says low MemAvailable alone is not evidence of danger -- the
+        # 2026-09-09 fix applied that to MEM_MIN and left this branch unguarded.
         n=$(( $(read_count $MEM_FAILS) + 1 ))
         echo "$n" > "$MEM_FAILS"
-        log "CRITICAL: MemAvailable $((avail/1024)) MiB below $((MEM_CRIT_KIB/1024)) MiB (consecutive: $n; $DISTRESS_DESC)"
+        log "CRITICAL: MemAvailable $((avail/1024)) MiB below $((MEM_CRIT_KIB/1024)) MiB, MemFree $((free/1024)) MiB (consecutive: $n; $DISTRESS_DESC)"
         escalate_mem "$n"
     elif [ "$avail" -lt "$MEM_MIN_KIB" ] && [ "$DISTRESS" = 1 ]; then
         n=$(( $(read_count $MEM_FAILS) + 1 ))

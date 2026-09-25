@@ -1,0 +1,292 @@
+# Laguna S 2.1 (NVFP4) on nimbus3 -- a single GB10.
+#
+# Endpoint: https://vllm-nimbus3.carlboettiger.info  (Service/Ingress in endpoints.yaml)
+# Auth: the same `vllm-api-key` secret every other vLLM endpoint here uses.
+#
+# WHY THE `ennerd` CHECKPOINT AND NOT `poolside`
+# poolside/Laguna-S-2.1-NVFP4 leaves 8 of 48 layers' experts in bf16 (6,144 tensors),
+# so it is 93 GiB and leaves ~4 GiB of KV on a 121.7 GiB box -- a 16K context ceiling,
+# and it fails to load at all at 32K. ennerd/Laguna-S-2.1-NVFP4 packs all 48 layers and
+# quantizes attention too: 65 GB, and 30.4 GiB of KV. It is explicitly built for this
+# hardware (tagged dgx-spark / gb10 / blackwell).
+#
+# MEASURED on nimbus3, 2026-09-21, both checkpoints on the same box:
+#                       poolside      ennerd
+#   single stream       17.7 tok/s    32.4 tok/s   (40.2 with DFlash, code prompts)
+#   aggregate @ c8      60.2 tok/s   120.4 tok/s
+#   context                  ~16K        131072
+#   KV cache                ~4 GiB   30.4 GiB / 1,107,209 tokens
+# ennerd publishes 32.1 and 43.2; we measure 32.4 and 40.2. Recipe transfers as written.
+# Full detail in cluster-ops tp2-benchmark.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laguna
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus3
+spec:
+  # SCALED TO 0 2026-09-24. Laguna is not ready for production use here: it enters
+  # non-terminating reasoning loops on agentic tool-calling traffic (31 aborted requests
+  # against zero on the other two models). The cause is upstream and unresolved -- see
+  # cluster-ops tp2-benchmark.md and k8s issue #95.
+  #
+  # Everything below is correct and was measured; this is a fitness decision, not a
+  # broken config. Scale to 1 to bring it back.
+  #
+  # NOTE ON THE FIX: poolside's RC2 (2026-08-01) mitigates looping by de-quantizing 8
+  # layers' experts back to bf16, growing 67.0 GiB/15 shards -> 92.9 GiB/49 shards. The
+  # fix IS the size, so no compact requant can carry it, and at 92.9 GiB a single GB10
+  # holds only ~115k KV tokens -- under one 200k request. Reviving this with the fix
+  # means TP2 on the nimbus2+nimbus4 pair (46.5 GiB/node -> ~1.31M KV tokens).
+  replicas: 0
+  # Recreate, as with every model Deployment here: a rolling update deadlocks
+  # waiting for GPU the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus3-laguna
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus3-laguna
+        # What endpoints.yaml's nimbus3 Service selects; swapping models on this
+        # node is scale-to-0 / scale-to-1 with no ingress churn.
+        vllm-endpoint: nimbus3
+    spec:
+      # Placement follows the WEIGHTS, as with qwen38-flashnext. Deliberately NOT
+      # `node-class: gb10` -- that asserts "any GB10 works", false the moment an
+      # unstaged box joins. Label a node only AFTER staging the checkpoint:
+      #   kubectl label node <n> vllm-cache/laguna=true
+      # Staged on nimbus3 2026-09-21 (65 GB, 15 shards).
+      nodeSelector:
+        vllm-cache/laguna: "true"
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        # Stock upstream image -- no derived build needed. vLLM 0.25.1 selects
+        # MarlinNvFp4LinearKernel for the NVFP4 GEMM and FLASHINFER_CUTLASS for the
+        # NVFP4 MoE on sm_121 without any backend forcing.
+        image: vllm/vllm-openai:v0.25.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: HF_HUB_OFFLINE
+          value: "1"
+        # NOTE: there is NO env var that skips vLLM's startup free-memory assertion.
+        # `VLLM_SKIP_INIT_MEMORY_CHECK` was tried here and is a NO-OP -- the string does
+        # not appear anywhere in the vllm package in either the stock 0.25.1 or the
+        # Anemll 0.25.2.dev image, and `request_memory()` in v1/worker/utils.py raises
+        # unconditionally.
+        #
+        # That assertion compares MemFree against the requested budget BEFORE allocating,
+        # so page cache left by the previous pod makes a restart fail transiently:
+        #   ValueError: Free memory on device cuda:0 (102.06/121.63 GiB) on startup is
+        #   less than desired GPU memory utilization (0.85, 103.38 GiB)
+        # It crash-looped four times on 2026-09-23 and only started once caches were
+        # dropped. RESTARTING THIS DEPLOYMENT AT 0.85 NEEDS A CACHE DROP FIRST:
+        #   kubectl create -f services/vllm/drop-caches-nimbus.yaml   (edit the hostname)
+        # Restarts alone do not clear it. Lower the utilization instead if that is not
+        # acceptable.
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command line silently truncates the rest into comment text. That has cost
+          # a failed load here before.
+          ARGS=(
+            --served-model-name laguna
+            --host 0.0.0.0 --port 8000
+            --trust-remote-code
+            --tensor-parallel-size 1
+            # Laguna requires an fp8 KV cache; `auto` is not accepted.
+            --kv-cache-dtype fp8
+            # 0.85, NOT 0.90. vLLM compares free memory against the requested budget
+            # BEFORE allocating, and reading 65 GB of shards leaves ~9 GiB of page
+            # cache behind, so 0.90 fails a pre-flight check on a freshly-dropped node:
+            #   ValueError: Free memory on device cuda:0 (105.03/121.63 GiB) on startup
+            #   is less than desired GPU memory utilization (0.9, 109.46 GiB)
+            # This is a startup check, not an OOM. 0.85 measured: 32.51 GiB of KV.
+            # 0.85 is the measured best. It was temporarily 0.80 between 2026-09-21 and
+            # 2026-09-22 because the host gpu-hang-watchdog's CRITICAL path escalated on
+            # MemAvailable ALONE and SIGKILLed this model mid-serve at 36.8 tok/s:
+            #   04:54 CRITICAL: MemAvailable 1178 MiB below 1536 MiB (consecutive: 3)
+            #   04:54 ESCALATION: killing vLLM
+            # while MemFree sat at 7.7-8.2 GiB and direct_reclaim was 0 throughout.
+            #
+            # That watchdog is fixed (CRITICAL now also requires reclaim distress or a
+            # genuinely low MemFree) and deployed to all four GB10s, so 0.85 is safe
+            # again and is worth ~6 GiB of KV. Do NOT raise beyond 0.85: vLLM asserts
+            # against free memory BEFORE allocating, and reading 65 GB of shards leaves
+            # ~9 GiB of page cache behind, so 0.90 fails a pre-flight check on a
+            # freshly-dropped node. Note 0.85 ALSO trips that assertion after a restart
+            # if page cache has not been reclaimed -- see the note in env: above; there
+            # is no env var that skips it, so drop caches before restarting.
+            --gpu-memory-utilization 0.85
+            # 262144 is the checkpoint's native max_position_embeddings, and it costs
+            # NOTHING extra in memory. --max-model-len caps per-REQUEST length; it does
+            # not size the KV pool. The pool is 835,785 tokens either way, so this only
+            # changes the concurrency vLLM reports:
+            #   131072 -> 6.38x        262144 -> 3.19x
+            # Both are plenty for this endpoint's traffic.
+            #
+            # 1M (ennerd's rope switch) does NOT fit on one Spark: it needs >1,048,576
+            # tokens of KV to hold even a single full-length request, and we have
+            # 835,785. That is a TP2 configuration -- halving the weights to ~33 GiB per
+            # node roughly doubles the pool.
+            --max-model-len 262144
+            --max-num-seqs 32
+            --max-num-batched-tokens 8192
+            --enable-prefix-caching
+            # DFlash k=3. Both ennerd's recipe and our own per-position acceptance
+            # curve land on 3: pos0 60.2%, pos1 33.9%, pos2 19.1% -- position 2 still
+            # contributes, so it is not yet wasted work.
+            #
+            # The poolside draft head is drop-in on the ennerd base: it ships no
+            # embed_tokens or lm_head of its own and shares the target's.
+            #
+            # ACCEPTANCE IS WORKLOAD-DEPENDENT -- 54.7% on code, 46.0% on prose.
+            # Laguna is a coding model and DFlash is a code-trained draft head, so
+            # quote ~40 tok/s for agentic traffic, not the prose number.
+            --speculative-config '{"model":"poolside/Laguna-S-2.1-DFlash-NVFP4","num_speculative_tokens":3}'
+            # Laguna IS a tool-calling model, and vLLM 0.25.1 ships parsers built for
+            # it -- both register under the name `poolside_v1`.
+            #
+            # Its format is GLM-style, NOT Qwen/Hermes:
+            #   <tool_call>NAME<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>
+            #   <tool_response>...</tool_response>
+            # so hermes/qwen3_coder parsers would silently fail to parse it.
+            #
+            # WHERE TO LOOK: the real template is chat_template.jinja. The
+            # `chat_template` field in tokenizer_config.json is a 35-char stub, and
+            # reading that instead is how this was first, wrongly, written off as having
+            # no tool support.
+            --enable-auto-tool-choice
+            --tool-call-parser poolside_v1
+            # PoolsideV1ReasoningParser subclasses DeepSeekV3ReasoningParser -- the
+            # model emits <think>...</think>, which this splits into reasoning_content
+            # so it does not leak into tool arguments.
+            --reasoning-parser poolside_v1
+            # THE ACTUAL FIX IS --default-chat-template-kwargs BELOW, not this flag.
+            # --reasoning-config only silences
+            #   WARNING: Auto-initialization of reasoning token IDs failed.
+            # It is kept because that warning is real (vLLM cannot auto-derive the
+            # delimiters through this wrapper parser), but adding it alone changed
+            # nothing: reasoning_content was still len 0 and </think> still sat in the
+            # middle of a 3,341-char content field.
+            #
+            # The tokens themselves are fine -- <think> is id 18 and </think> is id 19
+            # in this tokenizer, identical in the poolside and ennerd checkpoints. The
+            # failure is vLLM's auto-init on this wrapper parser, and naming the
+            # delimiters explicitly is the documented way round it.
+            #
+            # Pattern copied from Anemll/dspark-vllm-gx10's DeepSeek-V4 recipe, which
+            # passes the same flag alongside --reasoning-parser deepseek_v4.
+            --reasoning-config '{"reasoning_parser":"poolside_v1","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
+            # REQUIRED for reasoning to be separated at all.
+            #
+            # PoolsideV1ReasoningParser inherits DeepSeekV3ReasoningParser, which picks
+            # its real implementation from the chat-template kwargs:
+            #
+            #   thinking        = bool(chat_kwargs.get("thinking", False))
+            #   enable_thinking = bool(chat_kwargs.get("enable_thinking", False))
+            #   self._parser = DeepSeekR1ReasoningParser(...) if thinking
+            #                  else IdentityReasoningParser(...)
+            #
+            # Both default to FALSE, so with no kwargs it installs
+            # IdentityReasoningParser, which by design returns everything as content.
+            # The template's own `enable_thinking | default(true)` governs the PROMPT
+            # and never reaches the parser, so the model dutifully emits
+            # <think>...</think> and nothing splits it.
+            #
+            # Laguna's template names the kwarg `enable_thinking` (Anemll's DeepSeek-V4
+            # recipe passes `{"thinking": false}` for the opposite reason -- to turn
+            # thinking off).
+            # SERVER-WIDE OUTPUT CEILING. vLLM: "If max_new_tokens is specified in
+            # generation config, then it sets a server-wide limit on the number of
+            # output tokens for all requests." This is defence-in-depth, not the primary
+            # fix -- clients should send max_tokens.
+            #
+            # WHY: a client sending `max_tokens: null` gets max_model_len minus the
+            # prompt substituted -- observed here as max_tokens=239013 / 262099. At
+            # ~30 tok/s that is hours of licence to generate. On 2026-09-22 that produced
+            # 31 aborted requests (and zero on the other two models): the agent's 1200 s
+            # ceiling fired first, e.g. chatcmpl-bfbac6c3d6add990 ran exactly
+            # 21:54:31 -> 22:14:31. By contrast the same client caps qwen at 16000, which
+            # is most of why qwen "finished within budget" on the same prompts.
+            #
+            # TEMPERATURE: this checkpoint's generation_config.json ships temperature 1.0,
+            # which is wrong for agentic tool-calling -- the same variance that made
+            # qwen's tool-calls flip between answering and calling run to run (see
+            # qwen38-flashnext-nimbus.yaml). 0.0 for determinism. These are DEFAULTS; a
+            # client that sends its own temperature still wins.
+            --override-generation-config '{"max_new_tokens": 16000, "temperature": 0.0}'
+            --default-chat-template-kwargs '{"enable_thinking":true}'
+            #
+            # VERIFIED 2026-09-21: reasoning 2,287 chars / content 1,279 chars, no stray
+            # tags in either. CLIENT NOTE: the field is `message.reasoning`, NOT
+            # `reasoning_content`. Laguna's own chat_template.jinja says so --
+            # "Extract reasoning content from message.reasoning (vLLM field name)".
+            # A client reading `reasoning_content` sees an empty string and concludes
+            # the parser is broken.
+            --enable-log-requests --enable-log-outputs --max-log-len 4000
+          )
+          exec vllm serve ennerd/Laguna-S-2.1-NVFP4 "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only -- cgroups do not see CUDA allocations on
+            # unified memory (dgx-spark-memory.md). ~65 weights + ~33 KV.
+            memory: 100Gi
+            # All 8 slices: a slice is a co-tenancy slot, not a memory partition, so
+            # this frees no memory -- it is how we tell the scheduler to put nothing
+            # else on this GPU, which matters when the model needs ~98 of 121.7 GiB.
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 8
+            memory: 100Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        # Readiness only, no liveness: a hang at load leaves the pod NotReady for
+        # debugging instead of crash-looping a 65 GB load forever. Measured cold
+        # start with DFlash: ~10.5 min.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 120
+        securityContext:
+          capabilities:
+            add:
+            - IPC_LOCK
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

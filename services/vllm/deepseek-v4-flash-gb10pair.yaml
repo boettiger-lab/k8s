@@ -1,27 +1,95 @@
-# DeepSeek-V4-Flash served tensor-parallel across nimbus2 + nimbus4.
+# DeepSeek-V4-Flash-DSpark served tensor-parallel across nimbus2 + nimbus4.
+#
+# Endpoint: https://vllm-nimbus2.carlboettiger.info   (model id `deepseek-v4-flash`)
+# Auth: the shared `vllm-api-key` secret, same as every other vLLM endpoint here.
 #
 # WHY THIS IS TWO DEPLOYMENTS AND NOT ONE WITH replicas: 2
-# TP ranks are not interchangeable: rank 0 runs the API server, rank 1 is
-# --headless, and each needs a fixed --node-rank and a fixed node. A Deployment
-# with two replicas would give two identical pods. LeaderWorkerSet is the
-# k8s-native answer but needs its controller installed; two Deployments need
-# nothing and are honest about the asymmetry.
+# TP ranks are not interchangeable: rank 0 runs the API server, rank 1 is --headless,
+# and each needs a fixed --node-rank and a fixed node. A Deployment with two replicas
+# would give two identical pods. LeaderWorkerSet is the k8s-native answer but needs its
+# controller installed; two Deployments need nothing and are honest about the asymmetry.
 #
-# Only the HEAD carries `vllm-endpoint: nimbus2`, so the Service selects the
-# API server and never the worker.
+# Only the HEAD carries `vllm-endpoint: nimbus2`, so the Service selects the API server
+# and never the worker.
 #
-# START ORDER: the worker tolerates the head being absent, but the head will
-# wait on the worker. Both are Deployments so ordering is eventual, not
-# guaranteed -- if the head crash-loops on startup, check the worker is up.
+# START ORDER IS LOAD-BEARING. Bring up the WORKER (rank 1) FIRST, then the head --
+# Anemll's README specifies it and we validated it. Two Deployments give only eventual
+# ordering, so DO NOT rely on `kubectl apply` alone:
 #
-# MEMORY: see the GB10 notes in docs/services/vllm. `--kv-cache-memory` is the
-# binding control here and REPLACES the profiler; `--gpu-memory-utilization` is
-# still required for a startup free-memory assertion. Both values below were
-# measured on this pair, not chosen from first principles:
-#   free to CUDA at startup ~95-100 GiB of 121.63    (~18 GiB driver carveout)
-#   weights, TP2                        ~74.5 GiB/node
-#   KV at 6 GiB cap                      16,815 tokens, 2.05x at 8192 ctx
-# 0.80 (the upstream recipe's value) is REFUSED here -- it assumes a bare Spark.
+#   kubectl -n vllm scale deploy/deepseek-v4-flash-head --replicas=0
+#   kubectl -n vllm rollout status deploy/deepseek-v4-flash-worker   # worker Running
+#   kubectl -n vllm scale deploy/deepseek-v4-flash-head --replicas=1
+#
+# WHY: the ranks meet in a torch distributed store, and a rank that arrives alone waits
+# there. Applying both at once wedged this pair twice on 2026-09-21 -- the head sat
+# Pending waiting for the 8 GPU slices to free from an earlier pod while the worker
+# burned its rendezvous window, and a simultaneous restart of both left neither able to
+# establish the store (15 min silent, GPU 0% on both nodes). The symptom is NOT an
+# error: both pods read Running, the head reads 0/1, and the log simply stops.
+#
+# THE `\` ON THE --jit-monitor-mode LINE ABOVE THE WORKER'S --headless IS LOAD-BEARING.
+# Without it the continued command ENDS at --jit-monitor-mode, `exec vllm serve` replaces
+# the shell, and the bare `--headless` line is never reached. The worker then starts as a
+# SECOND NON-HEADLESS HEAD: its log carries an `(APIServer pid=1)` prefix, it runs a full
+# engine init, and it dies with exit 1 "Engine core initialization failed" while the real
+# head waits forever. Tell-tale: `(APIServer pid=1)` in the WORKER log, and nimbus4
+# sitting near 90+ GiB free while nimbus2 drops to single digits.
+#
+# This cost several restarts on 2026-09-21, partly because a `'--headless' in text` check
+# passes on the broken form -- the string is present, just not inside the command. Check
+# the rendered `args` and confirm the PRECEDING line ends with a backslash.
+#
+# --distributed-timeout-seconds / --cpu-distributed-timeout-seconds are deliberately
+# absent, but they were never shown to be harmful -- they were removed on a wrong
+# inference while this truncation was the actual fault. The default 1800 s window is
+# adequate once the ranks are correct; add them only with evidence.
+#
+# ---------------------------------------------------------------------------------
+# MEASURED on this pair 2026-09-21. This config is a replication of
+# https://github.com/Anemll/dspark-vllm-gx10 and it more than doubled our throughput.
+#
+#                                   prose      code    agg c8   KV tokens
+#   our previous stack (Ray, fp8 KV) 24.0         --      74.1   51,548 @ 32K
+#   this config (dspark k=5)         46.8       64.0     159.6  399,817 @ 350K
+#   Anemll published                 42.0       76.0        --
+#
+# Our prose EXCEEDS their published figure; code is at 84% of theirs, probably because
+# their measurement uses a 2048-token prompt with warm cache and ours a short prompt.
+#
+# WHAT ACTUALLY MATTERED, most to least:
+#   1. --kv-cache-dtype nvfp4_ds_mla. This is a KV CACHE format. Every published
+#      DeepSeek "NVFP4" figure means this, NOT NVFP4 weights -- the weights here are
+#      ordinary FP8 (E4M3, UE8M0 scales). Chasing NVFP4 *weights* was a dead end:
+#      nvidia/DeepSeek-V4-Flash-NVFP4 is 157 GB on disk, the same as FP8, and buys
+#      nothing. 11.22 GiB of this KV format holds 668,152 tokens.
+#   2. DSpark speculative decoding at k=5. Requires the DSpark checkpoint (it carries
+#      `dspark_noise_token_id = 128799`); the plain DeepSeek-V4-Flash config has only
+#      `num_nextn_predict_layers: 1` and fails with
+#      "Model config must specify ... for parallel drafting".
+#   3. --moe-backend flashinfer_b12x  (selects B12X_MXFP4)
+#   4. NO RAY. --nnodes/--node-rank/--headless over `mp`. This also cut startup from
+#      30-80 min of FlashInfer autotune to ~6 min end to end. Our earlier conclusion
+#      that "B12X multi-node is broken" came from
+#      `collective_rpc should not be called on follower node` under the RAY executor --
+#      that was a Ray-path artifact, not a B12X limitation.
+#
+# NOT the NVIDIA driver: this runs on 580.178.04, unchanged. A published GB10 driver
+# regression (580.142 -> 580.159.03, ~3.5x) is real but is NOT our problem -- do not
+# downgrade the fleet driver for performance. NOT vm.compaction_proactiveness either
+# (left at the default 20 throughout).
+#
+# CONCURRENCY TRADE-OFF: DSpark's draft KV costs about half the pool.
+#   mtp k=1    11.22 GiB   668,152 tokens   1.91x concurrency @ 350K
+#   dspark k=5  6.03 GiB   399,817 tokens   1.14x concurrency @ 350K
+# 1.14x at 350,000 means ONE full-length request at a time. --max-model-len caps
+# per-REQUEST length and does not size the pool, so lowering it to 131072 buys ~3.1x
+# concurrency for free. Raise/lower it to suit the traffic, and re-measure.
+#
+# ACCEPTANCE IS WORKLOAD-DEPENDENT. Ours at k=5: 65.7% on code, 41.4% on prose. Do not
+# quote a single tok/s for this model without saying which workload it came from.
+# Detail, including everything that did NOT work, in cluster-ops tp2-benchmark.md.
+# ---------------------------------------------------------------------------------
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -72,13 +140,257 @@ spec:
     - vllm-nimbus2.carlboettiger.info
     secretName: vllm-nimbus2-tls
 ---
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-v4-flash-worker
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus2
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: deepseek-v4-flash-worker
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4-flash-worker
+    spec:
+      # Pinned by hostname, not by a cache label: a TP rank's identity is its NODE
+      # (--node-rank and the fabric address are both fixed), so this genuinely is
+      # placement by machine rather than by where the weights happen to live.
+      nodeSelector:
+        kubernetes.io/hostname: nimbus4
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      # hostNetwork: the TP ranks talk over the CX-7 fabric addresses directly
+      # (192.168.200.x), which pod networking does not carry.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - ip: 192.168.200.12
+        hostnames: ["nimbus2"]
+      - ip: 192.168.200.13
+        hostnames: ["nimbus4"]
+      containers:
+      - name: vllm
+        # Anemll's GB10 port: vLLM 0.25.2.dev0+g752a3a504 with FlashInfer and b12x
+        # pinned to specific commits. The pins are the point -- stock vllm-openai
+        # v0.25.1 gives 24 tok/s with the same weights and flags.
+        image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: NODE_RANK
+          value: "1"
+        - name: VLLM_HOST_IP
+          value: "192.168.200.13"
+        - name: B12X_W4A16_TC_DECODE
+          value: "0"
+        - name: DG_JIT_NVCC_COMPILER
+          value: "/usr/local/cuda/bin/nvcc"
+        - name: DG_JIT_USE_NVRTC
+          value: "0"
+        - name: DSPARK_SLOT_CLAMP
+          value: "1"
+        - name: FLASHINFER_CUDA_ARCH_LIST
+          value: "12.1a"
+        - name: FLASHINFER_DISABLE_VERSION_CHECK
+          value: "1"
+        - name: FLASHINFER_WORKSPACE_BASE
+          value: "/hf/flashinfer"
+        - name: GLOO_SOCKET_IFNAME
+          value: "enp1s0f1np1"
+        - name: HF_HOME
+          value: "/hf"
+        - name: HF_HUB_DISABLE_XET
+          value: "1"
+        - name: HF_HUB_OFFLINE
+          value: "1"
+        - name: MASTER_ADDR
+          value: "192.168.200.12"
+        - name: MASTER_PORT
+          value: "25000"
+        - name: NCCL_CROSS_NIC
+          value: "1"
+        - name: NCCL_CUMEM_ENABLE
+          value: "0"
+        - name: NCCL_DEBUG
+          value: "WARN"
+        - name: NCCL_IB_ADDR_FAMILY
+          value: "AF_INET"
+        - name: NCCL_IB_DISABLE
+          value: "0"
+        - name: NCCL_IB_GID_INDEX
+          value: "3"
+        - name: NCCL_IB_HCA
+          value: "rocep1s0f1,roceP2p1s0f1"
+        - name: NCCL_IB_ROCE_VERSION_NUM
+          value: "2"
+        - name: NCCL_IGNORE_CPU_AFFINITY
+          value: "1"
+        - name: NCCL_NET
+          value: "IB"
+        - name: NCCL_NVLS_ENABLE
+          value: "0"
+        - name: NCCL_SOCKET_IFNAME
+          value: "enp1s0f1np1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+        - name: TILELANG_CLEANUP_TEMP_FILES
+          value: "1"
+        - name: TORCH_CUDA_ARCH_LIST
+          value: "12.1a"
+        - name: TP_SOCKET_IFNAME
+          value: "enp1s0f1np1"
+        - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "1"
+        - name: VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M
+          value: "16"
+        - name: VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM
+          value: "0"
+        - name: VLLM_CACHE_ROOT
+          value: "/hf/vllm-cache"
+        - name: VLLM_DSPARK_CONFIDENCE_SCHEDULER
+          value: "off"
+        - name: VLLM_DSPARK_CONFIDENCE_THRESHOLD
+          value: "0.0"
+        - name: VLLM_DSPARK_FUSED_MARKOV_ARGMAX
+          value: "0"
+        - name: VLLM_DSPARK_GPU_REJECTED_CONTEXT_MASK
+          value: "1"
+        - name: VLLM_DSPARK_HARDWARE_SCHEDULER_EARLY_STOP
+          value: "1"
+        - name: VLLM_DSPARK_LOCAL_ARGMAX
+          value: "1"
+        - name: VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT
+          value: "0"
+        - name: VLLM_DSPARK_REPLICATE_MARKOV_W1
+          value: "1"
+        - name: VLLM_DSV4_B12X_COMPRESSED_MLA
+          value: "0"
+        - name: VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE
+          value: "0"
+        - name: VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
+          value: "0"
+        - name: VLLM_SKIP_INIT_MEMORY_CHECK
+          value: "1"
+        - name: VLLM_SPARSE_INDEXER_MAX_LOGITS_MB
+          value: "256"
+        - name: VLLM_TRITON_MLA_SPARSE
+          value: "1"
+        - name: VLLM_USE_B12X_MOE
+          value: "1"
+        - name: VLLM_USE_B12X_WO_PROJECTION
+          value: "1"
+        - name: VLLM_USE_FLASHINFER_SAMPLER
+          value: "1"
+        command: ["/bin/bash", "-lc"]
+        args:
+        - |
+          set -euo pipefail
+          export PATH="/usr/local/cuda/bin:${PATH:-}"
+          export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+          export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+          # --node-rank comes from ${NODE_RANK}, NEVER a literal: these two Deployments
+          # share one args block, and hardcoding it gave BOTH pods --node-rank 0 while
+          # their env said 0 and 1. Two rank-0s never meet in the distributed store, so
+          # the pair wedged with NO error -- both Running, head 0/1, GPU 0% on both
+          # nodes, logs stopping dead after "world_size=2 rank=0". Anemll's compose
+          # passes ${NODE_RANK} for this reason.
+          exec vllm serve \
+          deepseek-ai/DeepSeek-V4-Flash-DSpark \
+          --served-model-name deepseek-v4-flash \
+          --host 0.0.0.0 \
+          --port 8000 \
+          --trust-remote-code \
+          --tensor-parallel-size 2 \
+          --pipeline-parallel-size 1 \
+          --kv-cache-dtype nvfp4_ds_mla \
+          --block-size 256 \
+          --max-model-len 350000 \
+          --max-num-seqs 12 \
+          --max-num-batched-tokens 8192 \
+          --max-cudagraph-capture-size 72 \
+          --gpu-memory-utilization 0.78 \
+          --enable-prefix-caching \
+          --async-scheduling \
+          --enable-chunked-prefill \
+          --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}' \
+          --tokenizer-mode deepseek_v4 \
+          --distributed-executor-backend mp \
+          --moe-backend flashinfer_b12x \
+          --tool-call-parser deepseek_v4 \
+          --enable-auto-tool-choice \
+          --reasoning-parser deepseek_v4 \
+          --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
+          --default-chat-template-kwargs '{"thinking":false}' \
+          --generation-config vllm \
+          --enable-flashinfer-autotune \
+          --nnodes 2 \
+          --node-rank ${NODE_RANK} \
+          --master-addr 192.168.200.12 \
+          --master-port 25000 \
+          --jit-monitor-mode warn \
+          --headless
+        resources:
+          requests:
+            cpu: 8
+            # Scheduler accounting only -- cgroups do not see CUDA allocations on
+            # unified memory. ~79 GiB weights + KV.
+            memory: 96Gi
+            # All 8 slices: how we tell the scheduler to put nothing else on this GPU.
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 16
+            memory: 96Gi
+            nvidia.com/gpu: 8
+        securityContext:
+          capabilities:
+            add: ["IPC_LOCK", "SYS_PTRACE"]
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /hf
+        - name: dshm
+          mountPath: /dev/shm
+        - name: infiniband
+          mountPath: /dev/infiniband
+      volumes:
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          # Anemll run --shm-size 64g. Allocation is lazy, so this is a ceiling.
+          sizeLimit: 64Gi
+      - name: infiniband
+        hostPath:
+          path: /dev/infiniband
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: deepseek-v4-flash-head
   namespace: vllm
   labels:
-    app: deepseek-v4-flash-head
+    k8s-app: vllm-nimbus2
 spec:
   replicas: 1
   strategy:
@@ -92,246 +404,234 @@ spec:
         app: deepseek-v4-flash-head
         vllm-endpoint: nimbus2
     spec:
-      hostNetwork: true
-      runtimeClassName: nvidia
+      # Pinned by hostname, not by a cache label: a TP rank's identity is its NODE
+      # (--node-rank and the fabric address are both fixed), so this genuinely is
+      # placement by machine rather than by where the weights happen to live.
       nodeSelector:
         kubernetes.io/hostname: nimbus2
       tolerations:
       - key: dedicated
+        operator: Equal
         value: gb10
         effect: NoSchedule
-      hostAliases:
-      - ip: 192.168.200.12
-        hostnames:
-        - nimbus2
-      - ip: 192.168.200.13
-        hostnames:
-        - nimbus4
-      volumes:
-      - name: ib
-        hostPath:
-          path: /dev/infiniband
-      - name: hf
-        hostPath:
-          path: /home/cboettig/.cache/huggingface
-      - name: jit
-        hostPath:
-          path: /home/cboettig/.cache/dsv4
-      - name: shm
-        emptyDir:
-          medium: Memory
-          sizeLimit: 10Gi
-      containers:
-      - name: vllm
-        image: aidendle94/sparkrun-vllm-ds4-gb10:production-ready
-        command:
-        - dsv4-vllm-entrypoint
-        - serve
-        - deepseek-ai/DeepSeek-V4-Flash
-        args:
-        - --served-model-name
-        - deepseek-v4-flash
-        - --host
-        - 0.0.0.0
-        - --port
-        - '8000'
-        - --trust-remote-code
-        - --tensor-parallel-size
-        - '2'
-        - --pipeline-parallel-size
-        - '1'
-        - --distributed-executor-backend
-        - mp
-        - --kv-cache-dtype
-        - fp8
-        - --block-size
-        - '256'
-        - --max-model-len
-        - '8192'
-        - --max-num-seqs
-        - '8'
-        - --max-num-batched-tokens
-        - '8192'
-        - --kv-cache-memory=6442450944
-        - --gpu-memory-utilization
-        - '0.76'
-        - --speculative-config
-        - '{"method":"mtp","num_speculative_tokens":1}'
-        - -cc.cudagraph_mode=PIECEWISE
-        - --enable-prefix-caching
-        - --tokenizer-mode
-        - deepseek_v4
-        - --nnodes
-        - '2'
-        - --node-rank
-        - '0'
-        - --master-addr
-        - 192.168.200.12
-        - --master-port
-        - '29501'
-        securityContext:
-          capabilities:
-            add:
-            - IPC_LOCK
-        env:
-        - name: NCCL_IB_HCA
-          value: rocep1s0f1,roceP2p1s0f1
-        - name: NCCL_SOCKET_IFNAME
-          value: enp1s0f1np1
-        - name: GLOO_SOCKET_IFNAME
-          value: enp1s0f1np1
-        - name: NCCL_IB_GID_INDEX
-          value: '3'
-        - name: VLLM_HOST_IP
-          value: 192.168.200.12
-        - name: HF_HOME
-          value: /hf
-        - name: HF_HUB_OFFLINE
-          value: '1'
-        volumeMounts:
-        - name: ib
-          mountPath: /dev/infiniband
-        - name: hf
-          mountPath: /hf
-        - name: jit
-          mountPath: /cache
-        - name: shm
-          mountPath: /dev/shm
-        resources:
-          requests:
-            memory: 90Gi
-            cpu: 8
-          limits:
-            nvidia.com/gpu: 8
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: deepseek-v4-flash-worker
-  namespace: vllm
-  labels:
-    app: deepseek-v4-flash-worker
-spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: deepseek-v4-flash-worker
-  template:
-    metadata:
-      labels:
-        app: deepseek-v4-flash-worker
-    spec:
-      hostNetwork: true
       runtimeClassName: nvidia
-      nodeSelector:
-        kubernetes.io/hostname: nimbus4
-      tolerations:
-      - key: dedicated
-        value: gb10
-        effect: NoSchedule
+      # hostNetwork: the TP ranks talk over the CX-7 fabric addresses directly
+      # (192.168.200.x), which pod networking does not carry.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       hostAliases:
       - ip: 192.168.200.12
-        hostnames:
-        - nimbus2
+        hostnames: ["nimbus2"]
       - ip: 192.168.200.13
-        hostnames:
-        - nimbus4
-      volumes:
-      - name: ib
-        hostPath:
-          path: /dev/infiniband
-      - name: hf
-        hostPath:
-          path: /home/cboettig/.cache/huggingface
-      - name: jit
-        hostPath:
-          path: /home/cboettig/.cache/dsv4
-      - name: shm
-        emptyDir:
-          medium: Memory
-          sizeLimit: 10Gi
+        hostnames: ["nimbus4"]
       containers:
       - name: vllm
-        image: aidendle94/sparkrun-vllm-ds4-gb10:production-ready
-        command:
-        - dsv4-vllm-entrypoint
-        - serve
-        - deepseek-ai/DeepSeek-V4-Flash
-        args:
-        - --served-model-name
-        - deepseek-v4-flash
-        - --host
-        - 0.0.0.0
-        - --port
-        - '8000'
-        - --trust-remote-code
-        - --tensor-parallel-size
-        - '2'
-        - --pipeline-parallel-size
-        - '1'
-        - --distributed-executor-backend
-        - mp
-        - --kv-cache-dtype
-        - fp8
-        - --block-size
-        - '256'
-        - --max-model-len
-        - '8192'
-        - --max-num-seqs
-        - '8'
-        - --max-num-batched-tokens
-        - '8192'
-        - --kv-cache-memory=6442450944
-        - --gpu-memory-utilization
-        - '0.76'
-        - --speculative-config
-        - '{"method":"mtp","num_speculative_tokens":1}'
-        - -cc.cudagraph_mode=PIECEWISE
-        - --enable-prefix-caching
-        - --tokenizer-mode
-        - deepseek_v4
-        - --nnodes
-        - '2'
-        - --node-rank
-        - '1'
-        - --master-addr
-        - 192.168.200.12
-        - --master-port
-        - '29501'
-        - --headless
-        securityContext:
-          capabilities:
-            add:
-            - IPC_LOCK
+        # Anemll's GB10 port: vLLM 0.25.2.dev0+g752a3a504 with FlashInfer and b12x
+        # pinned to specific commits. The pins are the point -- stock vllm-openai
+        # v0.25.1 gives 24 tok/s with the same weights and flags.
+        image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
         env:
-        - name: NCCL_IB_HCA
-          value: rocep1s0f1,roceP2p1s0f1
-        - name: NCCL_SOCKET_IFNAME
-          value: enp1s0f1np1
-        - name: GLOO_SOCKET_IFNAME
-          value: enp1s0f1np1
-        - name: NCCL_IB_GID_INDEX
-          value: '3'
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: NODE_RANK
+          value: "0"
         - name: VLLM_HOST_IP
-          value: 192.168.200.13
+          value: "192.168.200.12"
+        - name: B12X_W4A16_TC_DECODE
+          value: "0"
+        - name: DG_JIT_NVCC_COMPILER
+          value: "/usr/local/cuda/bin/nvcc"
+        - name: DG_JIT_USE_NVRTC
+          value: "0"
+        - name: DSPARK_SLOT_CLAMP
+          value: "1"
+        - name: FLASHINFER_CUDA_ARCH_LIST
+          value: "12.1a"
+        - name: FLASHINFER_DISABLE_VERSION_CHECK
+          value: "1"
+        - name: FLASHINFER_WORKSPACE_BASE
+          value: "/hf/flashinfer"
+        - name: GLOO_SOCKET_IFNAME
+          value: "enp1s0f1np1"
         - name: HF_HOME
-          value: /hf
+          value: "/hf"
+        - name: HF_HUB_DISABLE_XET
+          value: "1"
         - name: HF_HUB_OFFLINE
-          value: '1'
-        volumeMounts:
-        - name: ib
-          mountPath: /dev/infiniband
-        - name: hf
-          mountPath: /hf
-        - name: jit
-          mountPath: /cache
-        - name: shm
-          mountPath: /dev/shm
+          value: "1"
+        - name: MASTER_ADDR
+          value: "192.168.200.12"
+        - name: MASTER_PORT
+          value: "25000"
+        - name: NCCL_CROSS_NIC
+          value: "1"
+        - name: NCCL_CUMEM_ENABLE
+          value: "0"
+        - name: NCCL_DEBUG
+          value: "WARN"
+        - name: NCCL_IB_ADDR_FAMILY
+          value: "AF_INET"
+        - name: NCCL_IB_DISABLE
+          value: "0"
+        - name: NCCL_IB_GID_INDEX
+          value: "3"
+        - name: NCCL_IB_HCA
+          value: "rocep1s0f1,roceP2p1s0f1"
+        - name: NCCL_IB_ROCE_VERSION_NUM
+          value: "2"
+        - name: NCCL_IGNORE_CPU_AFFINITY
+          value: "1"
+        - name: NCCL_NET
+          value: "IB"
+        - name: NCCL_NVLS_ENABLE
+          value: "0"
+        - name: NCCL_SOCKET_IFNAME
+          value: "enp1s0f1np1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+        - name: TILELANG_CLEANUP_TEMP_FILES
+          value: "1"
+        - name: TORCH_CUDA_ARCH_LIST
+          value: "12.1a"
+        - name: TP_SOCKET_IFNAME
+          value: "enp1s0f1np1"
+        - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "1"
+        - name: VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M
+          value: "16"
+        - name: VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM
+          value: "0"
+        - name: VLLM_CACHE_ROOT
+          value: "/hf/vllm-cache"
+        - name: VLLM_DSPARK_CONFIDENCE_SCHEDULER
+          value: "off"
+        - name: VLLM_DSPARK_CONFIDENCE_THRESHOLD
+          value: "0.0"
+        - name: VLLM_DSPARK_FUSED_MARKOV_ARGMAX
+          value: "0"
+        - name: VLLM_DSPARK_GPU_REJECTED_CONTEXT_MASK
+          value: "1"
+        - name: VLLM_DSPARK_HARDWARE_SCHEDULER_EARLY_STOP
+          value: "1"
+        - name: VLLM_DSPARK_LOCAL_ARGMAX
+          value: "1"
+        - name: VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT
+          value: "0"
+        - name: VLLM_DSPARK_REPLICATE_MARKOV_W1
+          value: "1"
+        - name: VLLM_DSV4_B12X_COMPRESSED_MLA
+          value: "0"
+        - name: VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE
+          value: "0"
+        - name: VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
+          value: "0"
+        - name: VLLM_SKIP_INIT_MEMORY_CHECK
+          value: "1"
+        - name: VLLM_SPARSE_INDEXER_MAX_LOGITS_MB
+          value: "256"
+        - name: VLLM_TRITON_MLA_SPARSE
+          value: "1"
+        - name: VLLM_USE_B12X_MOE
+          value: "1"
+        - name: VLLM_USE_B12X_WO_PROJECTION
+          value: "1"
+        - name: VLLM_USE_FLASHINFER_SAMPLER
+          value: "1"
+        command: ["/bin/bash", "-lc"]
+        args:
+        - |
+          set -euo pipefail
+          export PATH="/usr/local/cuda/bin:${PATH:-}"
+          export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+          export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+          # --node-rank comes from ${NODE_RANK}, NEVER a literal: these two Deployments
+          # share one args block, and hardcoding it gave BOTH pods --node-rank 0 while
+          # their env said 0 and 1. Two rank-0s never meet in the distributed store, so
+          # the pair wedged with NO error -- both Running, head 0/1, GPU 0% on both
+          # nodes, logs stopping dead after "world_size=2 rank=0". Anemll's compose
+          # passes ${NODE_RANK} for this reason.
+          exec vllm serve \
+          deepseek-ai/DeepSeek-V4-Flash-DSpark \
+          --served-model-name deepseek-v4-flash \
+          --host 0.0.0.0 \
+          --port 8000 \
+          --trust-remote-code \
+          --tensor-parallel-size 2 \
+          --pipeline-parallel-size 1 \
+          --kv-cache-dtype nvfp4_ds_mla \
+          --block-size 256 \
+          --max-model-len 350000 \
+          --max-num-seqs 12 \
+          --max-num-batched-tokens 8192 \
+          --max-cudagraph-capture-size 72 \
+          --gpu-memory-utilization 0.78 \
+          --enable-prefix-caching \
+          --async-scheduling \
+          --enable-chunked-prefill \
+          --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}' \
+          --tokenizer-mode deepseek_v4 \
+          --distributed-executor-backend mp \
+          --moe-backend flashinfer_b12x \
+          --tool-call-parser deepseek_v4 \
+          --enable-auto-tool-choice \
+          --reasoning-parser deepseek_v4 \
+          --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
+          --default-chat-template-kwargs '{"thinking":false}' \
+          --generation-config vllm \
+          --enable-flashinfer-autotune \
+          --nnodes 2 \
+          --node-rank ${NODE_RANK} \
+          --master-addr 192.168.200.12 \
+          --master-port 25000 \
+          --jit-monitor-mode warn
         resources:
           requests:
-            memory: 90Gi
             cpu: 8
-          limits:
+            # Scheduler accounting only -- cgroups do not see CUDA allocations on
+            # unified memory. ~79 GiB weights + KV.
+            memory: 96Gi
+            # All 8 slices: how we tell the scheduler to put nothing else on this GPU.
             nvidia.com/gpu: 8
+          limits:
+            cpu: 16
+            memory: 96Gi
+            nvidia.com/gpu: 8
+        # Readiness only, no liveness: a hang at load leaves the pod NotReady for
+        # debugging instead of crash-looping a 79 GiB load. Cold start measured ~6 min.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 80
+        securityContext:
+          capabilities:
+            add: ["IPC_LOCK", "SYS_PTRACE"]
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /hf
+        - name: dshm
+          mountPath: /dev/shm
+        - name: infiniband
+          mountPath: /dev/infiniband
+      volumes:
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          # Anemll run --shm-size 64g. Allocation is lazy, so this is a ceiling.
+          sizeLimit: 64Gi
+      - name: infiniband
+        hostPath:
+          path: /dev/infiniband

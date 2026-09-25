@@ -11,7 +11,9 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--all" ]]; then
-  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 qwen38-flashnext stt --ignore-not-found
+  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 qwen38-flashnext laguna \
+    deepseek-v4-flash-head deepseek-v4-flash-worker stt --ignore-not-found
+  kubectl delete -f deepseek-v4-flash-gb10pair.yaml --ignore-not-found
   kubectl delete -f endpoints.yaml --ignore-not-found
   echo "Endpoints removed too (DNS records and certs will need re-issuing on next up)."
 else
@@ -21,12 +23,17 @@ else
     # `delete -f` would take the endpoint and its certificate with it. Drop only the
     # workload, same as for the model manifests.
     kubectl delete deployment -n vllm stt --ignore-not-found
+  elif [[ "$MODEL_MANIFEST" == "deepseek-v4-flash-gb10pair.yaml" ]]; then
+    # Same: this manifest carries the vllm-nimbus2 Service and Ingress.
+    kubectl delete deployment -n vllm deepseek-v4-flash-head deepseek-v4-flash-worker --ignore-not-found
   else
     kubectl delete -f "$MODEL_MANIFEST" --ignore-not-found
   fi
   echo "Endpoints kept:"
   echo "  https://vllm-cirrus.carlboettiger.info"
   echo "  https://vllm-nimbus.carlboettiger.info"
+  echo "  https://vllm-nimbus2.carlboettiger.info"
+  echo "  https://vllm-nimbus3.carlboettiger.info"
   echo "  https://whisper-cirrus.carlboettiger.info"
 fi
 # The API key secret is left alone; clients keep working across a model swap.

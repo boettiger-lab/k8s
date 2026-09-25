@@ -42,7 +42,7 @@ themselves.
 |-----------|----------|-----|
 | [`jupyterhub/`](services/jupyterhub/) | Multi-user notebooks (CPU + GPU profiles), BinderHub | [jupyterhub.cirrus](https://jupyterhub.cirrus.carlboettiger.info) |
 | [`minio/`](services/minio/) | S3-compatible object storage for research data | [minio](https://minio.carlboettiger.info), [data](https://data.carlboettiger.info) |
-| [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference, one model per GPU node | [vllm-cirrus](https://vllm-cirrus.carlboettiger.info), [vllm-nimbus](https://vllm-nimbus.carlboettiger.info) |
+| [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [`titiler/`](services/titiler/) | Dynamic tile server for cloud-optimized rasters | [titiler](https://titiler.carlboettiger.info) |
 | [`hash-archive/`](services/hash-archive/) | Content-hash registry for data provenance | [hash-archive](https://hash-archive.carlboettiger.info) |
 | [`mcp/`](services/mcp/) | GPU MCP data server (cudf/polars over the STAC catalogue), on nimbus | [gpu-mcp-nimbus](https://gpu-mcp-nimbus.carlboettiger.info) |

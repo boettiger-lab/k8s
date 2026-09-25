@@ -7,7 +7,7 @@ The user-facing half of the repo. What holds these up is
 |---|---|---|
 | [`jupyterhub/`](jupyterhub/) | Multi-user notebooks (CPU + GPU profiles), BinderHub | [jupyterhub.cirrus](https://jupyterhub.cirrus.carlboettiger.info) |
 | [`minio/`](minio/) | S3-compatible object storage for research data | [minio](https://minio.carlboettiger.info), [data](https://data.carlboettiger.info) |
-| [`vllm/`](vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
+| [`vllm/`](vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [`titiler/`](titiler/) | Dynamic tile server for cloud-optimized rasters | [titiler](https://titiler.carlboettiger.info) |
 | [`hash-archive/`](hash-archive/) | Content-hash registry for data provenance | [hash-archive](https://hash-archive.carlboettiger.info) |
 | [`postgres/`](postgres/) | PostgreSQL for research use — **not currently deployed** | — |

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bring up the vllm namespace, both endpoints, and ONE model.
+# Bring up the vllm namespace, the endpoints, and ONE model.
 #
 # Each GPU node serves a single model at a time behind a fixed URL (endpoints.yaml).
 # Pass a model manifest to pick which one; defaults to the current cirrus model.
@@ -7,6 +7,8 @@
 #   ./up.sh                              # cirrus: speech-to-text (parakeet + whisper)
 #   ./up.sh qwen38-flashnext-nimbus.yaml # nimbus: Qwen3.8-Flash-Next (NVFP4)
 #   ./up.sh qwen38-nimbus.yaml           # nimbus: Qwen3.8-27B (NVFP4), the rollback
+#   ./up.sh deepseek-v4-flash-gb10pair.yaml # nimbus2+4: DeepSeek-V4-Flash TP2 (mind start order)
+#   ./up.sh laguna-nimbus3.yaml          # nimbus3: Laguna (manifest is replicas: 0)
 #   ./up.sh qwen3-8-cirrus.yaml          # cirrus: Qwen3.8-27B -- see the note below
 #   ./up.sh gemma4-cirrus.yaml           # cirrus: Gemma 4
 #
@@ -41,3 +43,5 @@ echo
 echo "cirrus (speech-to-text): https://whisper-cirrus.carlboettiger.info/v1/models"
 echo "cirrus (LLM, unbacked):   https://vllm-cirrus.carlboettiger.info/v1/models"
 echo "nimbus:                   https://vllm-nimbus.carlboettiger.info/v1/models"
+echo "nimbus2+4 (TP2):          https://vllm-nimbus2.carlboettiger.info/v1/models"
+echo "nimbus3:                  https://vllm-nimbus3.carlboettiger.info/v1/models"
