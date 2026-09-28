@@ -25,7 +25,9 @@ Unattended-Upgrade::Origins-Pattern {
 	"origin=UbuntuESM,archive=${distro_codename}-infra-security";
 };
 
-// Regexes, matched from the start of the package name.
+// Regexes, matched from the start of the package name (Python re.match in
+// unattended-upgrade; apt-metrics.sh applies the same ones as bash EREs, so
+// keep them to syntax both understand -- no lookaheads).
 //
 // GPU stack: an unattended upgrade of the NVIDIA userspace libraries under a
 // running kernel module breaks every NEW GPU pod with a driver/library version
@@ -39,7 +41,10 @@ Unattended-Upgrade::Package-Blacklist {
 	"libnvidia-";
 	"cuda";
 	"libcuda";
-	"linux-";
+	// The kernel and everything versioned with it -- NOT bare "linux-", which
+	// also holds linux-libc-dev, linux-tools-common and linux-crashdump
+	// (ordinary userland, frequent security fixes).
+	"linux-(image|modules|headers|objects|signatures|restricted|firmware|buildinfo|generic|lowlatency|hwe|oem|nvidia|system76|tools-[0-9]|tools-nvidia|cloud-tools-[0-9])";
 	"zfs";
 	"libzfs";
 	"libzpool";

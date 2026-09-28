@@ -37,7 +37,9 @@ same script for Pop and Ubuntu. `join-gb10.sh` runs it automatically on new GB10
 1. **`51cluster-unattended-upgrades`** goes in `/etc/apt/apt.conf.d/`.
    - Allows security pockets only, matched by *origin*: Ubuntu, plus Ubuntu Pro
      ESM where it is attached.
-   - Blacklists `nvidia-`, `libnvidia-`, `cuda`, `linux-` and the ZFS packages.
+   - Blacklists `nvidia-`, `libnvidia-`, `cuda`, the kernel packages
+     (`linux-image`, `linux-modules`, `linux-headers`… but not userland such as
+     `linux-libc-dev`) and the ZFS packages.
      An unattended NVIDIA userspace bump under a loaded kernel module breaks
      every new GPU pod with a driver/library mismatch.
    - Never reboots.
