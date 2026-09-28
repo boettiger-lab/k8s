@@ -1,0 +1,54 @@
+// Cluster-wide unattended-upgrades policy. Installed to /etc/apt/apt.conf.d/
+// by install-os-updates.sh on EVERY node (Pop 22.04 and Ubuntu 24.04 alike).
+// Sorts after the package's 50unattended-upgrades, so everything here wins.
+//
+// POLICY: security pockets only, applied daily, never reboots, and never
+// touches the GPU driver stack, the kernel, or ZFS. Those are upgraded by hand
+// in a maintenance window, one node at a time (README.md).
+
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+
+// Match on ORIGIN, not ${distro_id}. The stock Allowed-Origins is
+// "${distro_id}:${distro_codename}-security"; on Pop ${distro_id} is "Pop",
+// but Ubuntu's security archive is origin "Ubuntu" -- so on cirrus the rule
+// matched nothing and unattended-upgrades ran every day for at least a year
+// without installing one package (found 2026-09-28 with 131 security updates
+// pending, openssl and libc6 among them). ${distro_codename} is still right on
+// Pop (jammy). #clear drops the stock list so it cannot quietly come back.
+#clear Unattended-Upgrade::Allowed-Origins;
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Origins-Pattern {
+	"origin=Ubuntu,archive=${distro_codename}-security";
+	// Ubuntu Pro ESM -- attached on the GB10s; matches nothing where it is not.
+	"origin=UbuntuESMApps,archive=${distro_codename}-apps-security";
+	"origin=UbuntuESM,archive=${distro_codename}-infra-security";
+};
+
+// Regexes, matched from the start of the package name.
+//
+// GPU stack: an unattended upgrade of the NVIDIA userspace libraries under a
+// running kernel module breaks every NEW GPU pod with a driver/library version
+// mismatch until the modules are reloaded (hit on cirrus). Kernel: needs a
+// reboot and must move in lockstep with the NVIDIA and ZFS modules built for
+// it. ZFS: userland should match the loaded module, and cirrus's tank pool
+// holds every PVC in the cluster.
+#clear Unattended-Upgrade::Package-Blacklist;
+Unattended-Upgrade::Package-Blacklist {
+	"nvidia-";
+	"libnvidia-";
+	"cuda";
+	"libcuda";
+	"linux-";
+	"zfs";
+	"libzfs";
+	"libzpool";
+	"libnvpair";
+	"libuutil";
+};
+
+// Reboots are a human decision on this cluster: cirrus is the only control
+// plane and must never be cordoned, and a GB10 reboot drops a loaded model.
+// A pending reboot is surfaced by the NodeRebootPending alert instead.
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";

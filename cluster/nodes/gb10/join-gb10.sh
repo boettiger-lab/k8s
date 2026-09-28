@@ -124,6 +124,10 @@ esac
 for f in k3s-agent-config.yaml harden-gb10.sh gpu-hang-watchdog.sh 99-gb10-vm.conf; do
     [ -f "$HERE/$f" ] || { echo "    FAIL: $HERE/$f missing" >&2; exit 1; }
 done
+# Shared with every node, so it lives outside this directory: run the join from
+# a full clone of the repo, not a copy of cluster/nodes/gb10/ alone.
+OS_UPDATES="$HERE/../../os-updates/install-os-updates.sh"
+[ -f "$OS_UPDATES" ] || { echo "    FAIL: $OS_UPDATES missing (run from a full repo clone)" >&2; exit 1; }
 grep -q 'node-taint' "$HERE/k3s-agent-config.yaml" \
   || { echo "    FAIL: k3s-agent-config.yaml has no node-taint." >&2; exit 1; }
 echo "    fleet files present, agent config carries the taint"
@@ -156,6 +160,15 @@ echo "    node-ip $NODE_IP, taint + eviction thresholds in place"
 echo
 echo "==> node hardening"
 bash "$HERE/harden-gb10.sh"
+
+# --- automatic OS security updates -------------------------------------------
+# The GB10 base image ships without unattended-upgrades: before 2026-09-28
+# nothing was applying security updates on any of these boxes. Installs the
+# cluster policy (security-only, kernel/GPU held) and the apt metrics the
+# OsAutoUpdatesMissing alert watches for.
+echo
+echo "==> automatic OS security updates"
+bash "$OS_UPDATES"
 
 # --- install the agent -------------------------------------------------------
 echo
