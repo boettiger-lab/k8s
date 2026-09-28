@@ -189,6 +189,31 @@ daemon between configs at startup. The workaround was to make the MPS node's
 config the `config.default` so it never transitions. Not relevant under
 time-slicing (no MPS daemon).
 
+### Running pods lose the GPU: `Failed to initialize NVML: Unknown Error`
+
+A GPU pod that *was* working starts failing `nvidia-smi` with `Failed to
+initialize NVML: Unknown Error`. The host driver is fine (`nvidia-smi` works on
+the node, and the kernel module matches the libraries), and newly started pods
+work. This is **not** the driver/library version mismatch.
+
+Cause: a `systemctl daemon-reload` on the node. Package upgrades trigger one
+routinely. On cgroup v2 with systemd-managed containers, the reload rebuilds each
+container's device cgroup from systemd's own list, and the NVIDIA devices are
+only on that list if `/dev/char/<major>:<minor>` symlinks exist for them. The
+NVIDIA device nodes are created by `nvidia-modprobe`, not udev, so by default
+those symlinks do not exist. Hit on cirrus 2026-09-28, during the first
+unattended-upgrades run: stt, a JupyterHub GPU server and an MCP pod all lost
+their GPUs at once.
+
+- **Prevent:** `sudo platform/nvidia/host-gpu-setup.sh` on every GPU node. It
+  installs `71-nvidia-dev-char.rules`, which recreates the links whenever the
+  driver binds, and creates them now. `cluster/os-updates/install-os-updates.sh`
+  runs it first, so this is automatic for any node set up that way.
+- **Recover:** restart the affected pods. Their device rules are only rebuilt at
+  container start.
+- **Test:** `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a
+  running GPU pod.
+
 ### Pod can't access a GPU
 
 1. Confirm it requests `nvidia.com/gpu` **and** sets `runtimeClassName: nvidia`.

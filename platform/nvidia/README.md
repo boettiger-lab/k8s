@@ -9,6 +9,18 @@ not a separate install.
 bash nvidia-device-plugin.sh   # idempotent helm upgrade --install
 ```
 
+## Host requirement: `/dev/char` links (every GPU node)
+
+```bash
+sudo ./host-gpu-setup.sh   # on the node; installs 71-nvidia-dev-char.rules
+```
+
+Without it, any `systemctl daemon-reload` on the node, including the ones
+package upgrades trigger, silently strips every *running* GPU container of its
+devices (`Failed to initialize NVML: Unknown Error`, host driver fine). It is
+run automatically by `cluster/os-updates/install-os-updates.sh`, and therefore
+by `join-gb10.sh`. Details are in the docs' troubleshooting section.
+
 ## Per-node GPU sharing
 
 Sharing is configured per node via the `nvidia.com/device-plugin.config` label

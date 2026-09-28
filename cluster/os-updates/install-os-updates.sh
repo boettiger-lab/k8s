@@ -6,10 +6,12 @@
 #   sudo ./install-os-updates.sh           # install, then show what WOULD be upgraded
 #   sudo ./install-os-updates.sh --apply   # ...and apply those security updates now
 #
-# Installs three things (policy and rationale in README.md):
-#   1. unattended-upgrades, security pockets only, GPU/kernel/ZFS held
-#   2. needrestart, restarting daemons after library updates (never k3s)
-#   3. apt-metrics timer, feeding node-exporter so the alerts can see this node
+# Installs four things (policy and rationale in README.md):
+#   1. GPU nodes: /dev/char symlinks, so a systemd reload during an upgrade
+#      does not strip running GPU containers of their devices
+#   2. unattended-upgrades, security pockets only, GPU/kernel/ZFS held
+#   3. needrestart, restarting daemons after library updates (never k3s)
+#   4. apt-metrics timer, feeding node-exporter so the alerts can see this node
 #
 # It never reboots. --apply installs only what the nightly run would install,
 # i.e. the non-held security updates; the held packages stay for a
@@ -24,7 +26,13 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "==> $(hostname): $(lsb_release -ds) ($(lsb_release -cs))"
 
-echo "==> 1/3  unattended-upgrades"
+echo "==> 1/4  GPU device symlinks"
+# FIRST, before anything below touches a package: the first unattended run on
+# cirrus (2026-09-28) reloaded systemd and every running GPU container lost its
+# GPU, and the apt-get install in the next step can trigger a reload too.
+bash "$HERE/../../platform/nvidia/host-gpu-setup.sh"
+
+echo "==> 2/4  unattended-upgrades"
 # The GB10 base image ships WITHOUT unattended-upgrades -- nothing at all was
 # applying security updates there. Pop has it but was matching nothing.
 # needrestart's policy goes in BEFORE the package: its apt hook fires at the end
@@ -40,10 +48,10 @@ echo "    origins:   $(apt-config dump --format '%v ' Unattended-Upgrade::Origin
 echo "    held:      $(apt-config dump --format '%v ' Unattended-Upgrade::Package-Blacklist)"
 echo "    allowed-origins (must be empty): '$(apt-config dump --format '%v' Unattended-Upgrade::Allowed-Origins)'"
 
-echo "==> 2/3  needrestart"
+echo "==> 3/4  needrestart"
 echo "    restart mode 'a' (automatic); k3s/containerd/nvidia excluded"
 
-echo "==> 3/3  apt-metrics timer"
+echo "==> 4/4  apt-metrics timer"
 install -m 0755 "$HERE/apt-metrics.sh" /usr/local/bin/apt-metrics.sh
 install -m 0644 "$HERE/apt-metrics.service" /etc/systemd/system/
 install -m 0644 "$HERE/apt-metrics.timer"   /etc/systemd/system/

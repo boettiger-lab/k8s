@@ -28,6 +28,13 @@ Both failures were silent: nothing logged an error, and no alert fired.
 
 ## What `install-os-updates.sh` installs
 
+**GPU nodes first:** before touching any package, it runs
+`platform/nvidia/host-gpu-setup.sh`. Upgrades trigger systemd reloads, and
+without that script's `/dev/char` links a reload strips every running GPU
+container of its GPU. The very first run on cirrus (2026-09-28) did exactly
+that. It is also why the installer needs a full repo clone, not just this
+directory.
+
 Run with sudo on each node, from a repo clone. It is idempotent, and it is the
 same script for Pop and Ubuntu. `join-gb10.sh` runs it automatically on new GB10s.
 
