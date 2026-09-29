@@ -14,11 +14,13 @@ bash nvidia-device-plugin.sh   # idempotent helm upgrade --install
 Sharing is configured per node via the `nvidia.com/device-plugin.config` label
 (see `nvidia-device-plugin-config.yaml`):
 
-- **cirrus** (`timeslice`): time-slicing, 8 replicas/GPU → 16 `nvidia.com/gpu`
+- **cirrus** (`timeslice-cdi`): time-slicing, 8 replicas/GPU → 16 `nvidia.com/gpu`
   slices. Time-slicing does **not** partition VRAM — a slice is just a
   bookkeeping slot capping how many pods share a GPU; every pod sees the full
   48 GB of its card. LLMs (vLLM) claim slice(s) and use the whole card; light
-  notebooks claim 1 each.
+  notebooks claim 1 each. Same as `timeslice` but with devices handed over via
+  **CDI** (`deviceListStrategy: cdi-cri`), so running GPU pods survive a
+  `systemctl daemon-reload`. Requires host toolkit ≥ 1.16 (cirrus: 1.20.1).
 - **nimbus** (`timeslice`): 8 replicas of the single GB10. Same label, different
   reason: the Spark has **unified memory** — CPU and GPU share one ~122 GiB pool, so
   there is no VRAM to divide and the replica count is purely a cap on how many GPU
@@ -28,7 +30,7 @@ Sharing is configured per node via the `nvidia.com/device-plugin.config` label
   because it was unlabelled and inherited `config.default`.)
 
 ```bash
-kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
+kubectl label node cirrus nvidia.com/device-plugin.config=timeslice-cdi --overwrite
 kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
 kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 ```
