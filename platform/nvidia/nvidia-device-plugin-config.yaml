@@ -1,5 +1,10 @@
 runtimeClassName: nvidia
 
+# Mount the host root read-only at /driver-root in the plugin. Required for the
+# plugin to generate CDI specs (the `timeslice-cdi` config below); inert on nodes
+# whose config still uses deviceListStrategy "envvar".
+nvidiaDriverRoot: "/"
+
 gfd:
   enabled: true
 
@@ -34,7 +39,7 @@ gfd:
 # (the plugin ignores `devices`/`rename` for mps), so it would slice all GPUs.
 #
 # Apply labels:
-#   kubectl label node cirrus nvidia.com/device-plugin.config=timeslice  --overwrite
+#   kubectl label node cirrus nvidia.com/device-plugin.config=timeslice-cdi --overwrite
 #   kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
 #   kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 #   kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
@@ -132,6 +137,35 @@ config:
         plugin:
           passDeviceSpecs: false
           deviceListStrategy: "envvar"
+          deviceIDStrategy: "uuid"
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 8
+    # cirrus. Identical to `timeslice` except for deviceListStrategy: "cdi-cri".
+    #
+    # WHY: with "envvar", the GPU is handed over as NVIDIA_VISIBLE_DEVICES and the
+    # legacy nvidia-container-runtime hook grants the /dev/nvidia* devices behind
+    # runc's back. systemd never learns about them, so ANY `systemctl
+    # daemon-reload` -- which package upgrades do routinely -- rebuilds every
+    # container's device cgroup without them, and running GPU pods fail with
+    # "Failed to initialize NVML: Unknown Error" (cirrus, twice on 2026-09-28).
+    # With "cdi-cri" the plugin returns CDI device names, containerd injects the
+    # devices into the OCI spec, and runc registers them with systemd, so they
+    # survive a reload. /dev/char symlinks alone did NOT fix it.
+    #
+    # Needs a host toolkit that ships nvidia-cdi-hook (>= 1.16; cirrus: 1.20.1).
+    # Check that before moving a GB10 onto this config.
+    timeslice-cdi: |
+      version: v1
+      flags:
+        migStrategy: "none"
+        failOnInitError: true
+        nvidiaDriverRoot: "/"
+        plugin:
+          passDeviceSpecs: false
+          deviceListStrategy: "cdi-cri"
           deviceIDStrategy: "uuid"
       sharing:
         timeSlicing:
