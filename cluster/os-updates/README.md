@@ -26,6 +26,20 @@ Both failures were silent: nothing logged an error, and no alert fired.
   unattended-upgrades, so nothing was ever installed automatically.
 - thelio (stock Ubuntu 24.04) was the only node doing it correctly.
 
+## Known issue: GPU nodes (2026-09-28), read before installing
+
+Any `systemctl daemon-reload`, which package upgrades trigger, strips **running** GPU containers of
+their GPU (`Failed to initialize NVML: Unknown Error`). It happened during the first
+unattended-upgrades run on cirrus. The `/dev/char` links from `platform/nvidia/host-gpu-setup.sh`
+turned out **not** to prevent it there; the likely cause is the old container toolkit running in
+legacy (non-CDI) mode. Until a node passes the reload test (a GPU pod still sees its GPU after
+`sudo systemctl daemon-reload`), hold its nightly run:
+
+    echo 'APT::Periodic::Unattended-Upgrade "0";' | sudo tee /etc/apt/apt.conf.d/52hold-unattended-gpu
+
+cirrus is held this way. The metrics report `node_apt_unattended_upgrades_enabled 0`, so
+`OsAutoUpdatesMissing` keeps the hold visible rather than forgotten.
+
 ## What `install-os-updates.sh` installs
 
 **GPU nodes first:** before touching any package, it runs

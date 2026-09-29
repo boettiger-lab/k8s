@@ -15,9 +15,12 @@ bash nvidia-device-plugin.sh   # idempotent helm upgrade --install
 sudo ./host-gpu-setup.sh   # on the node; installs nvidia-dev-char-symlinks.service
 ```
 
-Without it, any `systemctl daemon-reload` on the node, including the ones
-package upgrades trigger, silently strips every *running* GPU container of its
-devices (`Failed to initialize NVML: Unknown Error`, host driver fine). It is
+This is meant to stop a `systemctl daemon-reload` (which package upgrades trigger)
+from silently stripping every *running* GPU container of its devices (`Failed to
+initialize NVML: Unknown Error`, host driver fine). **On cirrus it was not enough**
+(2026-09-28): the old toolkit's legacy mode is the likely culprit, and the fix
+still to do is a current toolkit in CDI mode. See the docs' troubleshooting
+section. It is
 run automatically by `cluster/os-updates/install-os-updates.sh`, and therefore
 by `join-gb10.sh`. Details are in the docs' troubleshooting section.
 

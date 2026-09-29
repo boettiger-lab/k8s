@@ -205,14 +205,15 @@ those symlinks do not exist. Hit on cirrus 2026-09-28, during the first
 unattended-upgrades run: stt, a JupyterHub GPU server and an MCP pod all lost
 their GPUs at once.
 
-- **Prevent:** `sudo platform/nvidia/host-gpu-setup.sh` on every GPU node. It
-  installs `nvidia-dev-char-symlinks.service`, which recreates the links at
-  every boot before k3s starts, and creates them now.
-  `cluster/os-updates/install-os-updates.sh` runs it first, so this is automatic
-  for any node set up that way. NVIDIA's documented alternative, a udev rule
-  running `nvidia-ctk system create-dev-char-symlinks --create-all`, does not
-  work with cirrus's nvidia-ctk 1.14.0-rc.2 and the 580 driver ("missing
-  required device major nvidia-frontend"). Hence the service.
+- **Prevent: NOT SOLVED YET.** `/dev/char/<major>:<minor>` links (NVIDIA's documented
+  fix, installed by `platform/nvidia/host-gpu-setup.sh` as a boot service) did **not** help on
+  cirrus. A pod created while the links existed still lost its GPU on the next reload. The toolkit
+  there (`nvidia-container-toolkit 1.14.0-rc.2`) runs in legacy hook mode (`mode = "auto"`, no CDI
+  specs), which grants the devices without runc knowing about them, and that is most likely why.
+  The expected fix is a current toolkit in **CDI mode**, verified by a pod surviving
+  `sudo systemctl daemon-reload`. Until then, nightly unattended-upgrades is held on cirrus.
+  (NVIDIA's udev-rule variant also fails on 1.14.0-rc.2 with the 580 driver: `missing required
+  device major nvidia-frontend`.)
 - **Recover:** restart the affected pods. Their device rules are only rebuilt at
   container start.
 - **Test:** `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a
