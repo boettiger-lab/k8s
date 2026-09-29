@@ -142,6 +142,17 @@ singleuser:
                 # runtime, with no VRAM accounting/limit.
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
+            02b-gpu-2x:
+              display_name: RL GPU ×2
+              description: CUDA GPU environment, with RL, on BOTH of cirrus's GPUs
+              kubespawner_override:
+                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                # 2 time-slicing slices. The device plugin spreads a multi-slice
+                # request across GPUs, so this lands one slice on each Quadro
+                # (verify with nvidia-smi -L: two different UUIDs). Both GPUs
+                # stay SHARED with other slice holders -- this is not exclusive.
+                extra_resource_limits:
+                  nvidia.com/gpu: "2"
             03-gpu-spatial:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
