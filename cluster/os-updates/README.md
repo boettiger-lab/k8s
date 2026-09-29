@@ -36,7 +36,7 @@ CDI**. The first unattended run on cirrus did exactly that. The fix is in the NV
 | node | status |
 |---|---|
 | cirrus | **passes** (2026-09-28): toolkit 1.20.1, `timeslice-cdi` |
-| GB10s | not yet checked: still `envvar` |
+| GB10s (nimbus, nimbus2–4) | **pass** (2026-09-28): toolkit 1.20.0, `timeslice-cdi` |
 
 On a GPU node that has not passed, hold the nightly run until it does:
 
