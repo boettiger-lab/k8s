@@ -205,15 +205,21 @@ those symlinks do not exist. Hit on cirrus 2026-09-28, during the first
 unattended-upgrades run: stt, a JupyterHub GPU server and an MCP pod all lost
 their GPUs at once.
 
-- **Prevent: NOT SOLVED YET.** `/dev/char/<major>:<minor>` links (NVIDIA's documented
-  fix, installed by `platform/nvidia/host-gpu-setup.sh` as a boot service) did **not** help on
-  cirrus. A pod created while the links existed still lost its GPU on the next reload. The toolkit
-  there (`nvidia-container-toolkit 1.14.0-rc.2`) runs in legacy hook mode (`mode = "auto"`, no CDI
-  specs), which grants the devices without runc knowing about them, and that is most likely why.
-  The expected fix is a current toolkit in **CDI mode**, verified by a pod surviving
-  `sudo systemctl daemon-reload`. Until then, nightly unattended-upgrades is held on cirrus.
-  (NVIDIA's udev-rule variant also fails on 1.14.0-rc.2 with the 580 driver: `missing required
-  device major nvidia-frontend`.)
+- **Prevent: hand GPUs over via CDI.** Fixed on cirrus 2026-09-28, and verified: a running pod
+  kept its GPU through `sudo systemctl daemon-reload`. It takes three things together:
+  1. **A current container toolkit** (cirrus: 1.20.1). The old `ubuntu18.04` apt source had stalled
+     at 1.14.0-rc.2, which lacks `nvidia-cdi-hook`.
+  2. **The device plugin's `deviceListStrategy: cdi-cri`**, via the per-node config
+     `timeslice-cdi` in `platform/nvidia/nvidia-device-plugin-config.yaml`. With the default
+     `envvar`, the legacy runtime hook grants the devices behind runc's back, and systemd never
+     lists them.
+  3. **`/dev/char` links** (`platform/nvidia/host-gpu-setup.sh`, a boot service). With CDI, runc
+     registers each device with systemd as `DeviceAllow=/dev/char/<maj>:<min>`, so the links must
+     exist. The links **alone** did not help while the plugin was still on `envvar`.
+
+  Check a pod with `systemctl show cri-containerd-<container-id>.scope -p DeviceAllow`. A
+  protected pod lists `/dev/char/195:*` and `/dev/char/510:*`; an exposed one lists none. The
+  GB10s are still on `envvar`: check their toolkit version before moving them.
 - **Recover:** restart the affected pods. Their device rules are only rebuilt at
   container start.
 - **Test:** `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a
