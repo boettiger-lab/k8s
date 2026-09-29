@@ -189,6 +189,42 @@ daemon between configs at startup. The workaround was to make the MPS node's
 config the `config.default` so it never transitions. Not relevant under
 time-slicing (no MPS daemon).
 
+### Running pods lose the GPU: `Failed to initialize NVML: Unknown Error`
+
+A GPU pod that *was* working starts failing `nvidia-smi` with `Failed to
+initialize NVML: Unknown Error`. The host driver is fine (`nvidia-smi` works on
+the node, and the kernel module matches the libraries), and newly started pods
+work. This is **not** the driver/library version mismatch.
+
+Cause: a `systemctl daemon-reload` on the node. Package upgrades trigger one
+routinely. On cgroup v2 with systemd-managed containers, the reload rebuilds each
+container's device cgroup from systemd's own list, and the NVIDIA devices are
+only on that list if `/dev/char/<major>:<minor>` symlinks exist for them. The
+NVIDIA device nodes are created by `nvidia-modprobe`, not udev, so by default
+those symlinks do not exist. Hit on cirrus 2026-09-28, during the first
+unattended-upgrades run: stt, a JupyterHub GPU server and an MCP pod all lost
+their GPUs at once.
+
+- **Prevent: hand GPUs over via CDI.** Fixed on cirrus 2026-09-28, and verified: a running pod
+  kept its GPU through `sudo systemctl daemon-reload`. It takes three things together:
+  1. **A current container toolkit** (cirrus: 1.20.1). The old `ubuntu18.04` apt source had stalled
+     at 1.14.0-rc.2, which lacks `nvidia-cdi-hook`.
+  2. **The device plugin's `deviceListStrategy: cdi-cri`**, via the per-node config
+     `timeslice-cdi` in `platform/nvidia/nvidia-device-plugin-config.yaml`. With the default
+     `envvar`, the legacy runtime hook grants the devices behind runc's back, and systemd never
+     lists them.
+  3. **`/dev/char` links** (`platform/nvidia/host-gpu-setup.sh`, a boot service). With CDI, runc
+     registers each device with systemd as `DeviceAllow=/dev/char/<maj>:<min>`, so the links must
+     exist. The links **alone** did not help while the plugin was still on `envvar`.
+
+  Check a pod with `systemctl show cri-containerd-<container-id>.scope -p DeviceAllow`. A
+  protected pod lists `/dev/char/195:*` and `/dev/char/510:*`; an exposed one lists none. The
+  GB10s are still on `envvar`: check their toolkit version before moving them.
+- **Recover:** restart the affected pods. Their device rules are only rebuilt at
+  container start.
+- **Test:** `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a
+  running GPU pod.
+
 ### Pod can't access a GPU
 
 1. Confirm it requests `nvidia.com/gpu` **and** sets `runtimeClassName: nvidia`.

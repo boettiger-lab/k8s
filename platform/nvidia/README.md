@@ -9,6 +9,21 @@ not a separate install.
 bash nvidia-device-plugin.sh   # idempotent helm upgrade --install
 ```
 
+## Host requirement: `/dev/char` links (every GPU node)
+
+```bash
+sudo ./host-gpu-setup.sh   # on the node; installs nvidia-dev-char-symlinks.service
+```
+
+This is meant to stop a `systemctl daemon-reload` (which package upgrades trigger)
+from silently stripping every *running* GPU container of its devices (`Failed to
+initialize NVML: Unknown Error`, host driver fine). The links are **necessary but not
+sufficient**: it also takes CDI device handover (`timeslice-cdi` below) and a
+toolkit that ships `nvidia-cdi-hook`. Verified on cirrus 2026-09-28; see the
+docs' troubleshooting section. It is
+run automatically by `cluster/os-updates/install-os-updates.sh`, and therefore
+by `join-gb10.sh`. Details are in the docs' troubleshooting section.
+
 ## Per-node GPU sharing
 
 Sharing is configured per node via the `nvidia.com/device-plugin.config` label

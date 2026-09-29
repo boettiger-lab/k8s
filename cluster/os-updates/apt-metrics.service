@@ -1,0 +1,9 @@
+[Unit]
+Description=Export apt / reboot-required state for node-exporter (cluster/os-updates)
+After=apt-daily-upgrade.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/apt-metrics.sh
+Nice=10
+IOSchedulingClass=idle

@@ -18,6 +18,7 @@ greenfield.
 | GPU hang watchdog | `gpu-hang-watchdog.{sh,service,timer}` |
 | VM reclaim tuning | `99-gb10-vm.conf` |
 | everything above, installed | `harden-gb10.sh` |
+| automatic OS security updates (shared with every node) | `../../os-updates/`, run by `join-gb10.sh` |
 
 One template rather than three per-host files: three copies of the same 60 lines
 of rationale drift, and the drift is invisible until a node registers wrong.

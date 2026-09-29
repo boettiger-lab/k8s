@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly apt / reboot-required metrics for node-exporter (cluster/os-updates)
+
+[Timer]
+OnBootSec=2min
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

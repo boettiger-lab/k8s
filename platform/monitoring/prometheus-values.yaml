@@ -104,6 +104,11 @@ prometheus-node-exporter:
   extraArgs:
     - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s/containerd/.+|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+|var/lib/rancher/.+)($|/)
     - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
+    # Textfile collector for cluster/os-updates/apt-metrics.sh (host timer writes
+    # /var/lib/node_exporter/textfile_collector/apt.prom; the host root is already
+    # mounted read-only at /host/root). About eight series per node -- no
+    # bearing on the cardinality guard above.
+    - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile_collector
 prometheus-pushgateway:
   enabled: false
 
@@ -334,6 +339,69 @@ serverFiles:
             annotations:
               summary: "{{ $labels.node }} {{ $labels.device }}: pending sectors rising"
               description: "Current_Pending_Sector increased in the last 24h. A flat count is normal wear; a rising one means the drive is failing."
+
+      - name: os-updates
+        rules:
+          # Series come from cluster/os-updates/apt-metrics.sh on each node; the
+          # policy is in cluster/os-updates/README.md. All of these failures
+          # were SILENT until 2026-09-28: cirrus's unattended-upgrades matched
+          # no origin and installed nothing for a year, and the GB10s never had
+          # it installed. Nothing logged an error in either case.
+
+          # A node with no apt metrics, or with auto-updates switched off: the
+          # install script was never run there (a newly joined node), or
+          # unattended-upgrades was removed. Checked against node_uname_info
+          # so a node that simply lacks the series is still caught.
+          - alert: OsAutoUpdatesMissing
+            expr: count by (node) (node_uname_info) unless on(node) (node_apt_unattended_upgrades_enabled == 1)
+            for: 2h
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }} has no automatic OS security updates"
+              description: "No apt metrics, or unattended-upgrades disabled. Run cluster/os-updates/install-os-updates.sh on the node."
+
+          - alert: OsAutoUpdatesStalled
+            expr: time() - node_apt_unattended_upgrades_last_run_timestamp_seconds > 3 * 86400
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }}: unattended-upgrades has not run for 3 days"
+              description: "Check apt-daily-upgrade.timer, and look in /var/log/unattended-upgrades/ for a held dpkg lock or a broken package."
+
+          # Runs daily but installs nothing: the cirrus failure. security_auto
+          # counts only the updates the policy SHOULD install (the held
+          # kernel/GPU/ZFS packages are excluded), so after a nightly run this
+          # returns to 0. Nonzero for 3 straight days means the nightly run is
+          # skipping them. If one package is stuck for a legitimate reason (a
+          # dependency only in -updates), `sudo unattended-upgrade --dry-run -d`
+          # on the node names it.
+          - alert: OsSecurityUpdatesNotApplying
+            expr: min_over_time(node_apt_upgrades_pending{class="security_auto"}[3d]) > 0 and on(node) (node_apt_unattended_upgrades_enabled == 1)
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }}: security updates pending for 3 days despite unattended-upgrades"
+              description: "{{ $value }} security updates are eligible for automatic install but have not been applied. Run `sudo unattended-upgrade --dry-run -d` on the node."
+
+          # Reboots are manual on this cluster (cirrus must never be cordoned, and a
+          # GB10 reboot drops a loaded model), so they need a reminder instead.
+          - alert: NodeRebootPending
+            expr: time() - node_reboot_required_timestamp_seconds > 14 * 86400
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }} has needed a reboot for 14 days"
+              description: "/var/run/reboot-required is set. Reboot in a window: cluster/node-drain-reboot.md for workers, a planned outage for cirrus."
+
+          # The kernel/GPU/ZFS packages held back on purpose. Not a fault -- a
+          # reminder that a manual maintenance window is due (README.md).
+          - alert: OsMaintenanceDue
+            expr: min_over_time(node_apt_upgrades_pending{class="security_held"}[7d]) > 0
+            for: 1h
+            labels: { severity: info }
+            annotations:
+              summary: "{{ $labels.node }}: held kernel/GPU/ZFS security updates pending for 7 days"
+              description: "{{ $value }} held security updates. Upgrade in a maintenance window, one node at a time: cluster/os-updates/README.md."
 
       - name: monitoring
         rules:
