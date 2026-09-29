@@ -62,6 +62,9 @@ spec:
       # Staged on nimbus3 2026-09-21 (65 GB, 15 shards).
       nodeSelector:
         vllm-cache/laguna: "true"
+        # Only GB10s in the LLM pool. A node lent to JupyterHub (gb10-pool=jupyter)
+        # keeps its weight-cache label, but must not be picked for a model.
+        gb10-pool: llm
       tolerations:
       - key: dedicated
         operator: Equal
