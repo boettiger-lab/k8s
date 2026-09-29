@@ -25,6 +25,28 @@ node:
       operator: Equal
       value: user
       effect: NoSchedule
+    # GB10s: tolerated, but the affinity below admits ONLY GB10s in the jupyter
+    # pool. A toleration grants permission, it does not attract.
+    - key: dedicated
+      operator: Equal
+      value: gb10
+      effect: NoSchedule
+  # GB10s serving LLMs hold no cluster storage (cluster/nodes/gb10/README.md).
+  # A GB10 moved into the jupyter pool (`gb10-pool=jupyter`) needs the JuiceFS
+  # client so hub servers can mount their juicefs-home. The two terms are ORed:
+  # every non-GB10 node, plus jupyter-pool GB10s.
+  #
+  # Moving a GB10 back to `llm`: stop its jupyter servers FIRST. A delvol Job for
+  # a volume last used there gets pinned to the node, and strands once the CSI
+  # node leaves (see #66 and the controller note below).
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - {key: node-class, operator: NotIn, values: [gb10]}
+          - matchExpressions:
+              - {key: gb10-pool, operator: In, values: [jupyter]}
 
 # WHY THIS BLOCK EXISTS: the chart ships controller.resources.limits.memory=1Gi,
 # and that is not enough for this cluster. On 2026-09-13 both controller

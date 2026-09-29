@@ -41,6 +41,9 @@ spec:
       # Label after staging, never before.
       nodeSelector:
         vllm-cache/qwen38-flashnext: "true"
+        # Only GB10s in the LLM pool. A node lent to JupyterHub (gb10-pool=jupyter)
+        # keeps its weight-cache label, but must not be picked for a model.
+        gb10-pool: llm
       tolerations:
       - key: dedicated
         operator: Equal

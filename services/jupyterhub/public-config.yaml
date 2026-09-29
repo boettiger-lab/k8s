@@ -149,6 +149,39 @@ singleuser:
                 image: "ghcr.io/rocker-org/ml-spatial:latest"
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
+        # GPU placement, applied AFTER `image`, so it overrides the slice count the
+        # GPU images set. Slices are a co-tenancy counter, not a compute or VRAM
+        # share (see ../../platform/nvidia/README.md), so users pick hardware, not a
+        # slice number.
+        gpu:
+          display_name: GPU
+          choices:
+            default:
+              display_name: Environment default (GPU images get 1 shared cirrus GPU)
+              default: true
+              kubespawner_override: {}
+            cirrus-2x:
+              display_name: Both cirrus GPUs (2x Quadro RTX 8000, shared)
+              kubespawner_override:
+                # 9, not 2: the device plugin does NOT spread a multi-slice request
+                # across GPUs (2 slices landed on one Quadro, 2026-09-29). Each GPU
+                # has 8 slices, so 9 cannot fit on one. Costs 9 of cirrus's 16 slots.
+                extra_resource_limits:
+                  nvidia.com/gpu: "9"
+            gb10:
+              display_name: GB10 (NVIDIA Grace Blackwell, arm64, jupyter-pool node)
+              description: "Runs on a GB10 labelled gb10-pool=jupyter. arm64: the lab images are multi-arch, custom images must be too. GPU memory is the node's shared 121 GiB RAM."
+              kubespawner_override:
+                extra_resource_limits:
+                  nvidia.com/gpu: "1"
+                node_selector:
+                  gb10-pool: jupyter
+                # Replaces the spawner's tolerations, so the chart's jupyter
+                # defaults are restated alongside the GB10 taint.
+                tolerations:
+                  - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+                  - {key: hub.jupyter.org/dedicated, operator: Equal, value: user, effect: NoSchedule}
+                  - {key: hub.jupyter.org_dedicated, operator: Equal, value: user, effect: NoSchedule}
         interface:
           display_name: Interface
           choices:

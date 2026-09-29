@@ -81,10 +81,19 @@ window matters.
   with `nodeSelector: {node-class: gb10}`; reserve `kubernetes.io/hostname` for
   cases with a real per-box reason, such as a model tied to one box's local
   weight cache. Each such pin is a place the fleet stops behaving like a pool.
-- **These nodes hold no cluster data** — no JuiceFS, no RustFS, no ZFS-LocalPV,
-  regardless of workload. Nothing storage-related may tolerate this taint. The
-  `juicefs-csi-node` DaemonSet briefly did (live helm rev 4) and landed on
-  nimbus; reverted in rev 6.
+- **Two pools, tracked by the `gb10-pool` label** (from 2026-09-29):
+  `kubectl get nodes -L gb10-pool`.
+  - `llm`: serves models. **Holds no cluster data**: no JuiceFS, no RustFS, no
+    ZFS-LocalPV. (The `juicefs-csi-node` DaemonSet once landed on nimbus by
+    accident; reverted in helm rev 6.)
+  - `jupyter`: open to JupyterHub via the launcher's *GPU → GB10* option. It runs
+    the JuiceFS **client only** (CSI node + mount pods, a local read cache in
+    `/var/jfsCache`) so hub homes on `juicefs-home` can mount. It still holds no
+    RustFS, Postgres or ZFS-LocalPV. `platform/juicefs/csi-driver-values.yaml`
+    admits only this pool.
+  - **Moving a node between pools:** stop the node's jupyter servers (or scale
+    its model to 0) first, then relabel. Going `jupyter` → `llm` with a home still
+    mounted strands its delvol Jobs (#66).
 - **Wired only.** `join-gb10.sh` sets any Wi-Fi device down and unmanaged. A
   second interface is how a node registers an unroutable address and flannel
   silently blackholes cross-node traffic; `disconnected` is not sufficient,
