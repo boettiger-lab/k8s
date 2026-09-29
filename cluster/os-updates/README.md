@@ -60,7 +60,7 @@ same script for Pop and Ubuntu. `join-gb10.sh` runs it automatically on new GB10
     sudo cluster/os-updates/install-os-updates.sh           # install + dry run
     sudo cluster/os-updates/install-os-updates.sh --apply   # ...and apply now
 
-1. **`51cluster-unattended-upgrades`** goes in `/etc/apt/apt.conf.d/`.
+1. **`99zz-cluster-unattended-upgrades`** goes in `/etc/apt/apt.conf.d/`. It is named to sort **last**, because apt's last setting wins, and the GB10 image's `99update-notifier-nvidia` switches the nightly run off. The installer fails if the effective value isn't 1.
    - Allows security pockets only, matched by *origin*: Ubuntu, plus Ubuntu Pro
      ESM where it is attached.
    - Blacklists `nvidia-`, `libnvidia-`, `cuda`, the kernel packages
