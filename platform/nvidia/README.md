@@ -12,7 +12,7 @@ bash nvidia-device-plugin.sh   # idempotent helm upgrade --install
 ## Host requirement: `/dev/char` links (every GPU node)
 
 ```bash
-sudo ./host-gpu-setup.sh   # on the node; installs 71-nvidia-dev-char.rules
+sudo ./host-gpu-setup.sh   # on the node; installs nvidia-dev-char-symlinks.service
 ```
 
 Without it, any `systemctl daemon-reload` on the node, including the ones

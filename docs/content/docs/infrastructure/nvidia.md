@@ -206,9 +206,13 @@ unattended-upgrades run: stt, a JupyterHub GPU server and an MCP pod all lost
 their GPUs at once.
 
 - **Prevent:** `sudo platform/nvidia/host-gpu-setup.sh` on every GPU node. It
-  installs `71-nvidia-dev-char.rules`, which recreates the links whenever the
-  driver binds, and creates them now. `cluster/os-updates/install-os-updates.sh`
-  runs it first, so this is automatic for any node set up that way.
+  installs `nvidia-dev-char-symlinks.service`, which recreates the links at
+  every boot before k3s starts, and creates them now.
+  `cluster/os-updates/install-os-updates.sh` runs it first, so this is automatic
+  for any node set up that way. NVIDIA's documented alternative, a udev rule
+  running `nvidia-ctk system create-dev-char-symlinks --create-all`, does not
+  work with cirrus's nvidia-ctk 1.14.0-rc.2 and the 580 driver ("missing
+  required device major nvidia-frontend"). Hence the service.
 - **Recover:** restart the affected pods. Their device rules are only rebuilt at
   container start.
 - **Test:** `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a

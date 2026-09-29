@@ -1,0 +1,26 @@
+# Installed by host-gpu-setup.sh on every GPU node.
+#
+# /dev/char/<major>:<minor> links for the NVIDIA device nodes, created at boot
+# BEFORE k3s starts any container. Without them, a systemd reload (which any
+# package upgrade with a unit file triggers) rebuilds each container's device
+# cgroup from systemd's own list, and running GPU containers lose /dev/nvidia*
+# with "Failed to initialize NVML: Unknown Error" (cirrus, 2026-09-28).
+#
+# A service, not NVIDIA's documented udev rule: that rule needs
+# `create-dev-char-symlinks --create-all`, which the nvidia-ctk on cirrus
+# (1.14.0-rc.2) cannot do against the 580 driver ("missing required device
+# major nvidia-frontend"). Without --create-all it only links nodes that already
+# exist, so nvidia-smi runs first to make the driver create all of them.
+[Unit]
+Description=NVIDIA /dev/char symlinks (so systemd reloads keep GPU containers' devices)
+After=nvidia-persistenced.service
+Before=k3s.service k3s-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-__NVIDIA_SMI__ -L
+ExecStart=__NVIDIA_CTK__ system create-dev-char-symlinks
+
+[Install]
+WantedBy=multi-user.target

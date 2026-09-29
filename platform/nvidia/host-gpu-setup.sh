@@ -6,7 +6,8 @@
 #
 #   sudo platform/nvidia/host-gpu-setup.sh
 #
-# /dev/char symlinks for the NVIDIA devices (71-nvidia-dev-char.rules). On
+# /dev/char symlinks for the NVIDIA devices (nvidia-dev-char-symlinks.service,
+# at every boot, before k3s). On
 # cgroup v2 with systemd-managed containers, a `systemctl daemon-reload` --
 # which package upgrades trigger routinely -- rebuilds each container's device
 # cgroup from systemd's list. The runtime can only put a device on that list
@@ -25,11 +26,20 @@ if [ -z "$CTK" ]; then
     exit 0
 fi
 
-sed "s|__NVIDIA_CTK__|$CTK|" "$HERE/71-nvidia-dev-char.rules" > /etc/udev/rules.d/71-nvidia-dev-char.rules
-chmod 0644 /etc/udev/rules.d/71-nvidia-dev-char.rules
-udevadm control --reload-rules
-"$CTK" system create-dev-char-symlinks --create-all
-echo "    udev rule installed; $(ls -l /dev/char | grep -c nvidia) NVIDIA /dev/char links:"
+SMI="$(command -v nvidia-smi)"
+# Superseded: NVIDIA's udev rule needs --create-all, which fails on this
+# nvidia-ctk with the 580 driver -- remove it if an earlier run installed it.
+if [ -e /etc/udev/rules.d/71-nvidia-dev-char.rules ]; then
+    rm -f /etc/udev/rules.d/71-nvidia-dev-char.rules
+    udevadm control --reload-rules
+fi
+sed -e "s|__NVIDIA_CTK__|$CTK|" -e "s|__NVIDIA_SMI__|$SMI|" \
+    "$HERE/nvidia-dev-char-symlinks.service" > /etc/systemd/system/nvidia-dev-char-symlinks.service
+chmod 0644 /etc/systemd/system/nvidia-dev-char-symlinks.service
+systemctl daemon-reload
+systemctl enable nvidia-dev-char-symlinks.service >/dev/null
+systemctl restart nvidia-dev-char-symlinks.service
+echo "    boot service enabled; $(ls -l /dev/char | grep -c nvidia) NVIDIA /dev/char links:"
 ls -l /dev/char | grep nvidia | awk '{print "      " $(NF-2), $NF}'
 echo "    GPU containers started BEFORE these links existed are still exposed to"
 echo "    the next systemd reload: restart them once."
