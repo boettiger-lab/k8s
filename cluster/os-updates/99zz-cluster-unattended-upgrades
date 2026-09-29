@@ -1,6 +1,12 @@
 // Cluster-wide unattended-upgrades policy. Installed to /etc/apt/apt.conf.d/
 // by install-os-updates.sh on EVERY node (Pop 22.04 and Ubuntu 24.04 alike).
-// Sorts after the package's 50unattended-upgrades, so everything here wins.
+//
+// The name must sort LAST: apt reads apt.conf.d in name order and the last
+// setting wins. The GB10 base image ships 99update-notifier-nvidia, which sets
+// APT::Periodic::Unattended-Upgrade "0" and Update-Package-Lists "0". Under
+// the old name (51cluster-...) that silently disabled the nightly run on all
+// four GB10s (found 2026-09-29 by the OsAutoUpdatesMissing alert).
+// install-os-updates.sh now also checks the effective value.
 //
 // POLICY: security pockets only, applied daily, never reboots, and never
 // touches the GPU driver stack, the kernel, or ZFS. Those are upgraded by hand

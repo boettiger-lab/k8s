@@ -41,12 +41,20 @@ install -d /etc/needrestart/conf.d
 install -m 0644 "$HERE/50-cluster.conf" /etc/needrestart/conf.d/50-cluster.conf
 apt-get -qq update
 apt-get -qq install -y unattended-upgrades needrestart >/dev/null
-install -m 0644 "$HERE/51cluster-unattended-upgrades" /etc/apt/apt.conf.d/51cluster-unattended-upgrades
+rm -f /etc/apt/apt.conf.d/51cluster-unattended-upgrades   # pre-2026-09-29 name; lost to 99update-notifier-nvidia
+install -m 0644 "$HERE/99zz-cluster-unattended-upgrades" /etc/apt/apt.conf.d/99zz-cluster-unattended-upgrades
 systemctl enable --now apt-daily.timer apt-daily-upgrade.timer >/dev/null
 systemctl enable unattended-upgrades.service >/dev/null
 echo "    origins:   $(apt-config dump --format '%v ' Unattended-Upgrade::Origins-Pattern)"
 echo "    held:      $(apt-config dump --format '%v ' Unattended-Upgrade::Package-Blacklist)"
 echo "    allowed-origins (must be empty): '$(apt-config dump --format '%v' Unattended-Upgrade::Allowed-Origins)'"
+# Verify the EFFECTIVE values, not the file we wrote: a vendor file sorting
+# later (99update-notifier-nvidia on the GB10s) once overrode ours silently.
+for k in APT::Periodic::Unattended-Upgrade APT::Periodic::Update-Package-Lists; do
+    v="$(apt-config dump --format '%v' "$k")"
+    [ "$v" = "1" ] || { echo "    FAIL: effective $k is '$v', not 1 -- a later file in /etc/apt/apt.conf.d overrides ours:" >&2; grep -l "$k" /etc/apt/apt.conf.d/* >&2; exit 1; }
+done
+echo "    effective: Unattended-Upgrade=1, Update-Package-Lists=1"
 
 echo "==> 3/4  needrestart"
 echo "    restart mode 'a' (automatic); k3s/containerd/nvidia excluded"
