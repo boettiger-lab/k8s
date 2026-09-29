@@ -60,13 +60,15 @@ fi
 # Not set via k3s --node-label: NodeRestriction only lets a kubelet self-assign
 # labels from a short allow-list, and nvidia.com/* is not on it.
 #
-# `timeslice` to match nimbus: 8 slices of the ONE GB10. Read that as a
+# `timeslice-cdi`, as on every GB10: 8 slices of the ONE GB10, handed over via
+# CDI so running GPU pods survive a systemd reload (see
+# ../../../platform/nvidia/nvidia-device-plugin-config.yaml). Read the slices as a
 # co-tenancy cap, not a memory carve-up -- the "VRAM" those slices share is the
 # host's 121 GiB unified pool, so the slice count bounds nothing. The only
 # effective control on a model's footprint is --kv-cache-memory-bytes in the
 # vLLM manifest. See ../../../platform/nvidia/nvidia-device-plugin-config.yaml.
 say "labelling $NODE for the NVIDIA device plugin"
-kubectl label node "$NODE" nvidia.com/device-plugin.config=timeslice --overwrite
+kubectl label node "$NODE" nvidia.com/device-plugin.config=timeslice-cdi --overwrite
 
 say "waiting for $NODE to advertise nvidia.com/gpu"
 GPUS=""

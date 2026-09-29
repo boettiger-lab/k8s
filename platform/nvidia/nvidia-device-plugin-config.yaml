@@ -24,7 +24,7 @@ gfd:
 #          advertised 8 slices until 2026-09-07 only because the node was unlabelled
 #          and fell through to config.default. Revisit if it ever receives one of
 #          cirrus's 48GB RTX 8000s.
-#   nimbus (1x GB10, DGX Spark) -> label "timeslice": 8 slices of the ONE GB10.
+#   GB10s (nimbus, nimbus2-4) -> label "timeslice-cdi": 8 slices of the ONE GB10.
 #          Same map entry as cirrus, but read it differently: those 8 slices are
 #          shares of a single chip, not 8 GPUs, and the "VRAM" they share is the
 #          host's 121 GiB UNIFIED pool -- the same memory the OS, k3s and every
@@ -40,9 +40,8 @@ gfd:
 #
 # Apply labels:
 #   kubectl label node cirrus nvidia.com/device-plugin.config=timeslice-cdi --overwrite
-#   kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
 #   kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
-#   kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
+#   for n in nimbus nimbus2 nimbus3 nimbus4; do kubectl label node $n nvidia.com/device-plugin.config=timeslice-cdi --overwrite; done
 #
 # The labels are applied with kubectl rather than via k3s `--node-label`, because
 # NodeRestriction only lets a kubelet self-assign labels from a short allow-list
@@ -143,7 +142,7 @@ config:
           resources:
             - name: nvidia.com/gpu
               replicas: 8
-    # cirrus. Identical to `timeslice` except for deviceListStrategy: "cdi-cri".
+    # cirrus and every GB10. Identical to `timeslice` except for deviceListStrategy: "cdi-cri".
     #
     # WHY: with "envvar", the GPU is handed over as NVIDIA_VISIBLE_DEVICES and the
     # legacy nvidia-container-runtime hook grants the /dev/nvidia* devices behind
@@ -155,8 +154,9 @@ config:
     # devices into the OCI spec, and runc registers them with systemd, so they
     # survive a reload. /dev/char symlinks alone did NOT fix it.
     #
-    # Needs a host toolkit that ships nvidia-cdi-hook (>= 1.16; cirrus: 1.20.1).
-    # Check that before moving a GB10 onto this config.
+    # Needs a host toolkit that ships nvidia-cdi-hook (>= 1.16): cirrus 1.20.1,
+    # GB10s 1.20.0 (from the CUDA sbsa repo). All verified with a daemon-reload
+    # on 2026-09-28. `timeslice` (envvar) is kept only as a fallback.
     timeslice-cdi: |
       version: v1
       flags:

@@ -36,7 +36,7 @@ Sharing is configured per node via the `nvidia.com/device-plugin.config` label
   notebooks claim 1 each. Same as `timeslice` but with devices handed over via
   **CDI** (`deviceListStrategy: cdi-cri`), so running GPU pods survive a
   `systemctl daemon-reload`. Requires host toolkit ≥ 1.16 (cirrus: 1.20.1).
-- **nimbus** (`timeslice`): 8 replicas of the single GB10. Same label, different
+- **GB10s: nimbus, nimbus2–4** (`timeslice-cdi`, CDI as on cirrus): 8 replicas of the single GB10. Same label, different
   reason: the Spark has **unified memory** — CPU and GPU share one ~122 GiB pool, so
   there is no VRAM to divide and the replica count is purely a cap on how many GPU
   pods the scheduler will place here. vLLM takes 6 of the 8 slices and leaves 2 free.
@@ -46,7 +46,7 @@ Sharing is configured per node via the `nvidia.com/device-plugin.config` label
 
 ```bash
 kubectl label node cirrus nvidia.com/device-plugin.config=timeslice-cdi --overwrite
-kubectl label node nimbus nvidia.com/device-plugin.config=timeslice  --overwrite
+for n in nimbus nimbus2 nimbus3 nimbus4; do kubectl label node $n nvidia.com/device-plugin.config=timeslice-cdi --overwrite; done
 kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
 ```
 
