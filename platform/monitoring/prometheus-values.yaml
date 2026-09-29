@@ -7,7 +7,7 @@
 # SEVENTEEN DAYS, every one an OOMKill. Separately, thelio has died silently
 # four times and nothing ever reported it. See k8s issue #73.
 #
-# kube-state-metrics is ON since 2026-09-25, but ALLOWLISTED to five metrics
+# kube-state-metrics is ON since 2026-09-25, but ALLOWLISTED to seven metrics
 # (see its block below). Unrestricted it adds real series volume, and this
 # Prometheus has had cardinality trouble before (see the guards below).
 alertmanager:
@@ -78,10 +78,15 @@ alertmanager:
 # and metrics the workload rules read are exported -- one series per
 # Deployment/StatefulSet (x2 each) plus one per currently-WAITING container, a
 # few hundred series in total. Add to the allowlist deliberately, not wholesale.
+#
+# `nodes` added 2026-09-29 for Gb10NoAllocatableGpu: two metrics, a few
+# series per node (one allocatable series per resource, one per taint).
 kube-state-metrics:
   enabled: true
-  collectors: [deployments, statefulsets, pods]
+  collectors: [deployments, statefulsets, pods, nodes]
   metricAllowlist:
+    - kube_node_status_allocatable
+    - kube_node_spec_taint
     - kube_deployment_spec_replicas
     - kube_deployment_status_replicas_available
     - kube_statefulset_replicas
@@ -258,6 +263,28 @@ serverFiles:
                 `journalctl -b -1` on thelio ends without a shutdown sequence,
                 this is a fall. Duration is in /var/log/thelio-deathwatch.log
                 on cirrus. See cluster-ops#1, #23.
+
+          # cluster-ops#11. Every node tainted dedicated=gb10 must advertise
+          # nvidia.com/gpu. The failure this catches is silent: a device-plugin
+          # DaemonSet missing the node's toleration keeps its grandfathered
+          # pod (NoSchedule does not evict) until a drain, and the node then
+          # comes back with zero GPUs and every vLLM pod Pending. The
+          # allocatable value survives a NotReady node, so NodeDown and this
+          # do not double-fire. 30m covers a driver-upgrade reboot.
+          - alert: Gb10NoAllocatableGpu
+            expr: |
+              max by (node) (kube_node_spec_taint{key="dedicated", value="gb10"})
+                unless on (node)
+              (max by (node) (kube_node_status_allocatable{resource="nvidia_com_gpu"}) > 0)
+            for: 30m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $labels.node }} is a GB10 advertising no nvidia.com/gpu"
+              description: >-
+                The node carries dedicated=gb10 but allocatable nvidia.com/gpu
+                is 0 or absent, so no GPU pod can land there. Check the
+                nvidia-device-plugin pod on the node (missing toleration,
+                CrashLoop, or driver/CDI mismatch). See cluster-ops#11.
 
       - name: workloads
         rules:
