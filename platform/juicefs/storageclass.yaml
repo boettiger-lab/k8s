@@ -5,6 +5,12 @@
 # version at deploy time (see README) — the CSI driver must be installed first.
 #
 # Apply with `kubectl apply -f juicefs/storageclass.yaml`.
+#
+# StorageClass mountOptions are IMMUTABLE, and a PV copies them at provision
+# time. Changing them therefore means: delete + re-apply the class (existing
+# PVs are unaffected), patch spec.mountOptions on each existing PV, and remount
+# (restart the pod using it -- the CSI starts a fresh mount pod with the new
+# options once the old one has no users).
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -30,6 +36,12 @@ mountOptions:
   - writeback                 # async upload; trades some durability for speed on
                               # write-heavy (conda/pip/.git) workloads. Reconsider
                               # if you'd rather wait for confirmed uploads.
+  # JuiceFS exposes internal files (.config, .stats, .accesslog, .trash) at the
+  # mount root, and with one subdir per PVC the mount root IS the user's home --
+  # so ~/.config was a read-only root-owned file and every XDG tool (tmux,
+  # opencode, uv...) failed with "Not a directory". This renames them to
+  # .jfs.config etc. (issue #103). Needs JuiceFS >= 1.1; the mount image is 1.3.1.
+  - prefix-internal
 ---
 # juicefs-home: the class for JUPYTER HOME DIRECTORIES.
 #
@@ -69,3 +81,4 @@ parameters:
 mountOptions:
   - cache-dir=/var/jfsCache
   - cache-size=51200
+  - prefix-internal           # see juicefs-sc above: frees ~/.config (issue #103)
