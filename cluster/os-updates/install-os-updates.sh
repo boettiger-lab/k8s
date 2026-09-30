@@ -63,6 +63,8 @@ echo "==> 4/4  apt-metrics timer"
 install -m 0755 "$HERE/apt-metrics.sh" /usr/local/bin/apt-metrics.sh
 install -m 0644 "$HERE/apt-metrics.service" /etc/systemd/system/
 install -m 0644 "$HERE/apt-metrics.timer"   /etc/systemd/system/
+install -d /etc/systemd/system/apt-daily-upgrade.service.d
+install -m 0644 "$HERE/apt-daily-upgrade-metrics.conf" /etc/systemd/system/apt-daily-upgrade.service.d/50-apt-metrics.conf
 systemctl daemon-reload
 systemctl enable --now apt-metrics.timer >/dev/null
 systemctl start apt-metrics.service
