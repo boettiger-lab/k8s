@@ -396,19 +396,27 @@ serverFiles:
               description: "Check apt-daily-upgrade.timer, and look in /var/log/unattended-upgrades/ for a held dpkg lock or a broken package."
 
           # Runs daily but installs nothing: the cirrus failure. security_auto
-          # counts only the updates the policy SHOULD install (the held
-          # kernel/GPU/ZFS packages are excluded), so after a nightly run this
-          # returns to 0. Nonzero for 3 straight days means the nightly run is
-          # skipping them. If one package is stuck for a legitimate reason (a
-          # dependency only in -updates), `sudo unattended-upgrade --dry-run -d`
-          # on the node names it.
+          # counts only what the policy SHOULD install (held kernel/GPU/ZFS
+          # excluded), and apt-metrics also runs as ExecStartPost of the nightly
+          # apt-daily-upgrade.service, so a healthy node records a 0 right after
+          # every run. No zero in 26h (one daily run plus its random delay) means
+          # a run happened but skipped eligible updates.
+          #
+          # NOT min_over_time over 3 days: on a healthy node new security
+          # packages can land between each run and the next hourly refresh, so
+          # the node never shows a zero (nimbus, 2026-09-30). The history guard
+          # stops a node whose series is newer than 26h from firing on its first
+          # samples. The stalled-run case is OsAutoUpdatesStalled's job.
           - alert: OsSecurityUpdatesNotApplying
-            expr: min_over_time(node_apt_upgrades_pending{class="security_auto"}[3d]) > 0 and on(node) (node_apt_unattended_upgrades_enabled == 1)
+            expr: |
+              min_over_time(node_apt_upgrades_pending{class="security_auto"}[26h]) > 0
+                and on(node) (node_apt_unattended_upgrades_enabled == 1)
+                and on(node) (time() - min_over_time(timestamp(node_apt_upgrades_pending{class="security_auto"})[26h:15m]) > 25 * 3600)
             for: 1h
             labels: { severity: warning }
             annotations:
-              summary: "{{ $labels.node }}: security updates pending for 3 days despite unattended-upgrades"
-              description: "{{ $value }} security updates are eligible for automatic install but have not been applied. Run `sudo unattended-upgrade --dry-run -d` on the node."
+              summary: "{{ $labels.node }}: eligible security updates not applied by a nightly run"
+              description: "No zero for eligible security updates in 26h, although unattended-upgrades is enabled and runs daily. Run `sudo unattended-upgrade --dry-run -d` on the node to see which package it skips and why."
 
           # Reboots are manual on this cluster (cirrus must never be cordoned, and a
           # GB10 reboot drops a loaded model), so they need a reminder instead.
@@ -423,7 +431,10 @@ serverFiles:
           # The kernel/GPU/ZFS packages held back on purpose. Not a fault -- a
           # reminder that a manual maintenance window is due (README.md).
           - alert: OsMaintenanceDue
-            expr: min_over_time(node_apt_upgrades_pending{class="security_held"}[7d]) > 0
+            # Same history guard: without it a brand-new series fires at once.
+            expr: |
+              min_over_time(node_apt_upgrades_pending{class="security_held"}[7d]) > 0
+                and on(node) (time() - min_over_time(timestamp(node_apt_upgrades_pending{class="security_held"})[7d:1h]) > 6.9 * 86400)
             for: 1h
             labels: { severity: info }
             annotations:
