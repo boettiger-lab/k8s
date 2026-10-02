@@ -1,57 +1,30 @@
 ---
-title: "Custom Images"
-weight: 50
-bookToc: true
+title: "Custom images"
+weight: 2
 ---
 
-# Custom Docker Images for JupyterHub
+# Custom images
 
-This page describes how to build and use custom Docker images for JupyterHub single-user servers in this cluster.
+## Lab images
 
-## Build Locations
+| Image | Built from | Base |
+|---|---|---|
+| `ghcr.io/boettiger-lab/k8s` | `images/Dockerfile` | `rocker/ml-spatial` |
+| `ghcr.io/boettiger-lab/k8s-gpu` | `images/Dockerfile.gpu` | `rocker/cuda` |
+| `ghcr.io/boettiger-lab/k8s:openvscode` | `images/Dockerfile.openvscode` | |
 
-Source Dockerfiles live in the repository under `images/`:
+GitHub Actions builds them on every push to `images/` and weekly, natively on
+amd64 and arm64 runners. Each tag is a multi-arch manifest, so the same image
+runs on the GB10s.
 
-- `images/Dockerfile` – Base CPU image for general use
-- `images/Dockerfile.gpu` – GPU-enabled image with CUDA and NVIDIA tooling
+## Your own image
 
-You can extend these or create additional images as needed.
+In the JupyterHub launcher, choose **Custom image** and enter any public
+`image:tag`. For the JupyterHub interfaces to work, the image needs
+`jupyterhub-singleuser` (the [Jupyter Docker Stacks](https://jupyter-docker-stacks.readthedocs.io/)
+and [Rocker](https://rocker-project.org/) images include it). To use it on a
+GB10, it must also have an arm64 build.
 
-## Build and Push
-
-Build and push from the repo root (replace `your-registry` and tags accordingly):
-
-```bash
-# CPU image
-docker build -f images/Dockerfile -t your-registry/custom-notebook:latest .
-docker push your-registry/custom-notebook:latest
-
-# GPU image
-docker build -f images/Dockerfile.gpu -t your-registry/custom-notebook:gpu .
-docker push your-registry/custom-notebook:gpu
-```
-
-If you use GitHub Container Registry (GHCR), authenticate first and use `ghcr.io/<org-or-user>/<image>:<tag>` names.
-
-## Use in JupyterHub
-
-Reference your image in Helm values (see `services/jupyterhub/public-config.yaml` or your chosen values file):
-
-```yaml
-singleuser:
-  image:
-    name: ghcr.io/boettiger-lab/custom-notebook
-    tag: latest
-    pullPolicy: Always
-```
-
-## Tips
-
-- Keep images slim and reproducible—prefer pinned versions.
-- Pre-install common Python/R packages to reduce startup time.
-- For GPU images, ensure compatibility with the host NVIDIA driver and CUDA libraries.
-
-## Related
-
-- See the `services/jupyterhub/` directory for deployment scripts and value files.
-- For CI builds, see `github-actions/` examples for runner configuration.
+Alternatively, choose **Build from a repository**: BinderHub builds an image
+from a Git repository's environment files (`environment.yml`,
+`requirements.txt`, `install.R`, a `Dockerfile`) and launches it.

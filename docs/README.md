@@ -59,28 +59,28 @@ The built site will be in the `docs/public` directory.
 ## Structure
 
 ```
-docs/
-├── hugo.toml              # Hugo configuration
-├── content/               # Documentation content
-│   ├── _index.md         # Home page
-│   └── docs/
-│       ├── infrastructure/    # Infrastructure setup docs
-│       │   ├── k3s.md
-│       │   ├── nvidia.md
-│       │   ├── openebs.md
-│       │   ├── cert-manager.md
-│       │   └── external-dns.md
-│       ├── services/          # Service documentation
-│       │   ├── jupyterhub.md
-│       │   ├── postgres.md
-│       │   └── github-actions.md
-│       └── admin/             # Administration guides
-│           ├── users.md
-│           └── tips-tricks.md
-├── themes/                # Hugo themes
-│   └── hugo-book/
-└── public/               # Generated site (after build)
+content/
+├── _index.md            # home: what the cluster offers
+└── docs/
+    ├── using/           # for lab users: access, JupyterHub, storage, APIs, runners
+    ├── architecture/    # for outside readers: how it's built, by role
+    └── admin/           # running it: users, images, deploying a service
 ```
+
+## What belongs here
+
+This site says what the cluster offers, how to use it, and how it is built, by
+role. It must not go stale, so leave out:
+
+- **live state:** which node is up or cordoned, which model is served,
+  replica counts;
+- **versions, dates and benchmarks;**
+- **incident history, lessons and traps.**
+
+Configuration rationale goes in comments in the manifests, and open work goes
+in GitHub issues. Operational notes go in the lab's private ops repository.
+Name a host only where the design depends on it (for example, a public
+hostname).
 
 ## Writing Documentation
 

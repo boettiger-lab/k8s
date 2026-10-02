@@ -1,80 +1,35 @@
 ---
-title: "Research Cluster Documentation"
+title: "Boettiger Lab Cluster"
 type: docs
 ---
 
 # Boettiger Lab research cluster
 
-Documentation for the lab's self-hosted Kubernetes ([K3s](https://k3s.io/)) cluster —
-the computational environment our group runs on campus workstations. Configuration
-lives in [boettiger-lab/k8s](https://github.com/boettiger-lab/k8s).
+A self-hosted Kubernetes ([K3s](https://k3s.io/)) cluster run by the
+[Boettiger Lab](https://boettiger-lab.github.io/) at UC Berkeley. It runs on
+a handful of lab-owned machines on campus. Lab members use it for interactive
+computing with GPUs, object storage, and LLM and speech-to-text APIs. Course
+repositories use it for CI runners. All configuration is public in
+[boettiger-lab/k8s](https://github.com/boettiger-lab/k8s).
 
-## The cluster
+## What it offers
 
-**One cluster, five nodes.** cirrus is the control plane; four DGX Sparks are workers.
+| | |
+|---|---|
+| [JupyterHub]({{< relref "/docs/using/jupyterhub" >}}) | JupyterLab, VS Code or RStudio in the browser, with optional GPUs and a home directory that follows you between servers |
+| [Object storage]({{< relref "/docs/using/object-storage" >}}) | An S3-compatible endpoint for datasets and outputs |
+| [LLM and speech APIs]({{< relref "/docs/using/llm-api" >}}) | OpenAI-compatible endpoints for chat/completions and audio transcription |
+| [GitHub Actions runners]({{< relref "/docs/using/github-actions" >}}) | Self-hosted runners for a few course and research organizations |
+| [Data services]({{< relref "/docs/using/data-services" >}}) | Map tiles from cloud-optimized GeoTIFFs, a DuckDB MCP server, a content-hash archive |
 
-| Node | Role | Hardware |
-|------|------|----------|
-| **cirrus** | control plane, storage, most services | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank` |
-| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB unified memory; tainted for LLM inference only |
-| **nimbus2** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified; QSFP-paired with nimbus4 |
-| **nimbus3** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified |
-| **nimbus4** | arm64 GPU worker (DGX Spark) | GB10, 128 GB unified; QSFP-paired with nimbus2 |
+## Where to start
 
-**thelio is not in the cluster.** It was removed 2026-09-18 after repeated unexplained
-lockups and has not been readmitted. Do not write manifests that target it.
+- **Lab members:** [Getting access]({{< relref "/docs/using/access" >}}), then
+  [JupyterHub]({{< relref "/docs/using/jupyterhub" >}}).
+- **Curious how it's built:** [How it's built]({{< relref "/docs/architecture" >}}).
+- **Running it:** [Administration]({{< relref "/docs/admin" >}}).
 
-**nimbus2 and nimbus4 are cabled together** with direct-attach ConnectX-7 (200 GbE,
-~187 Gbps measured), which is what makes tensor-parallel serving across the pair
-possible. nimbus and nimbus3 are cabled to each other but that link is unconfigured —
-nimbus serves the production endpoint, so TP work there would disturb it.
-
-The nodes are not interchangeable — see
-[Node placement]({{< relref "docs/infrastructure/node-placement" >}}) before pinning a
-workload to one.
-
-## Services — what the cluster provides
-
-- [**JupyterHub**]({{< relref "docs/services/jupyterhub" >}}) — multi-user notebooks, CPU and GPU profiles
-- [**MinIO**]({{< relref "docs/services/minio" >}}) — S3-compatible object storage for research data
-- [**vLLM**]({{< relref "docs/services/vllm" >}}) — OpenAI-compatible LLM inference on the GPU nodes
-- [**PostgreSQL**]({{< relref "docs/services/postgres" >}}) — relational database
-- [**GitHub Actions runners**]({{< relref "docs/services/github-actions" >}}) — self-hosted CI
-
-## Infrastructure — what holds them up
-
-- [**K3s**]({{< relref "docs/infrastructure/k3s" >}}) — the cluster itself, and how nodes join it
-- [**NVIDIA GPUs**]({{< relref "docs/infrastructure/nvidia" >}}) — device plugin and per-node sharing
-- [**OpenEBS**]({{< relref "docs/infrastructure/openebs" >}}) — node-local ZFS volumes with quotas
-- [**Shared home storage**]({{< relref "docs/infrastructure/shared-home-storage" >}}) — JuiceFS RWX homes
-- [**RustFS**]({{< relref "docs/infrastructure/rustfs" >}}) — the S3 backend beneath JuiceFS
-- [**cert-manager**]({{< relref "docs/infrastructure/cert-manager" >}}) — automatic HTTPS
-- [**external-dns**]({{< relref "docs/infrastructure/external-dns" >}}) — DNS from Ingress objects
-- [**Node placement**]({{< relref "docs/infrastructure/node-placement" >}}) — taints, labels, architecture
-
-## Monitoring — how we watch it
-
-- [**Prometheus & exporters**]({{< relref "docs/monitoring/prometheus" >}}) — the metrics store, GPU/host/drive exporters
-- [**Grafana**]({{< relref "docs/monitoring/grafana" >}}) — drive health, node health, GPU dashboards
-- [**Carbon dashboard**]({{< relref "docs/monitoring/carbon" >}}) — power, CO₂ per token and service quality for LLM inference, per model, live or aggregated
-
-## Administration
-
-- [**Access model & user accounts**]({{< relref "docs/admin/users" >}}) — who can reach what, and the namespace-scoped RBAC tooling
-- [**Secrets**]({{< relref "docs/admin/secrets" >}}) — how credentials reach workloads
-- [**Custom images**]({{< relref "docs/admin/custom-images" >}}) — the notebook and GPU images
-- [**Tips & tricks**]({{< relref "docs/admin/tips-tricks" >}}) — day-to-day operations
-
-## Getting started
-
-1. **New user?** You want [JupyterHub]({{< relref "docs/services/jupyterhub" >}}) —
-   lab members work through the hosted services (notebooks, S3 buckets, LLM endpoints),
-   not through `kubectl` or SSH. See [Access model]({{< relref "docs/admin/users" >}}).
-2. **Running work?** Read [Node placement]({{< relref "docs/infrastructure/node-placement" >}}) —
-   arm64, GPU sharing, and node-local storage all constrain where a pod can land.
-3. **Administering?** Start from [K3s]({{< relref "docs/infrastructure/k3s" >}}).
-
-## Support
-
-Open an issue on the [GitHub repository](https://github.com/boettiger-lab/k8s), or check
-[Tips & tricks]({{< relref "docs/admin/tips-tricks" >}}) first.
+These pages describe what the cluster is and how to use it. They don't track
+live state, such as which machine is up or which model is being served.
+[Checking current state]({{< relref "/docs/using/current-state" >}}) explains
+how to get that from the cluster itself.
