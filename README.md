@@ -10,25 +10,21 @@ databases, LLM inference, and CI runners — on campus GPU workstations.
 
 ## The cluster
 
-**One K3s cluster, three nodes.** cirrus is the control plane; thelio and nimbus are
-workers. nimbus ran a cluster of its own until 2026-09-07; the migration and the
-reasoning behind its taint are in
-[`cluster/nodes/nimbus/join/`](cluster/nodes/nimbus/join/).
+**One K3s cluster** of campus workstations, each with a distinct role. The live
+roster is `kubectl get nodes -L kubernetes.io/arch,node-class,gb10-pool`; host
+configuration and per-node rationale are under [`cluster/nodes/`](cluster/nodes/).
 
-| Node | Role | Hardware |
-|------|------|----------|
-| **cirrus** | control plane + data + GPU compute | Threadripper 3990X (128 core), 2× Quadro RTX 8000 48 GB, ZFS pool `tank`. **Never cordon it** — control plane, storage, and most services all live here. |
-| **thelio** | amd64 GPU worker | Ryzen 9 3900X, RTX 2080 8 GB. Tainted `hub.jupyter.org/dedicated=user:NoSchedule` — jupyter user pods only, with new homes on JuiceFS so a server can restart on cirrus if thelio is lost. Its GPU is one exclusive device, not time-sliced. |
-| **nimbus** | arm64 GPU worker (DGX Spark) | GB10 Grace Blackwell, 128 GB **unified** memory. Tainted `dedicated=gb10:NoSchedule` — only sanctioned work (vLLM, the GPU MCP server, GPU telemetry), never general cluster load. |
+| Role | Node(s) | Notes |
+|------|---------|-------|
+| **Control plane, storage, ingress** | cirrus (amd64, 2× Quadro RTX 8000) | Holds the ZFS pool `tank`, Traefik, MinIO and the JuiceFS backends. **Never cordon it.** |
+| **GB10 GPU workers** | nimbus, nimbus2, … (arm64, unified memory) | Tainted `dedicated=gb10:NoSchedule` fleet-wide; LLM inference, or jupyter where labelled `gb10-pool=jupyter`. |
+| **Jupyter-only GPU worker** | thelio (amd64, RTX 2080) | Tainted `hub.jupyter.org/dedicated=user:NoSchedule`; one exclusive GPU, not time-sliced. |
 
-The cluster is **mixed-architecture**: cirrus and thelio are amd64, nimbus is arm64, so
-an amd64-only image must never be allowed to schedule on nimbus — the taint is what
-enforces that.
-
-Nodes differ in ways that matter when scheduling: nimbus is **arm64** (most images
-here are amd64-only) and its taint must be tolerated explicitly; only cirrus provides
-`openebs-zfs` volumes; GPU sharing is configured per node. See
-[node placement](https://boettiger-lab.github.io/k8s/docs/infrastructure/node-placement/).
+Nodes differ in ways that matter when scheduling: the GB10s are **arm64**, so an
+image must be multi-arch to run there, and their taint must be tolerated explicitly;
+only cirrus provides `openebs-zfs` volumes (homes on JuiceFS are RWX and follow a user
+to any node); GPU sharing is configured per node (see
+[`platform/nvidia/`](platform/nvidia/)).
 
 ## Repository layout
 
@@ -123,10 +119,11 @@ here are meant to match the live cluster; if you change one, apply it.
 
 Secrets are **never committed**. `.gitignore` excludes kubeconfigs, `*.key`,
 `*secret*`, `*private*`, `*-kubeconfig.yaml`, `values.private*.yaml`, and the
-`secrets/` directory. Each service that needs credentials ships an interactive setup
-script (e.g. `services/jupyterhub/setup-secrets.sh`, `services/minio/set-secrets.sh`)
-that creates the required Kubernetes `Secret` objects. See the
-[Secrets Management](https://boettiger-lab.github.io/k8s/docs/admin/secrets/) docs.
+`secrets/` directory. Where a service needs credentials, an interactive setup
+script creates the Kubernetes `Secret` objects (e.g.
+`services/jupyterhub/setup-secrets.sh`, `platform/rustfs/setup-rustfs.sh`); otherwise
+the manifest's header names the Secret and its keys, to be created by hand with
+`kubectl create secret generic` (e.g. `services/minio/minio.yaml`).
 
 ## Documentation site
 

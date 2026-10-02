@@ -9,9 +9,8 @@ Helm release `juypterhelm` in namespace `jupyter`, configured entirely by
 
 User homes are `ReadWriteMany` JuiceFS volumes, so a session can start on any node
 that has capacity; see [`../../platform/juicefs/`](../../platform/juicefs/). GPU
-profiles schedule onto cirrus or thelio via the NVIDIA device plugin
-([`../../platform/nvidia/`](../../platform/nvidia/)); nimbus is tainted for
-inference and does not run notebooks.
+profiles schedule onto cirrus, thelio, or a GB10 labelled `gb10-pool=jupyter`
+via the NVIDIA device plugin ([`../../platform/nvidia/`](../../platform/nvidia/)).
 
 ## Deployment Steps
 
@@ -137,8 +136,11 @@ oversubscription this default prevents.)
 
 ### Node placement
 
-Notebook pods land on **cirrus** or **thelio** (both amd64). **nimbus** is arm64 and
-carries `dedicated=gb10:NoSchedule`, so nothing spawns there without an explicit
-toleration — deliberate, since the profile images (`rocker/ml-verse` and friends)
-have no arm64 builds. If arm64 profiles are ever wanted, they need their own images,
-their own profile entries, and that toleration.
+Notebook pods land on **cirrus** or **thelio** (both amd64) by default. thelio is
+tainted `hub.jupyter.org/dedicated=user:NoSchedule`, which z2jh user pods already
+tolerate, so it takes jupyter user pods and nothing else. The **GB10** choice in the
+GPU menu targets a GB10 labelled `gb10-pool=jupyter` (arm64, `dedicated=gb10`
+taint): it sets that nodeSelector and restates the jupyter tolerations alongside the
+GB10 one, because a `tolerations` override replaces the spawner's list. The lab
+images are multi-arch; a custom image must be too to use that choice. GB10s
+labelled `gb10-pool=llm` serve inference and take no notebooks.

@@ -112,4 +112,4 @@ metrics -- with the toleration but without the selector it just ImagePullBackOff
 
 [nimbus-carbon-api](https://github.com/boettiger-lab/nimbus-carbon-api) (the name
 predates it covering more than nimbus), deployed here as `carbon-api.yaml`.
-Web docs: `docs/content/docs/monitoring/carbon.md`.
+Web docs: <https://boettiger-lab.github.io/k8s/docs/architecture/monitoring/>.

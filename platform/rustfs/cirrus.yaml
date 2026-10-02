@@ -3,7 +3,7 @@
 # cirrus cluster as a compute-only worker; see ../cluster/nodes/nimbus/join/.
 #
 # Purpose: a dedicated, durable S3 backend on cirrus/tank (openebs-zfs) for the
-# JuiceFS `juicefs-homes` bucket — see docs/.../infrastructure/shared-home-storage.md.
+# JuiceFS `juicefs-homes` bucket — see ../juicefs/README.md.
 # This runs ALONGSIDE the existing MinIO (minio ns, /mnt/nvme2,3 hostPath), which
 # is left completely untouched. Migrating MinIO's existing data here is a separate,
 # later effort.
@@ -12,7 +12,7 @@
 #   kubectl -n rustfs create secret generic rustfs-secrets \
 #     --from-literal=access-key=<AK> --from-literal=secret-key=<SK>
 #
-# NOTE: not yet applied to the cluster. Apply with `kubectl apply -f rustfs/cirrus.yaml`.
+# Live on cirrus. Apply/update with `kubectl apply -f platform/rustfs/cirrus.yaml`.
 ---
 apiVersion: v1
 kind: Namespace
@@ -134,7 +134,7 @@ metadata:
     app: rustfs
 spec:
   # JuiceFS reaches this purely in-cluster at rustfs.rustfs.svc:9000 — no
-  # ingress/TLS hop on the data path (see doc "S3 endpoint" decision).
+  # ingress/TLS hop on the data path (see "Design decisions" in ../juicefs/README.md).
   ports:
     - port: 9000
       targetPort: 9000

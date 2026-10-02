@@ -30,8 +30,9 @@ Both failures were silent: nothing logged an error, and no alert fired.
 
 Any `systemctl daemon-reload`, which package upgrades trigger, strips **running** GPU containers
 of their GPU (`Failed to initialize NVML: Unknown Error`) **unless the node hands GPUs over via
-CDI**. The first unattended run on cirrus did exactly that. The fix is in the NVIDIA docs page
-(troubleshooting): a current toolkit, `deviceListStrategy: cdi-cri`, and `/dev/char` links.
+CDI**. The first unattended run on cirrus did exactly that. The fix is in
+[`../../platform/nvidia/`](../../platform/nvidia/): a current toolkit, `deviceListStrategy: cdi-cri`,
+and `/dev/char` links.
 
 | node | status |
 |---|---|
