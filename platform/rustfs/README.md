@@ -10,10 +10,16 @@ Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS stor
 ## Components
 
 *   **Namespace**: `rustfs`
-*   **Storage**: 1Ti PVC using `openebs-zfs` storage class so data resides on the ZFS pool.
+*   **Purpose**: the object backend for JuiceFS homes (bucket `juicefs-homes`); see
+    [`../juicefs/`](../juicefs/). Infrastructure, not a user-facing S3 service.
+*   **Storage**: 4Ti PVC on `openebs-zfs` (cirrus `tank`). The class is thin, so the
+    size is a ceiling, not a reservation. ZFS is the redundancy layer; RustFS runs
+    single-node without erasure coding.
 *   **Access**:
-    *   S3 API exposed via Ingress (see `cirrus.yaml`)
-    *   Service: `rustfs` (port 9000 API, 9001 Console)
+    *   S3 API: **in-cluster only**, `http://rustfs.rustfs.svc:9000`, path-style. No
+        Ingress, so the JuiceFS data path never touches Traefik or TLS.
+    *   Console: `https://rustfs.cirrus.carlboettiger.info` (port 9001), for browsing
+        only; removing that Ingress does not affect storage.
 *   **Security**: Runs as non-root user `10001` (fsGroup handled by storage class/deployment).
 
 ## Deployment
@@ -32,7 +38,9 @@ Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS stor
 ## Configuration
 
 *   **Environment Variables**: Defined in `cirrus.yaml`, referencing `rustfs-secrets`.
-*   **Domain**: Edit the Ingress rules and `RUSTFS_SERVER_DOMAINS` in `cirrus.yaml` to change.
+*   **`RUSTFS_SERVER_DOMAINS` must stay unset.** It switches RustFS to
+    virtual-hosted-style bucket parsing from the `Host` header, which breaks the
+    path-style access JuiceFS and `mc` use (`InvalidBucketName`).
 
 ## Verification
 
@@ -41,5 +49,5 @@ kubectl get pods -n rustfs
 kubectl get ingress -n rustfs
 ```
 
-Access the S3 API at the hostname configured in `cirrus.yaml`.
-The console is available internally on port 9001 (not exposed by default ingress, you may need to port-forward or add a rule).
+From outside the cluster, reach the S3 API with
+`kubectl port-forward -n rustfs service/rustfs 9000:9000`.

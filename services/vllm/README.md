@@ -34,7 +34,7 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it) | LLM Deployments on cirrus, both scaled to 0 since cirrus became an ASR node |
 | `qwen38-flashnext-nimbus.yaml` | **Current** nimbus model: Qwen3.8-Flash-Next NVFP4, PLE table mmapped from NVMe |
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
-| `deepseek-v4-flash-gb10pair.yaml` | **Current** nimbus2+nimbus4 model: DeepSeek-V4-Flash-DSpark, TP2 head + worker, with its own Service/Ingress. Start order matters — see the docs page |
+| `deepseek-v4-flash-gb10pair.yaml` | **Current** nimbus2+nimbus4 model: DeepSeek-V4-Flash-DSpark, TP2 head + worker, with its own Service/Ingress. Start order matters — see the manifest header |
 | `laguna-nimbus3.yaml` | Laguna S 2.1 NVFP4 on nimbus3 — **scaled to 0** 2026-09-24 (upstream reasoning loops, issue #95) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |

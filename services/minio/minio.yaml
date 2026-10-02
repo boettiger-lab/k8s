@@ -1,3 +1,8 @@
+# MinIO on cirrus. Credentials are NOT in this file; create the Secret (in the
+# minio namespace, before the Deployment starts):
+#   kubectl -n minio create secret generic minio-secrets \
+#     --from-literal=MINIO_ROOT_USER=<user> --from-literal=MINIO_ROOT_PASSWORD=<password>
+#
 # Deploys a new Namespace for the MinIO Pod
 apiVersion: v1
 kind: Namespace
@@ -32,7 +37,7 @@ spec:
       # ONLY exist on cirrus. Without this, the scheduler could place MinIO on
       # thelio, where hostPath type:DirectoryOrCreate would silently create
       # EMPTY data dirs and serve an empty object store. Also keeps the S3 data
-      # path on-node with JupyterHub/Traefik (see docs/.../node-placement.md).
+      # path on-node with JupyterHub/Traefik (see ../../platform/traefik/helmchartconfig.yaml).
       nodeSelector:
         kubernetes.io/hostname: cirrus
       containers:

@@ -10,9 +10,18 @@
 # (user pod -> Traefik on thelio -> MinIO on cirrus = two VXLAN hops, ~0.94Gb/s
 # cap). With everything co-located on cirrus the path stays on-node (~3Gb/s).
 #
-# Without this pin, Traefik only stays on cirrus because thelio is cordoned;
-# it would drift back to thelio the moment thelio is uncordoned. This makes the
-# placement an explicit, durable invariant. See docs/.../node-placement.md.
+# Without this pin, the scheduler is free to move Traefik to any untainted
+# node. This makes the placement an explicit, durable invariant. The other half of it is the
+# system-upgrade server-plan's `cordon: false` (../../cluster/upgrade/plans.yml).
+#
+# Consequence: every ingress hostname, including the GB10 vLLM endpoints,
+# resolves to cirrus and hairpins over the LAN to the serving node. That is
+# the accepted price of one ingress/cert/DNS path, and it makes cirrus a hard
+# dependency for every endpoint.
+#
+# CoreDNS, by contrast, is deliberately left floating: DNS is not
+# bandwidth-bound, so its placement does not affect throughput, and it is a
+# k3s-managed addon, which makes pinning it awkward.
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:

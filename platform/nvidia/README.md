@@ -19,10 +19,10 @@ This is meant to stop a `systemctl daemon-reload` (which package upgrades trigge
 from silently stripping every *running* GPU container of its devices (`Failed to
 initialize NVML: Unknown Error`, host driver fine). The links are **necessary but not
 sufficient**: it also takes CDI device handover (`timeslice-cdi` below) and a
-toolkit that ships `nvidia-cdi-hook`. Verified on cirrus 2026-09-28; see the
-docs' troubleshooting section. It is
+toolkit that ships `nvidia-cdi-hook`. Verified on cirrus 2026-09-28; see
+Troubleshooting below. It is
 run automatically by `cluster/os-updates/install-os-updates.sh`, and therefore
-by `join-gb10.sh`. Details are in the docs' troubleshooting section.
+by `join-gb10.sh`.
 
 ## Per-node GPU sharing
 
@@ -66,7 +66,36 @@ would add hard per-slice VRAM caps but cannot be limited to one GPU (the plugin
 ignores `devices`/`rename` for mps), so it would cap *all* GPUs — which a large
 LLM (which needs ~a whole card) can't tolerate.
 
-Full docs, including troubleshooting (post-restart "all GPUs unhealthy", MPS
-sidecar crash-loop), are in `docs/content/docs/infrastructure/nvidia.md`.
+## Requesting a GPU
+
+A pod needs both `runtimeClassName: nvidia` and an `nvidia.com/gpu` limit. A pod may
+claim several slices (`failRequestsGreaterThanOne` is left false); on cirrus that
+still gives one card's full VRAM, it just keeps other pods off that card. The plugin
+does not spread a multi-slice request across GPUs.
+
+## Troubleshooting
+
+**All GPUs `unhealthy`, allocatable 0, after a reboot or k3s restart.** `capacity`
+still shows the full count and the plugin log marks every device unhealthy
+(`ERROR_NO_PERMISSION` / `ERROR_OPERATING_SYSTEM`). The re-registration left the
+plugin's XID health check in a stale state; the GPUs are fine and running pods keep
+their slices, but no new GPU pod schedules. Fix: delete the plugin pod on that node
+(`kubectl -n nvidia-device-plugin delete pod <nvdp-...>`); allocatable recovers in
+seconds and running GPU work is not disturbed.
+
+**Running pods lose the GPU: `Failed to initialize NVML: Unknown Error`**, host
+`nvidia-smi` fine, new pods fine. A `systemctl daemon-reload` rebuilt the container's
+device cgroup without the NVIDIA devices (see `timeslice-cdi` in
+`nvidia-device-plugin-config.yaml` for the mechanism and the fix).
+- Check a pod: `systemctl show cri-containerd-<container-id>.scope -p DeviceAllow`
+  on the node. A protected pod lists `/dev/char/195:*` and `/dev/char/510:*`; an
+  exposed one lists none.
+- Recover: restart the affected pods; device rules are only rebuilt at container start.
+- Test a node: `sudo systemctl daemon-reload`, then `nvidia-smi -L` inside a running
+  GPU pod.
+
+**A GPU pod sits Pending on a tainted node.** The plugin DaemonSet needs that node's
+taint in `tolerations` (one list; see the config file), or the node advertises no
+`nvidia.com/gpu` at all.
 
 Based on [NVIDIA's Improving GPU Utilization in K8s](https://developer.nvidia.com/blog/improving-gpu-utilization-in-kubernetes/).

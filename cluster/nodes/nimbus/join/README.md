@@ -256,7 +256,7 @@ curl -s https://gpu-mcp-nimbus.carlboettiger.info/healthz
 ## Things that will bite
 
 **The DNS records move.** Traefik is pinned to cirrus (see
-`docs/.../node-placement.md`), so `vllm-nimbus` and `gpu-mcp-nimbus` now resolve
+`../../../../platform/traefik/helmchartconfig.yaml`), so `vllm-nimbus` and `gpu-mcp-nimbus` now resolve
 to cirrus's IP and hairpin over the LAN to nimbus. Negligible for token
 streaming, but it does make cirrus a hard dependency for nimbus's endpoints.
 external-dns runs `--policy=upsert-only` with the default TXT owner ID on both

@@ -20,5 +20,5 @@ GitOps controller: changes are applied by hand, and the manifests here are meant
 the live cluster.
 
 Before deploying anything that needs a GPU, an arm64 image, or node-local storage, read
-[node placement](https://boettiger-lab.github.io/k8s/docs/infrastructure/node-placement/) —
-the three nodes are not interchangeable.
+[compute architecture](https://boettiger-lab.github.io/k8s/docs/architecture/compute/) —
+the nodes are not interchangeable.
