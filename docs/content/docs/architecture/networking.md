@@ -11,6 +11,7 @@ weight: 3
 | [cert-manager](https://cert-manager.io/) | Let's Encrypt certificates via DNS-01 on Cloudflare (ClusterIssuer `letsencrypt-production`) |
 | [external-dns](https://github.com/kubernetes-sigs/external-dns) | creates Cloudflare DNS records from Ingress hostnames |
 | Cloudflare | DNS for `*.carlboettiger.info`; most web services are proxied, the Kubernetes API is DNS-only |
+| [Dex](https://dexidp.io/) | OIDC issuer at `dex.carlboettiger.info`. It logs people in with GitHub and issues tokens whose `groups` claim carries GitHub org and team membership, so services trust one issuer instead of each talking to GitHub |
 
 A new public service needs only an Ingress with a hostname under
 `carlboettiger.info` and the `letsencrypt-production` issuer annotation.
