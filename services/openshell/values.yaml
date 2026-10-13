@@ -36,8 +36,8 @@ server:
   # --- auth (phase 2) ---
   # Without an issuer, EVERY authenticated caller is a Platform Admin and bypasses
   # workspace membership. Never deploy this multi-user without OIDC.
-  # NB: Dex is NOT currently deployed anywhere; ../armada/dex.yaml is unverified config,
-  # not a running service. These values are aspirational until phase 2 is done.
+  # Dex: ../../platform/dex/ (client `openshell-cli`). The course orgs must be
+  # added to its connector before students can log in.
   oidc:
     issuer: https://dex.carlboettiger.info
     audience: openshell-cli
