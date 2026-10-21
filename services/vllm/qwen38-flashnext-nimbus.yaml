@@ -44,6 +44,21 @@ spec:
         # Only GB10s in the LLM pool. A node lent to JupyterHub (gb10-pool=jupyter)
         # keeps its weight-cache label, but must not be picked for a model.
         gb10-pool: llm
+      # Prefer nimbus, its home. The selector above also matches nimbus2 and
+      # nimbus4, and deepseek-v4-flash is hostname-pinned to exactly that pair.
+      # Today it holds all 8 slices on both, so nothing else fits there. But a
+      # restart of this pod while deepseek is down could land here on one of
+      # them, and then deepseek cannot come back while nimbus sits idle.
+      # Preferred, not required: if nimbus is gone, falling over is still right.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: [nimbus]
       tolerations:
       - key: dedicated
         operator: Equal
