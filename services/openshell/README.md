@@ -135,22 +135,16 @@ not a nice-to-have; it is the boundary between students.
 membership (`GitHubOAuthenticator` + `allowed_organizations`, see `../jupyterhub/`).
 GitHub is not an OIDC issuer, but Dex's GitHub connector federates exactly that identity
 model into a real OIDC issuer with discovery, JWKS, the device grant, and a `groups` claim
-derived from GitHub orgs and teams. We already have working prior art in
-[`../armada/dex.yaml`](../armada/dex.yaml) — including a public static client with a
-`/device/callback` redirect URI, which is the shape the OpenShell CLI needs for headless
-login.
+derived from GitHub orgs and teams. Dex is shared infrastructure at
+[`../../platform/dex/`](../../platform/dex/), with `openshell-cli` already registered as
+a public static client (device grant + localhost redirects), which is the shape the
+OpenShell CLI needs for headless login.
 
 Work involved:
 
-1. Promote Dex out of the `armada` namespace into its own top-level component (`../dex/`),
-   since it becomes shared infrastructure. Move storage off `type: memory` (a restart
-   currently invalidates all sessions).
-2. GitHub OAuth app for `dex.carlboettiger.info` (see `../oauth-apps.md`). Add the course
-   orgs (`espm-157`, `boettiger-lab`, …) as connector `orgs` with `teamNameField: slug`.
-3. Ingress + cert for `dex.carlboettiger.info` — external-dns and
-   `letsencrypt-production` handle both automatically.
-4. Static clients: `openshell-cli` as a public client with `/device/callback` and
-   `http://localhost:*/callback` redirect URIs.
+Dex itself (issuer, ingress, persistent storage, `openshell-cli` client) is in
+[`../../platform/dex/`](../../platform/dex/). What remains for OpenShell is adding the course
+orgs (`espm-157`, …) to the connector's `orgs` there, so students can log in.
 
 Mapping into OpenShell:
 

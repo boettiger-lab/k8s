@@ -1,0 +1,95 @@
+# Dex: the cluster's shared OIDC issuer (https://dex.carlboettiger.info).
+#
+#   ./up.sh            (helm upgrade -i dex dex/dex -n dex --version 0.25.2 -f values.yaml)
+#
+# GitHub is not an OIDC issuer for user logins. Dex's GitHub connector turns the
+# same identity JupyterHub uses (GitHub org/team membership) into a real issuer:
+# discovery, JWKS, the device grant, and a `groups` claim of "org" / "org:team"
+# strings. Services trust Dex, not GitHub. See boettiger-lab/k8s#58, #114.
+#
+# The rendered config lives in a Secret the chart creates (configSecret), not a
+# ConfigMap. The GitHub client secret is NOT in this file: Dex expands $VARS in
+# its config from the environment, filled from the `dex-github` Secret made by
+# ./setup-secrets.sh.
+
+config:
+  issuer: https://dex.carlboettiger.info
+
+  # CRDs in the cluster datastore. Persistent across restarts (the old
+  # `type: memory` dropped every session on restart) with no extra database to
+  # run or back up. Dex holds only sessions, refresh tokens and signing keys
+  # here; clients and connectors come from this file, so losing the store
+  # costs re-logins, nothing more.
+  storage:
+    type: kubernetes
+    config:
+      inCluster: true
+
+  oauth2:
+    skipApprovalScreen: true
+
+  enablePasswordDB: false
+
+  connectors:
+  - type: github
+    id: github
+    name: GitHub
+    config:
+      # OAuth app with callback https://dex.carlboettiger.info/callback.
+      # The client ID is not a secret; the client secret comes from env.
+      clientID: Ov23liOV5rxCR1fEEInJ
+      clientSecret: $GITHUB_CLIENT_SECRET
+      redirectURI: https://dex.carlboettiger.info/callback
+      # Login requires membership in one of these orgs. Same set as
+      # JupyterHub's allowed_organizations. Add a course org (espm-157, ...)
+      # when a service that serves its students needs it. An org that
+      # restricts OAuth-app access must approve this app, or its members
+      # can't log in.
+      orgs:
+      - name: boettiger-lab
+      - name: SchmidtDSE
+      teamNameField: slug
+
+  # One client per consuming service, so a token minted for one service is not
+  # accepted by another (the ID token's `aud` is the client ID).
+  staticClients:
+  # OpenShell CLI (services/openshell/): public, so no secret. Dex always lets
+  # public clients redirect to http://localhost:<any port> and /device/callback
+  # (headless device-grant login).
+  - id: openshell-cli
+    name: OpenShell CLI
+    public: true
+    redirectURIs:
+    - /device/callback
+
+envVars:
+- name: GITHUB_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: dex-github
+      key: clientSecret
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    # The existing record is DNS-only (resolves straight to cirrus); keep it so
+    # external-dns does not flip the host's exposure.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+  hosts:
+  - host: dex.carlboettiger.info
+    paths:
+    - path: /
+      pathType: ImplementationSpecific
+  tls:
+  - secretName: dex-tls
+    hosts:
+    - dex.carlboettiger.info
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
