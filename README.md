@@ -77,7 +77,7 @@ repo, not here.
 
 | Directory | Purpose |
 |-----------|---------|
-| [`images/`](images/) | Custom container images (Jupyter, GPU, openvscode); built via GitHub Actions |
+| [`images/`](images/) | Custom container images (Jupyter, GPU); built via GitHub Actions |
 | [`docs/`](docs/) | Hugo documentation site, published to GitHub Pages |
 | [`examples/`](examples/) | Deployment examples (e.g. Shiny apps) |
 | [`nrp/`](nrp/) | Kubeconfig for the National Research Platform (an *external* cluster) |

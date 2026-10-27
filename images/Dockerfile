@@ -38,6 +38,9 @@ ENV PATH="${PATH}:${HOME}/.local/bin"
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
+COPY install-themes.sh /tmp/install-themes.sh
+RUN bash /tmp/install-themes.sh && rm /tmp/install-themes.sh
+
 # The installers above run as root with HOME=/home/${NB_USER}, so npm and
 # jlpm/yarn scatter config + caches through the home dir as root. Delete the
 # pure build caches (~76 MB of ~/.npm + ~/.yarn) and then hand every remaining
