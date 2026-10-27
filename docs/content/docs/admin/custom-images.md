@@ -11,7 +11,6 @@ weight: 2
 |---|---|---|
 | `ghcr.io/boettiger-lab/k8s` | `images/Dockerfile` | `rocker/ml-spatial` |
 | `ghcr.io/boettiger-lab/k8s-gpu` | `images/Dockerfile.gpu` | `rocker/cuda` |
-| `ghcr.io/boettiger-lab/k8s:openvscode` | `images/Dockerfile.openvscode` | |
 
 GitHub Actions builds them on every push to `images/` and weekly, natively on
 amd64 and arm64 runners. Each tag is a multi-arch manifest, so the same image
