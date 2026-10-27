@@ -151,7 +151,10 @@ metadata:
   labels:
     k8s-app: vllm-nimbus2
 spec:
-  replicas: 1
+  # SCALED TO 0 2026-10-27: nimbus2 serves Nemotron 3.5 Super on its own
+  # (nemotron35-super-nimbus2.yaml) behind this same Service. Restore with the
+  # start order in the header, after scaling nemotron35-super to 0.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
@@ -394,7 +397,10 @@ metadata:
   labels:
     k8s-app: vllm-nimbus2
 spec:
-  replicas: 1
+  # SCALED TO 0 2026-10-27: nimbus2 serves Nemotron 3.5 Super on its own
+  # (nemotron35-super-nimbus2.yaml) behind this same Service. Restore with the
+  # start order in the header, after scaling nemotron35-super to 0.
+  replicas: 0
   strategy:
     type: Recreate
   selector:

@@ -1,0 +1,153 @@
+# Nemotron 3.5 Super VL 120B-A12B (NVFP4) on nimbus2 -- a single GB10.
+#
+# Endpoint: https://vllm-nimbus2.carlboettiger.info  (model id `nemotron-3.5-super`)
+# The Service/Ingress for that host live in deepseek-v4-flash-gb10pair.yaml; this pod
+# carries `vllm-endpoint: nimbus2`, so it takes the endpoint over when the DeepSeek
+# pair is scaled to 0. Never run both: they would split traffic.
+#
+# RECIPE: NVIDIA's own DGX Spark command from the model card (released 2026-10-15),
+# https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4 --
+# LiLiCorr (DFlash) drafter, mamba flags, parsers. Deviations are commented inline.
+#
+# MEASURED on nimbus2, 2026-10-27 (in-pod, temperature 0, single stream):
+#   weights resident 70.03 GiB; load ~420 s + ~215 s engine init
+#   KV pool 1,631,538 tokens (8.95 GiB) at --max-model-len 1048576. MemAvailable
+#   ~10 GiB idle, low of 4.99 GiB during a 1M-token request -- below the watchdog's
+#   8 GiB watch line, but it only acts under 1.5 GiB with reclaim distress
+#   decode ~33 tok/s essay prose, 35-44 code, 38-46 on bench-flashnext-nimbus.py;
+#   flat with context (38.9 tok/s at 998k tokens)
+#   cold prefill ~3,100 tok/s at 16-32k, 2,565 at 128k, 1,394 at 512k, 891 at 1M
+#   warm prefix at 128k: 50 s -> 3 s
+#   needle at 60% depth: found at 256k, 512k and 998k
+# vs Qwen3.8-Flash-Next on nimbus: ~1.8x prefill, ~1.6x decode. vs the DeepSeek
+# TP2 pair (two boxes): ~0.7x prose decode, ~0.6x code.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron35-super
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus2
+spec:
+  replicas: 1
+  # Recreate, as with every model Deployment here: a rolling update deadlocks
+  # waiting for GPU the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus2-nemotron35
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus2-nemotron35
+        vllm-endpoint: nimbus2
+    spec:
+      # Placement follows the WEIGHTS (hostPath HF cache, `type: Directory`).
+      # Label a node only AFTER staging both repos (target + LiLiCorr drafter):
+      #   kubectl label node <n> vllm-cache/nemotron35-super=true
+      nodeSelector:
+        vllm-cache/nemotron35-super: "true"
+        gb10-pool: llm
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        # The card's pinned release; publishes linux/arm64.
+        image: vllm/vllm-openai:v0.32.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: HF_HUB_OFFLINE
+          value: "1"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command silently truncates the rest of it.
+          ARGS=(
+            --served-model-name nemotron-3.5-super nemotron
+            --host 0.0.0.0 --port 8000
+            --trust-remote-code
+            --gpu-memory-utilization 0.75
+            # The model's native window. It fits only because of k=3 below: the KV
+            # pool in TOKENS depends on the draft length, and not monotonically.
+            # Measured at 0.75 utilization and max-model-len 262144:
+            #   k=3 1,190,458   k=4 398,122   k=5 378,242   k=7 492,704
+            # Change num_speculative_tokens and this may no longer load.
+            --max-model-len 1048576
+            --max-num-seqs 1
+            --max-num-batched-tokens 8192
+            # k=3, not the card's 7. Decode is flat across k=3..7 (prose ~33, code
+            # 35-44 tok/s, within run-to-run noise): acceptance falls off steeply past
+            # position 2 (k=7: 75/50/30/20/12/8/5%). So k only buys memory layout --
+            # k=3 has the largest pool, and at k=4/5 a warm 128k prefix MISSED the
+            # cache (49 s TTFT instead of 3 s). MTP was not measured.
+            --speculative-config '{"method":"dflash","model":"nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4-LiLiCorr","num_speculative_tokens":3}'
+            --mamba-backend flashinfer
+            --mamba-ssm-cache-dtype float16
+            --enable-mamba-cache-stochastic-rounding
+            --mamba-cache-philox-rounds 5
+            --enable-mamba-shared-prefix-checkpoint
+            --block-size 64
+            --prefix-match-unit 64
+            --video-pruning-rate 0.5
+            --media-io-kwargs '{"video": {"fps": 2, "num_frames": 256}}'
+            --enable-auto-tool-choice
+            --tool-call-parser qwen3_coder
+            --reasoning-parser nemotron_v3
+            # Server-wide output ceiling, as on the other GB10 endpoints: a client
+            # sending max_tokens:null otherwise gets max_model_len minus the prompt.
+            --override-generation-config '{"max_new_tokens": 16000}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4 "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only -- cgroups do not see CUDA allocations on
+            # unified memory (dgx-spark-memory.md). 0.75 x 121.7 GiB ~= 91 GiB.
+            memory: 96Gi
+            # All 8 slices: a co-tenancy lock, not a memory partition.
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 12
+            memory: 96Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        # Readiness only, no liveness: a hang at load leaves the pod NotReady for
+        # debugging instead of crash-looping a 75 GB load.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 120
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

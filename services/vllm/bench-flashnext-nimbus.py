@@ -37,7 +37,7 @@ import json, os, random, statistics, string, sys, threading, time, urllib.reques
 
 BASE = "http://localhost:8000"
 KEY = os.environ["VLLM_API_KEY"]
-MODEL = "qwen"
+MODEL = os.environ.get("BENCH_MODEL", "qwen")
 OUT = "/tmp/bench-results.json"
 
 # Prompt sizes spanning agentic traffic. The geo-agent regression slice averaged
