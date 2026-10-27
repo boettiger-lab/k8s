@@ -1,0 +1,111 @@
+# See kustomization.yaml and llm-auth.py for what this does.
+#
+# Two replicas with maxUnavailable 0: every request to an opted-in endpoint passes
+# through here first, and Traefik answers 500 when the auth service is unreachable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-auth
+  labels:
+    app: llm-auth
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: llm-auth
+  template:
+    metadata:
+      labels:
+        app: llm-auth
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: llm-auth
+          image: python:3.13-slim
+          command: ["python", "-u", "/app/llm-auth.py"]
+          env:
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-api-key
+                  key: api-key
+            # Set to "false" once nothing presents the shared key any more; the
+            # log names those callers `shared-key`.
+            - name: ACCEPT_SHARED_KEY
+              value: "true"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: app
+              mountPath: /app
+      volumes:
+        - name: app
+          configMap:
+            name: llm-auth
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: llm-auth
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: llm-auth
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-auth
+spec:
+  selector:
+    app: llm-auth
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: llm-auth
+spec:
+  forwardAuth:
+    address: http://llm-auth.vllm.svc.cluster.local:8080/auth
+    # Replace the caller's token with vLLM's own key, and name the caller.
+    authResponseHeaders:
+      - Authorization
+      - X-Auth-User
