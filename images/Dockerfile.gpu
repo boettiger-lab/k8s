@@ -18,6 +18,9 @@ ENV PATH="${PATH}:${HOME}/.local/bin"
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
+COPY install-themes.sh /tmp/install-themes.sh
+RUN bash /tmp/install-themes.sh && rm /tmp/install-themes.sh
+
 RUN /opt/venv/bin/pip install \
     huggingface_hub \
     nox \

@@ -12,6 +12,7 @@ on:
       - 'images/Dockerfile.gpu'
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
+      - 'images/install-themes.sh'
       - '.github/workflows/docker-gpu-image.yml'
 
 # Build each architecture on its own native runner (arm64 on ubuntu-24.04-arm,
