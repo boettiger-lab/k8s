@@ -14,12 +14,15 @@
 #                model is serving there, so GPU time serving no LLM (cirrus's
 #                speech-to-text) is counted nowhere.
 #                power_hosts: every DCGM host whose watts belong to that node's
-#                models. A tensor-parallel model lists every rank -- only the
-#                head exports vLLM metrics, but the worker draws half the
-#                power. A host may be claimed once.
+#                models (default: the node itself). A host may be claimed once.
 #   models.json  optional display names, keyed by served model name, or
 #                "model@node" where a name is reused on two nodes ("qwen" has
-#                been more than one checkpoint on nimbus).
+#                been more than one checkpoint on nimbus). A "model@node" entry
+#                may also carry power_hosts/gpu_count for that model alone: a
+#                tensor-parallel model lists every rank there, NOT on the node,
+#                so the node's later single-GPU models are not charged for an
+#                idle worker while the pair keeps its history (nimbus2: the
+#                DeepSeek pair drew nimbus4 too; Nemotron does not).
 #
 # Both are read once at start: edit, then bump checksum/config below (or
 # `kubectl -n monitoring rollout restart deployment/carbon-api`).
@@ -40,14 +43,19 @@ data:
     [
       {"name": "cirrus",  "gpu_hardware": "Quadro RTX 8000", "gpu_count": 2},
       {"name": "nimbus",  "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1},
-      {"name": "nimbus2", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 2,
-       "power_hosts": ["nimbus2", "nimbus4"]},
+      {"name": "nimbus2", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1},
       {"name": "nimbus3", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1}
     ]
   models.json: |
     {
-      "deepseek-v4-flash": {
+      "nemotron-3.5-super@nimbus2": {
+        "display_name": "Nemotron 3.5 Super NVFP4",
+        "description": "120B-A12B hybrid Mamba MoE on one GB10, LiLiCorr speculative decoding (k=3), 1M context"
+      },
+      "deepseek-v4-flash@nimbus2": {
         "display_name": "DeepSeek-V4-Flash-DSpark",
+        "power_hosts": ["nimbus2", "nimbus4"],
+        "gpu_count": 2,
         "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s"
       },
       "qwen@nimbus": {
@@ -80,7 +88,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-09-24-per-model-4nodes"
+        checksum/config: "2026-10-27-per-model-power-hosts"
     spec:
       securityContext:
         runAsNonRoot: true
