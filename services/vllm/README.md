@@ -25,6 +25,21 @@ API_KEY=$(kubectl get secret vllm-api-key -n vllm -o jsonpath='{.data.api-key}' 
 curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bearer $API_KEY"
 ```
 
+### Per-user keys (`llm-auth/`, #91)
+
+An endpoint whose Ingress carries
+`traefik.ingress.kubernetes.io/router.middlewares: vllm-llm-auth@kubernetescrd` also
+accepts a **JupyterHub API token**: one made at `/hub/token`, or `JUPYTERHUB_API_TOKEN`
+inside a user server. Traefik asks `llm-auth` first; it looks the token up at the hub's
+`/hub/api/user` (through `proxy-public`, so no hub settings change) and, if valid,
+swaps in `vllm-api-key` before forwarding. vLLM still sees only its one key. Revoking a
+token at `/hub/token`, or removing the user from the hub, cuts access within a minute.
+
+`kubectl -n vllm logs -l app=llm-auth` names the caller of each request. The shared
+key is still accepted and logs as `shared-key`; set `ACCEPT_SHARED_KEY=false` in
+`llm-auth/llm-auth.yaml` once nothing uses it. Deploy with `kubectl apply -k llm-auth/`.
+If the hub is down, tokens seen in the last minute keep working and others get a 503.
+
 ## Layout
 
 | File | What |
@@ -43,6 +58,7 @@ curl -s https://vllm-nimbus.carlboettiger.info/v1/models -H "Authorization: Bear
 | `dgx-spark-memory.md` | The full unified-memory analysis: measurements, KV-cache arithmetic, and why the cgroup limit is not a limit |
 | `Dockerfile.gemma4` | `vllm-openai:gemma4` + audio extras (`ghcr.io/boettiger-lab/vllm-gemma4-audio`) |
 | `up.sh` / `down.sh` | Apply the endpoints plus one model / remove models but keep the endpoints |
+| `llm-auth/` | Traefik ForwardAuth that accepts JupyterHub API tokens as per-user keys |
 | `secrets.sh` | Creates `vllm-api-key` and the HF token secret. **Git-ignored — holds real credentials** |
 
 ## Switching models

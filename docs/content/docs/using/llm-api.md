@@ -5,12 +5,21 @@ weight: 4
 
 # LLM and speech APIs
 
-All endpoints are OpenAI-compatible and need an API key. Ask a cluster admin
-for one.
+All endpoints are OpenAI-compatible. Your API key is a JupyterHub API token:
 
-```bash
-export API_KEY=...
-```
+- **Inside JupyterHub** it is already set as `JUPYTERHUB_API_TOKEN`:
+
+  ```bash
+  export API_KEY=$JUPYTERHUB_API_TOKEN
+  ```
+
+- **Anywhere else**, make a token at
+  [jupyterhub.cirrus.carlboettiger.info/hub/token](https://jupyterhub.cirrus.carlboettiger.info/hub/token)
+  and export it as `API_KEY`. Give it a note saying where it's used. Revoke it on the
+  same page when you no longer need it.
+
+A token works for as long as it is valid and you are a hub user, so leaving the lab
+ends access.
 
 ## LLMs
 

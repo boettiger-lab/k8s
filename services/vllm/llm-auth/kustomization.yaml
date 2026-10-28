@@ -1,0 +1,15 @@
+# Per-user keys for the vLLM endpoints (#91): a Traefik ForwardAuth that accepts
+# JupyterHub API tokens. Apply with `kubectl apply -k .`; the generated ConfigMap
+# name carries a content hash, so editing llm-auth.py rolls the Deployment.
+#
+# An endpoint opts in with this annotation on its Ingress:
+#   traefik.ingress.kubernetes.io/router.middlewares: vllm-llm-auth@kubernetescrd
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: vllm
+resources:
+  - llm-auth.yaml
+configMapGenerator:
+  - name: llm-auth
+    files:
+      - llm-auth.py
