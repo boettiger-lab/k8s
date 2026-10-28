@@ -3,6 +3,12 @@
 # Endpoint: https://vllm-nimbus2.carlboettiger.info   (model id `deepseek-v4-flash`)
 # Auth: the shared `vllm-api-key` secret, same as every other vLLM endpoint here.
 #
+# THINKING IS ON by default (--default-chat-template-kwargs), with the same 32768-token
+# output ceiling as the single-GB10 models (open-llm-proxy#150). On the
+# geo-agent-benchmark numeric tier (2026-10-28) thinking took this pair from 42/48 to
+# 47/48 for a median of 47 s per question instead of 40 s: DSpark keeps the extra
+# tokens cheap. Clients can still send chat_template_kwargs {"thinking": false}.
+#
 # WHY THIS IS TWO DEPLOYMENTS AND NOT ONE WITH replicas: 2
 # TP ranks are not interchangeable: rank 0 runs the API server, rank 1 is --headless,
 # and each needs a fixed --node-rank and a fixed node. A Deployment with two replicas
@@ -344,7 +350,8 @@ spec:
           --enable-auto-tool-choice \
           --reasoning-parser deepseek_v4 \
           --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
-          --default-chat-template-kwargs '{"thinking":false}' \
+          --default-chat-template-kwargs '{"thinking":true}' \
+          --override-generation-config '{"max_new_tokens": 32768}' \
           --generation-config vllm \
           --enable-flashinfer-autotune \
           --nnodes 2 \
@@ -591,7 +598,8 @@ spec:
           --enable-auto-tool-choice \
           --reasoning-parser deepseek_v4 \
           --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
-          --default-chat-template-kwargs '{"thinking":false}' \
+          --default-chat-template-kwargs '{"thinking":true}' \
+          --override-generation-config '{"max_new_tokens": 32768}' \
           --generation-config vllm \
           --enable-flashinfer-autotune \
           --nnodes 2 \
