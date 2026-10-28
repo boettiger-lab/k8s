@@ -6,9 +6,11 @@
 # pod installs it from a pinned git commit: the commit the upstream deploy script
 # (skills/kev-deploy/scripts/kev_serve.py) runs.
 #
-# Namespace and Secret (create once, not tracked):
+# Namespace and Secret (create once, not tracked). Clients use one key for laya and
+# kev, so the Secret copies laya's:
 #   kubectl create namespace kev
-#   kubectl create secret generic kev-api-key -n kev --from-literal=api-key=<key>
+#   kubectl create secret generic kev-api-key -n kev --from-literal=api-key="$(
+#     kubectl -n laya get secret laya-api-key -o jsonpath='{.data.api-key}' | base64 -d)"
 #
 # TURING. cirrus has Quadro RTX 8000s (sm_75): fp16 tensor cores, no native bf16.
 # Upstream serves bf16 with flash-linear-attention's fused Qwen3.5 kernels, measured
