@@ -114,7 +114,7 @@ spec:
             # and vLLM then allows max_model_len minus the prompt (~1M here), so an
             # unbounded runaway would hold the single sequence slot for hours
             # (open-llm-proxy#150). 16000 was too low: it cut off car-31's
-            # reasoning (28-30k tokens) in the geo-agent-benchmark numeric tier.
+            # final reasoning call mid-answer in the geo-agent-benchmark numeric tier.
             --override-generation-config '{"max_new_tokens": 32768}'
             --enable-log-requests --max-log-len 2000
           )
