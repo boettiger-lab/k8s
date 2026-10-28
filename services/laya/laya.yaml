@@ -1,0 +1,163 @@
+# Laya decision-model server (ESPM 157 Module 3) --- https://laya.carlboettiger.info
+#
+# cirrus copy of the NRP deployment in espm-157/text-instructor/k8s/laya.yaml
+# (https://laya.nrp-nautilus.io). Same image, same laya pin, same env.
+#
+# Namespace and Secret (create once, not tracked):
+#   kubectl create namespace laya
+#   kubectl create secret generic laya-api-key -n laya --from-literal=api-key=<key>
+#
+# CAPACITY. laya-serve runs one inference thread and does not batch across
+# requests, so a pod uses about half of a GPU (load test 2026-10-13, RTX 2080 Ti:
+# ~26 paragraphs/s single-request, ~50/s through /v1/systemone/batch). Throughput
+# scales with replicas. Each replica claims ONE time-slicing slice on cirrus, so
+# replicas share the two Quadro RTX 8000s with notebooks and stt. The model is
+# small (~2-3 GB with torch), so VRAM is not the limit; CPU and GPU time are.
+# Scale with:
+#   kubectl scale deployment/laya -n laya --replicas=N
+# and to 0 between terms (it holds GPU slices while idle).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laya
+  namespace: laya
+  labels:
+    k8s-app: laya
+spec:
+  replicas: 4
+  # GPU deployments must use Recreate: a rolling update would deadlock waiting for
+  # GPU capacity the outgoing pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: laya
+  template:
+    metadata:
+      labels:
+        k8s-app: laya
+    spec:
+      # Required: a Service named `laya` injects LAYA_PORT=tcp://..., which
+      # laya-serve reads as its port.
+      enableServiceLinks: false
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      containers:
+      - name: laya
+        image: pytorch/pytorch:2.13.0-cuda12.6-cudnn9-runtime
+        command: ["bash", "-c"]
+        args:
+        - pip install --no-cache-dir --break-system-packages "laya[serve]==0.4.6" && exec laya-serve
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: LAYA_PORT
+          value: "8000"
+        - name: LAYA_DEVICE
+          value: cuda
+        - name: LAYA_MODELS
+          value: english
+        - name: LAYA_DEFAULT_MODEL
+          value: english
+        - name: LAYA_MAX_LOADED
+          value: "1"
+        # The cap only bounds buffered request bodies (<= 2 MB each), so 128 costs
+        # at most ~256 MB. Above it a pod answers 503; below it requests queue on
+        # the single inference thread. 128 x 4 replicas leaves a class of ~100
+        # running agents room to fan out without seeing 503s.
+        - name: LAYA_MAX_CONCURRENT
+          value: "128"
+        - name: HF_HOME
+          value: /cache/huggingface
+        - name: LAYA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: laya-api-key
+              key: api-key
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 60
+        volumeMounts:
+        - name: cache
+          mountPath: /cache
+        resources:
+          requests:
+            cpu: 2
+            memory: 6Gi
+            nvidia.com/gpu: 1
+          limits:
+            cpu: 4
+            memory: 8Gi
+            nvidia.com/gpu: 1
+      volumes:
+      # Shared across replicas and restarts, so a new pod does not re-download
+      # the model.
+      - name: cache
+        hostPath:
+          path: /home/cboettig/.cache/laya
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: laya
+  namespace: laya
+  labels:
+    k8s-app: laya
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    k8s-app: laya
+---
+# Traefik equivalent of NRP's haproxy timeout-server: 600s (a 64-paragraph batch
+# call under load takes several seconds; leave plenty of room).
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: laya-long-timeout
+  namespace: laya
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    idleConnTimeout: 600s
+    readIdleTimeout: 600s
+    responseHeaderTimeout: 600s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: laya
+  namespace: laya
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+    # <namespace>-<name>@kubernetescrd
+    traefik.ingress.kubernetes.io/service.servertransport: laya-laya-long-timeout@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: laya.carlboettiger.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: laya
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - laya.carlboettiger.info
+    secretName: laya-tls
