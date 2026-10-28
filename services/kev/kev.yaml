@@ -6,19 +6,27 @@
 # pod installs it from a pinned git commit: the commit the upstream deploy script
 # (skills/kev-deploy/scripts/kev_serve.py) runs.
 #
-# Namespace and Secret (create once, not tracked):
+# Namespace and Secret (create once, not tracked). Clients use one key for laya and
+# kev, so the Secret copies laya's:
 #   kubectl create namespace kev
-#   kubectl create secret generic kev-api-key -n kev --from-literal=api-key=<key>
+#   kubectl create secret generic kev-api-key -n kev --from-literal=api-key="$(
+#     kubectl -n laya get secret laya-api-key -o jsonpath='{.data.api-key}' | base64 -d)"
 #
-# TURING. cirrus has Quadro RTX 8000s (sm_75). Upstream serves bf16 with the fused
-# Qwen3.5 kernels from flash-linear-attention, measured on Ampere and newer. That
-# package is left out here, so kev.serve falls back to transformers' reference
-# kernels in bf16. Measured 2026-10-28: ~500 ms per request (upstream: tens of ms
-# fused on an L40S); 64 requests at 32-way concurrency in 7 s, all 200.
+# TURING. cirrus has Quadro RTX 8000s (sm_75): fp16 tensor cores, no native bf16.
+# Upstream serves bf16 with flash-linear-attention's fused Qwen3.5 kernels, measured
+# on Ampere and newer. Here KEV_DTYPE=fp16 on the reference kernels. Measured
+# 2026-10-28 (Kev-4B, AG News accuracy 0.925 in every mode):
+#   bf16           364 ms/request, ~5 req/s
+#   bf16 + fused   357 ms/request, ~4 req/s
+#   fp16           130 ms/request, ~11 req/s   <- this
+#   fp16 + fused   140 ms/request, ~9 req/s
+# The fused kernels do run on sm_75 (they need gcc in the image for Triton), but
+# buy nothing: the time is in the matmuls, not the DeltaNet ops.
 #
-# CAPACITY. Unlike laya-serve, kev.serve batches concurrent requests on the GPU, so
-# one replica takes a class's fan-out; scale replicas only if the queue grows
-# (GET /v1/models reports batches and queue depth). Kev-4B holds ~15 GB of VRAM
+# CAPACITY. Unlike laya-serve, kev.serve batches concurrent requests on the GPU;
+# one replica tops out near 11 req/s (3 s p50 at 32 concurrent), against ~60 req/s
+# for laya's four pods. Add replicas if the queue grows (GET /v1/models reports
+# batches and queue depth). Kev-4B holds ~15 GB of VRAM
 # (weights plus batching buffers and CUDA graphs); time-slicing does not cap that,
 # so it counts against the card it lands on. Scale to 0 between terms:
 #   kubectl scale deployment/kev -n kev --replicas=0
@@ -71,6 +79,8 @@ spec:
           value: "false"
         - name: PYTHONUNBUFFERED
           value: "1"
+        - name: KEV_DTYPE
+          value: fp16
         - name: KEV_API_KEY
           valueFrom:
             secretKeyRef:
