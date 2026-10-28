@@ -176,6 +176,8 @@ metadata:
     # Origin serves its own Let's Encrypt cert, so TLS is intact.
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
     traefik.ingress.kubernetes.io/service.servertransport: vllm-vllm-long-timeout@kubernetescrd
+    # Per-user keys: JupyterHub API tokens, plus the shared key for now (llm-auth/).
+    traefik.ingress.kubernetes.io/router.middlewares: vllm-llm-auth@kubernetescrd
   labels:
     app: vllm-nimbus3
 spec:
