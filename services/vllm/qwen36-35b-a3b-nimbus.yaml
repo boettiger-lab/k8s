@@ -1,0 +1,114 @@
+# Qwen3.6-35B-A3B NVFP4 + MTP k=3 on nimbus -- a TEST deployment for
+# geo-agent-benchmark screening (scale qwen38-flashnext to 0 first; both carry
+# `vllm-endpoint: nimbus`).
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info  (model id `qwen3.6-35b-a3b`)
+#
+# Fastest reported single-GB10 agent-capable config as of 2026-10: ~100-110 tok/s
+# single-stream at 32K context with MTP k=3 (NVIDIA forum thread 376484). We measured
+# ~106 tok/s on this checkpoint in July on NGC vLLM 26.05 + Marlin MoE (commit 9fa7fc8).
+#
+# Tool parser is qwen3_coder, not qwen3_xml: vLLM #43713 (qwen3_xml emits invalid JSON
+# for several <function=...> blocks in one <tool_call>) is still open.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen36-35b-a3b
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-qwen36
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-qwen36
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-qwen36
+        vllm-endpoint: nimbus
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.32.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: MAX_JOBS
+          value: "4"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command silently truncates the rest of it.
+          ARGS=(
+            --served-model-name qwen3.6-35b-a3b
+            --host 0.0.0.0 --port 8000
+            --gpu-memory-utilization 0.60
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 8192
+            --kv-cache-dtype fp8
+            # Off by default for hybrid models.
+            --enable-prefix-caching
+            --enable-chunked-prefill
+            --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+            --enable-auto-tool-choice
+            --tool-call-parser qwen3_coder
+            --reasoning-parser qwen3
+            # Same output ceiling as nemotron35-super (open-llm-proxy#150).
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve nvidia/Qwen3.6-35B-A3B-NVFP4 "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only: 0.60 x 121.7 GiB ~= 73 GiB.
+            memory: 80Gi
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 12
+            memory: 80Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 160
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

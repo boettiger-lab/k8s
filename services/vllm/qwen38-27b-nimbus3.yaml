@@ -1,0 +1,121 @@
+# Qwen3.8-27B (dense) NVFP4 + z-lab DFlash2 drafter on nimbus3 -- a TEST deployment
+# for geo-agent-benchmark screening against Flash-Next (nimbus) and Nemotron (nimbus2).
+#
+# Endpoint: https://vllm-nimbus3.carlboettiger.info  (model id `qwen3.8-27b`)
+#
+# Config is the fastest reported single-GB10 vLLM setup as of 2026-10:
+# unsloth/Qwen3.8-27B-NVFP4 + z-lab/Qwen3.8-27B-DFlash2, k=7, 54 tok/s single-stream
+# greedy on short prompts (madeye.github.io/qwen3.8-dflash2-gb10, vLLM 0.28).
+#
+# cudagraph_mode=PIECEWISE IS LOAD-BEARING on v0.32.0: the FULL cuda-graph path
+# (vLLM PR #60692) drops DFlash acceptance to ~0 on hybrid GDN targets like Qwen3.8,
+# ~3.7x slower with correct output (vLLM #63587; fix in open PR #64059).
+#
+# Targets nimbus3 by hostname: it is in gb10-pool=jupyter, and this test does not move
+# it to the llm pool. All 8 GPU slices are claimed so no notebook lands on its GPU.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen38-27b
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus3-qwen38-27b
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus3-qwen38-27b
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus3-qwen38-27b
+        vllm-endpoint: nimbus3
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.32.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        # FlashInfer's JIT build otherwise runs the host out of RAM, which on unified
+        # memory reads like a GPU OOM.
+        - name: MAX_JOBS
+          value: "4"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command silently truncates the rest of it.
+          ARGS=(
+            --served-model-name qwen3.8-27b
+            --host 0.0.0.0 --port 8000
+            --gpu-memory-utilization 0.60
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 8192
+            --kv-cache-dtype fp8
+            # Off by default for hybrid models.
+            --enable-prefix-caching
+            --enable-chunked-prefill
+            --speculative-config '{"method":"dflash","model":"z-lab/Qwen3.8-27B-DFlash2","num_speculative_tokens":7}'
+            --compilation-config '{"cudagraph_mode":"PIECEWISE"}'
+            --enable-auto-tool-choice
+            --tool-call-parser qwen3_coder
+            --reasoning-parser qwen3
+            # Same output ceiling as nemotron35-super (open-llm-proxy#150).
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve unsloth/Qwen3.8-27B-NVFP4 "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only (cgroups do not see unified-memory CUDA
+            # allocations): 0.60 x 121.7 GiB ~= 73 GiB.
+            memory: 80Gi
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 12
+            memory: 80Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 160
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: DirectoryOrCreate

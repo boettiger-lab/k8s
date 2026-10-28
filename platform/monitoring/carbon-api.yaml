@@ -58,6 +58,14 @@ data:
         "gpu_count": 2,
         "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s"
       },
+      "qwen3.6-35b-a3b@nimbus": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4",
+        "description": "35B-A3B MoE, MTP speculative decoding (k=3)"
+      },
+      "qwen3.8-27b@nimbus3": {
+        "display_name": "Qwen3.8-27B NVFP4",
+        "description": "Dense, DFlash2 speculative decoding (k=7)"
+      },
       "qwen@nimbus": {
         "display_name": "Qwen3.8-Flash-Next NVFP4",
         "description": "MoE, PLE table mmapped from NVMe, MTP speculative decoding"
@@ -88,7 +96,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-10-27-per-model-power-hosts"
+        checksum/config: "2026-10-28-qwen36-qwen38-27b"
     spec:
       securityContext:
         runAsNonRoot: true
