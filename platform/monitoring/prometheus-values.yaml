@@ -455,5 +455,20 @@ serverFiles:
             for: 30m
             labels: { severity: warning }
             annotations:
-              summary: "Scrape target {{ $labels.job }} down for 30m"
-              description: "Alerts derived from this target are now silent, not passing."
+              # Name the thing that stopped answering, not the scrape job: "target
+              # kubernetes-service-endpoints down" read as the alerting system
+              # itself being broken. service-endpoints series carry `service`,
+              # pod series `pod`, static jobs (prometheus, api-servers) neither.
+              summary: >-
+                Prometheus can't read metrics from
+                {{ if $labels.service }}{{ $labels.namespace }}/{{ $labels.service }}{{ else if $labels.pod }}{{ $labels.namespace }}/{{ $labels.pod }}{{ else }}{{ $labels.job }}{{ end }}{{ if $labels.node }} on {{ $labels.node }}{{ end }}
+                for 30m
+              # Prometheus can't put the scrape error in the alert, so say where
+              # to find it. The service itself may be healthy (e.g. a backend that
+              # puts /metrics behind an API key returns 401).
+              description: >-
+                Scraping {{ $labels.instance }} (job {{ $labels.job }}) has failed for 30m.
+                The service itself may be fine; what's lost is visibility: dashboards
+                and alerts built on its metrics are now blind, not passing. The reason
+                is on Prometheus' Targets page: connection refused = not running,
+                401/403 = /metrics needs auth, 404 = no /metrics endpoint.
