@@ -1,0 +1,79 @@
+# Import the TensorFold image (build-tensorfold-dsv41.yaml) into k3s containerd on nimbus
+# (rank 0) and nimbus3 (rank 1). nimbus imports from its own hostPath; nimbus3 fetches the
+# tarball over HTTP from a throwaway server pod on nimbus. Both check the sha256.
+#
+#   kubectl apply -f import-tensorfold-dsv41.yaml
+#   kubectl -n vllm wait --for=condition=complete job/tf-import-nimbus job/tf-import-nimbus3 --timeout=30m
+#   kubectl delete -f import-tensorfold-dsv41.yaml
+#
+# The nimbus3 Job can fail its first attempt if the server pod is not ready yet; backoffLimit
+# covers that. A rebuilt image has a new sha256: update both checks.
+apiVersion: v1
+kind: Pod
+metadata: {name: tf-tarserver, namespace: vllm, labels: {app: tf-tarserver}}
+spec:
+  nodeSelector: {kubernetes.io/hostname: nimbus}
+  tolerations: [{key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}, {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}]
+  containers:
+  - name: http
+    image: python:3.12-slim
+    command: ["python", "-m", "http.server", "8080", "-d", "/out"]
+    volumeMounts: [{name: out, mountPath: /out, readOnly: true}]
+  volumes: [{name: out, hostPath: {path: /var/lib/tensorfold-build, type: Directory}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: tf-tarserver, namespace: vllm}
+spec:
+  selector: {app: tf-tarserver}
+  ports: [{port: 8080}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: tf-import-nimbus, namespace: vllm}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: {kubernetes.io/hostname: nimbus}
+      tolerations: [{key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}, {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}]
+      containers:
+      - name: import
+        image: rancher/k3s:v1.36.4-k3s1
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eux
+          cp /out/tensorfold-dsv41.tar /tmp/i.tar
+          echo "098a82582f1dc69cb8671bf5ac3a6e3aa767e5b9b429f65810b2f54df4a439e6  /tmp/i.tar" | sha256sum -c
+          ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/i.tar
+          ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images ls name==docker.io/library/tensorfold-dsv41:07aa02585f64
+        securityContext: {privileged: true}
+        volumeMounts: [{name: tmp, mountPath: /tmp}, {name: containerd-sock, mountPath: /run/k3s/containerd}, {name: out, mountPath: /out}]
+      volumes: [{name: tmp, hostPath: {path: /var/lib/tensorfold-import, type: DirectoryOrCreate}}, {name: containerd-sock, hostPath: {path: /run/k3s/containerd, type: Directory}}, {name: out, hostPath: {path: /var/lib/tensorfold-build, type: Directory}}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: tf-import-nimbus3, namespace: vllm}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: {kubernetes.io/hostname: nimbus3}
+      tolerations: [{key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}, {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}]
+      containers:
+      - name: import
+        image: rancher/k3s:v1.36.4-k3s1
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eux
+          wget -q -O /tmp/i.tar http://tf-tarserver.vllm.svc:8080/tensorfold-dsv41.tar
+          echo "098a82582f1dc69cb8671bf5ac3a6e3aa767e5b9b429f65810b2f54df4a439e6  /tmp/i.tar" | sha256sum -c
+          ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import /tmp/i.tar
+          ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images ls name==docker.io/library/tensorfold-dsv41:07aa02585f64
+        securityContext: {privileged: true}
+        volumeMounts: [{name: tmp, mountPath: /tmp}, {name: containerd-sock, mountPath: /run/k3s/containerd}, {name: out, mountPath: /out}]
+      volumes: [{name: tmp, hostPath: {path: /var/lib/tensorfold-import, type: DirectoryOrCreate}}, {name: containerd-sock, hostPath: {path: /run/k3s/containerd, type: Directory}}, {name: out, emptyDir: {}}]

@@ -1,0 +1,263 @@
+# DeepSeek-V4.1-Flash-1017 (EXL3 2.9 bpw) on the TensorFold engine, tensor-parallel across
+# nimbus (rank 0, API) + nimbus3 (rank 1) over their CX-7 link (192.168.200.12/.13).
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `deepseek-v41-flash`)
+# Auth: the shared `vllm-api-key` secret.
+#
+# SCALED TO 0: an option, not a production model. Translated from
+# 0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark @887bec7 (start.sh run_args).
+# V4.1 is ~2x V4-Flash's parameters (552B + 196B Engram tables) and fits two GB10s only as
+# this 2.9 bpw quantization, with the Engram tables read from NVMe.
+#
+# SETUP, once per pair, in order:
+#   1. build-tensorfold-dsv41.yaml    image tarball on nimbus (~1 h)
+#   2. import-tensorfold-dsv41.yaml   into containerd on nimbus + nimbus3
+#   3. fetch-tensorfold-dsv41.yaml    weights + Engram + chat template on both nodes
+# The first start also compiles the CUDA extensions into /cache (init container, ~10-15 min).
+#
+# SHARES THE NIMBUS ENDPOINT. Rank 0 carries `vllm-endpoint: nimbus` and takes all 8 GPU
+# slices on each node, so scale nimbus's and nimbus3's own models to 0 first (and
+# mcp-gpu-nimbus, as for Flash-Next -- see README).
+#
+# START ORDER: rank 0 FIRST -- it opens the rendezvous store on :29551 -- then rank 1.
+# This is the REVERSE of the vLLM pair (deepseek-v4-flash-gb10pair.yaml).
+#
+#   kubectl -n vllm scale deploy/tensorfold-dsv41-r0 --replicas=1
+#   kubectl -n vllm rollout status deploy/tensorfold-dsv41-r0 --timeout=1s || true   # r0 pod Running
+#   kubectl -n vllm scale deploy/tensorfold-dsv41-r1 --replicas=1
+#
+# METRICS: /metrics requires the API key (401 to Prometheus), so the carbon dashboard
+# does not see this model.
+#
+# MEMORY. After warm-up the engine caps its allocator at reserved + (MemAvailable - floor),
+# computed ONCE from the host. Our GB10s run vm.min_free_kbytes=2 GiB and
+# watermark_scale_factor=200, which keep MemAvailable near 0 even with 5-6 GiB actually free,
+# so the cap landed at ~102 GiB and every request OOMed against it. TF_DS_MEM_FLOOR_GIB=0
+# turns the cap off. Over a full benchmark (2026-10-28/29) MemFree never went below
+# 5.2 GiB on either node. That leaves the node watchdog as the only guard, and its MEMORY
+# trigger fires only while a VLLM::EngineCore process exists -- it does NOT watch
+# TensorFold. Its GPU-hang trigger still applies. Do not leave this serving unattended
+# without fixing one of the two.
+#
+# MEASURED (geo-agent-benchmark numeric tier, 24 questions x 2 trials, thinking on):
+#                                     pass    median s/question   model calls
+#   V4.1-1017 TensorFold (this)       45/48   66                  244
+#   V4-Flash-0731 vLLM pair           48/48   55                  178
+#   V4-Flash-DSpark vLLM pair         47/48   47                  224
+# Short-prompt decode is ~2x the vLLM pair's (~90 tok/s SQL, ~60 prose), but per-call time
+# on agentic traffic is about the same: V4.1 makes more calls and longer prompts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tensorfold-dsv41-r0
+  namespace: vllm
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: tensorfold-dsv41-r0}
+  template:
+    metadata:
+      labels:
+        app: tensorfold-dsv41-r0
+        vllm-endpoint: nimbus
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      - {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      initContainers:
+      # CUDA extensions (rdma, exl3 linear/experts/prefetch), cached in /cache: ~10-15 min the
+      # first time, a no-op after. The recipe builds them before the weights load.
+      - name: extensions
+        image: docker.io/library/tensorfold-dsv41:07aa02585f64
+        imagePullPolicy: Never
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          find /cache/torch_extensions -maxdepth 2 -name lock -type f -print -delete 2>/dev/null || true
+          python3 -c 'from tensorfold.cuda import rdma
+          from tensorfold.cuda.exl3 import experts, linear, prefetch
+          for m in (rdma, linear, experts, prefetch):
+              m._ext()'
+        env:
+        - {name: TORCH_EXTENSIONS_DIR, value: /cache/torch_extensions}
+        - {name: CUDA_CACHE_PATH, value: /cache/nv}
+        resources:
+          limits: {nvidia.com/gpu: 8}
+        volumeMounts:
+        - {name: cache, mountPath: /cache}
+        - {name: infiniband, mountPath: /dev/infiniband}
+      containers:
+      - name: tensorfold
+        image: docker.io/library/tensorfold-dsv41:07aa02585f64
+        imagePullPolicy: Never
+        # Named: vllm-nimbus-service targets port "http".
+        ports:
+        - {containerPort: 8000, name: http}
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # --context 262144 --parallel 2, not the recipe's 1M x 8: leaves a few GiB more
+          # headroom on a node that also runs k3s (see MEMORY in the header).
+          # The engine refuses a key file it cannot open safely (the secret mount is a 0644
+          # symlink): copy it to a private regular file first.
+          install -m 600 /run/keys/api-key /tmp/api-key
+          exec tensorfold serve /model --tp 2 --rank "$RANK" --master 192.168.200.12 \
+            --host 0.0.0.0 --port 8000 --name DeepSeek-V4.1-Flash-1017 --alias deepseek-v41-flash \
+            --api-key-file /tmp/api-key \
+            --context 262144 --vision --parallel 2 --mtp-drafts 5 \
+            --temperature 0.4 --top-p 1.0 --thinking --reasoning-effort high --no-update-check
+        env:
+        - {name: RANK, value: "0"}
+        # Every TF_DS_* value is the recipe's (start.sh; docs/WHAT-I-CHANGED.md).
+        - {name: TF_DS_REPLAY, value: "1"}
+        - {name: TF_DS_REPLAY_FLOOR, value: "1"}
+        - {name: TF_DS_PREFILL_CHUNK, value: "2048"}
+        - {name: TF_DS_RANK_CACHE, value: /cache/tf-ds-rank}
+        - {name: TF_DS_RANK_CACHE_READERS, value: "32"}
+        - {name: TF_DS_WARM_LENGTHS, value: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,33,131,514,1024,2113"}
+        - {name: TF_DS_ENGRAM, value: /engram}
+        - {name: TF_DS_SPILL_GIB, value: "32"}
+        - {name: TF_DS_SPILL_DIR, value: /cache/tf-ds-spill}
+        - {name: TF_DS_ENGRAM_DONTNEED, value: "1"}
+        # 0 disables the allocator ceiling -- see MEMORY in the header. Without it every
+        # request OOMs on our nodes.
+        - {name: TF_DS_MEM_FLOOR_GIB, value: "0"}
+        - {name: TF_DROP_UNOFFERED_TOOL_CALLS, value: "1"}
+        - {name: TRITON_CACHE_DIR, value: /cache/triton}
+        - {name: CUDA_CACHE_PATH, value: /cache/nv}
+        - {name: TORCH_EXTENSIONS_DIR, value: /cache/torch_extensions}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        # Both CX-7 RoCE devices; our pairs use two subnets (200/201), one per device.
+        - {name: TF_RDMA_DEVICES, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: TF_RDMA_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_SOCKET_IFNAME, value: enp1s0f1np1}
+        resources:
+          requests: {cpu: 8, memory: 96Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 20, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK", "SYS_PTRACE"]}
+        startupProbe:
+          tcpSocket: {port: 8000}
+          periodSeconds: 15
+          failureThreshold: 240
+        volumeMounts:
+        - {name: view, mountPath: /model, subPath: deepseek-v41-1017-exl3-2.9bpw/model, readOnly: true}
+        - {name: view, mountPath: /engram, subPath: deepseek-v41-1017-exl3-2.9bpw/engram, readOnly: true}
+        - {name: cache, mountPath: /cache}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+        - {name: api-key, mountPath: /run/keys, readOnly: true}
+      volumes:
+      - {name: view, hostPath: {path: /home/cboettig/tfv41, type: Directory}}
+      - {name: cache, hostPath: {path: /home/cboettig/tfv41/cache, type: DirectoryOrCreate}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
+      - {name: api-key, secret: {secretName: vllm-api-key, items: [{key: api-key, path: api-key}]}}
+---
+# Rank 1 (nimbus3): no HTTP server. Start it after rank 0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tensorfold-dsv41-r1
+  namespace: vllm
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: tensorfold-dsv41-r1}
+  template:
+    metadata:
+      labels:
+        app: tensorfold-dsv41-r1
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      - {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      initContainers:
+      - name: extensions
+        image: docker.io/library/tensorfold-dsv41:07aa02585f64
+        imagePullPolicy: Never
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          find /cache/torch_extensions -maxdepth 2 -name lock -type f -print -delete 2>/dev/null || true
+          python3 -c 'from tensorfold.cuda import rdma
+          from tensorfold.cuda.exl3 import experts, linear, prefetch
+          for m in (rdma, linear, experts, prefetch):
+              m._ext()'
+        env:
+        - {name: TORCH_EXTENSIONS_DIR, value: /cache/torch_extensions}
+        - {name: CUDA_CACHE_PATH, value: /cache/nv}
+        resources:
+          limits: {nvidia.com/gpu: 8}
+        volumeMounts:
+        - {name: cache, mountPath: /cache}
+        - {name: infiniband, mountPath: /dev/infiniband}
+      containers:
+      - name: tensorfold
+        image: docker.io/library/tensorfold-dsv41:07aa02585f64
+        imagePullPolicy: Never
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          exec tensorfold serve /model --tp 2 --rank "$RANK" --master 192.168.200.12 \
+            --host 0.0.0.0 --port 8000 --name DeepSeek-V4.1-Flash-1017 --alias deepseek-v41-flash \
+            --context 262144 --vision --parallel 2 --mtp-drafts 5 \
+            --temperature 0.4 --top-p 1.0 --thinking --reasoning-effort high --no-update-check
+        env:
+        - {name: RANK, value: "1"}
+        # Env must match rank 0's.
+        - {name: TF_DS_REPLAY, value: "1"}
+        - {name: TF_DS_REPLAY_FLOOR, value: "1"}
+        - {name: TF_DS_PREFILL_CHUNK, value: "2048"}
+        - {name: TF_DS_RANK_CACHE, value: /cache/tf-ds-rank}
+        - {name: TF_DS_RANK_CACHE_READERS, value: "32"}
+        - {name: TF_DS_WARM_LENGTHS, value: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,33,131,514,1024,2113"}
+        - {name: TF_DS_ENGRAM, value: /engram}
+        - {name: TF_DS_SPILL_GIB, value: "32"}
+        - {name: TF_DS_SPILL_DIR, value: /cache/tf-ds-spill}
+        - {name: TF_DS_ENGRAM_DONTNEED, value: "1"}
+        - {name: TF_DS_MEM_FLOOR_GIB, value: "0"}
+        - {name: TF_DROP_UNOFFERED_TOOL_CALLS, value: "1"}
+        - {name: TRITON_CACHE_DIR, value: /cache/triton}
+        - {name: CUDA_CACHE_PATH, value: /cache/nv}
+        - {name: TORCH_EXTENSIONS_DIR, value: /cache/torch_extensions}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: TF_RDMA_DEVICES, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: TF_RDMA_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_SOCKET_IFNAME, value: enp1s0f1np1}
+        resources:
+          requests: {cpu: 8, memory: 96Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 20, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK", "SYS_PTRACE"]}
+        volumeMounts:
+        - {name: view, mountPath: /model, subPath: deepseek-v41-1017-exl3-2.9bpw/model, readOnly: true}
+        - {name: view, mountPath: /engram, subPath: deepseek-v41-1017-exl3-2.9bpw/engram, readOnly: true}
+        - {name: cache, mountPath: /cache}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+      volumes:
+      - {name: view, hostPath: {path: /home/cboettig/tfv41, type: Directory}}
+      - {name: cache, hostPath: {path: /home/cboettig/tfv41/cache, type: DirectoryOrCreate}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
