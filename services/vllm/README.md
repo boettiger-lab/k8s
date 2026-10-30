@@ -51,6 +51,8 @@ If the hub is down, tokens seen in the last minute keep working and others get a
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
 | `nemotron35-super-nimbus2.yaml` | **Current** nimbus2 model: Nemotron 3.5 Super NVFP4 on one GB10, NVIDIA's Spark recipe with draft length 3 and 1M context. Measurements in the manifest header |
 | `deepseek-v4-flash-gb10pair.yaml` | nimbus2+nimbus4 TP2 pair, **scaled to 0** 2026-10-27 for Nemotron — still owns the `vllm-nimbus2` Service/Ingress: DeepSeek-V4-Flash-DSpark, TP2 head + worker. Start order matters — see the manifest header |
+| `deepseek-v41-tensorfold-nimbuspair.yaml` | DeepSeek-V4.1-Flash-1017 (EXL3 2.9 bpw) on the TensorFold engine, nimbus+nimbus3 TP2 over CX-7 — **scaled to 0**, an option for hard questions. Takes the `vllm-nimbus` endpoint; rank 0 starts FIRST. See the manifest header |
+| `build-tensorfold-dsv41.yaml`, `import-tensorfold-dsv41.yaml`, `fetch-tensorfold-dsv41.yaml` | One-time setup for the TensorFold pair: image tarball built on nimbus, imported on both nodes, weights fetched to both |
 | `laguna-nimbus3.yaml` | Laguna S 2.1 NVFP4 on nimbus3 — **scaled to 0** 2026-09-24 (upstream reasoning loops, issue #95) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |

@@ -1,0 +1,104 @@
+# Build the TensorFold engine image for DeepSeek-V4.1-Flash ON nimbus, as a tarball.
+# Same buildkit-OCI-worker pattern as build-flashnext-nimbus.yaml (see its header for why
+# not the containerd worker). There is no ghcr push: import-tensorfold-dsv41.yaml loads the
+# tarball into containerd on both ranks' nodes, and the Deployments use imagePullPolicy: Never.
+#
+# Dockerfile: 0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark @887bec7.
+# Engine:     Elevatormusic/TensorFold tag dsv41-1.0.0 (07aa02585f64), the commit that recipe serves.
+#
+#   kubectl apply -f build-tensorfold-dsv41.yaml
+#   kubectl logs -n vllm -f job/build-tensorfold -c build
+#
+# Output: /var/lib/tensorfold-build/tensorfold-dsv41.tar on nimbus (11.4 GB, 2026-10-28
+# sha256 098a82582f1dc69cb8671bf5ac3a6e3aa767e5b9b429f65810b2f54df4a439e6).
+# CPU/disk only, safe while nimbus is serving. If the build container fails on a missing
+# buildkitd socket, the sidecar lost the race; the Job's retry gets it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-tensorfold
+  namespace: vllm
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      - key: dedicated
+        operator: Equal
+        value: nimbus
+        effect: NoSchedule
+      initContainers:
+      - name: clone
+        image: alpine/git:2.49.1
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -eux
+          git clone https://github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark /src
+          git -C /src checkout --detach 887bec7bc0a45286d0d3ae7a2ed04fd067fb9d55
+        volumeMounts:
+        - name: src
+          mountPath: /src
+      - name: buildkitd
+        image: moby/buildkit:v0.28.0
+        restartPolicy: Always
+        args: ["--addr=unix:///run/buildkit/buildkitd.sock", "--root=/var/lib/buildkit"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: buildkit-sock
+          mountPath: /run/buildkit
+        - name: buildkit-state
+          mountPath: /var/lib/buildkit
+        readinessProbe:
+          exec:
+            command: ["buildctl", "--addr", "unix:///run/buildkit/buildkitd.sock", "debug", "workers"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+      - name: build
+        image: moby/buildkit:v0.28.0
+        command: ["buildctl"]
+        args:
+        - --addr=unix:///run/buildkit/buildkitd.sock
+        - build
+        - --frontend=dockerfile.v0
+        - --local=context=/src/docker
+        - --local=dockerfile=/src/docker
+        - --opt=build-arg:TF_REPO=https://github.com/Elevatormusic/TensorFold.git
+        - --opt=build-arg:TF_COMMIT=07aa02585f64cfb04c60a96de6554c0d4708ed46
+        - --output=type=docker,name=docker.io/library/tensorfold-dsv41:07aa02585f64,dest=/out/tensorfold-dsv41.tar
+        volumeMounts:
+        - name: src
+          mountPath: /src
+        - name: buildkit-sock
+          mountPath: /run/buildkit
+        - name: out
+          mountPath: /out
+      containers:
+      - name: done
+        image: alpine:3.22
+        command: ["sh", "-c", "ls -la /out; sha256sum /out/tensorfold-dsv41.tar"]
+        volumeMounts:
+        - name: out
+          mountPath: /out
+      volumes:
+      - name: src
+        emptyDir: {}
+      - name: buildkit-sock
+        emptyDir: {}
+      - name: buildkit-state
+        hostPath:
+          path: /var/lib/buildkit
+          type: DirectoryOrCreate
+      - name: out
+        hostPath:
+          path: /var/lib/tensorfold-build
+          type: DirectoryOrCreate

@@ -1,0 +1,91 @@
+# Fetch the DeepSeek-V4.1-Flash-1017 weights onto BOTH ranks' nodes with the recipe's own
+# scripts: download.sh (EXL3 2.9 bpw shards + Engram tables, checksum verify, assemble the
+# model/ + engram/ view), then patch_template.py (writes model/chat_template.jinja).
+# One Job per node; each node needs its own full copy.
+#
+#   kubectl apply -f fetch-tensorfold-dsv41.yaml
+#   kubectl -n vllm logs -f job/fetch-tfv41-nimbus
+#
+# Lands in /home/cboettig/tfv41/deepseek-v41-1017-exl3-2.9bpw/{model,engram} on the host,
+# which the Deployments mount. Roughly 196 GiB of weights plus the Engram tables per node:
+# check free disk first. Re-running resumes and re-verifies.
+#
+# Do NOT run this on a node whose neighbour is serving a tight-memory model: the download
+# fills page cache, and on 2026-10-28 that took nimbus2's DeepSeek KV pool below its
+# startup minimum.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-tfv41-nimbus
+  namespace: vllm
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      - {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}
+      containers:
+      - name: fetch
+        image: python:3.12-bookworm
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          pip install -q 'huggingface_hub[cli]==0.36.0'
+          git clone -q https://github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark /recipe
+          git -C /recipe checkout -q --detach 887bec7bc0a45286d0d3ae7a2ed04fd067fb9d55
+          # download.sh reads .env; only MODEL_VIEW matters to these steps.
+          printf 'MODEL_VIEW=/data/deepseek-v41-1017-exl3-2.9bpw\nWORKER_SSH=unused\nBIND_HOST=127.0.0.1\nPORT=8100\nSERVED_NAME=x\n' > /recipe/.env
+          /recipe/scripts/download.sh download engram verify view
+          MODEL_VIEW=/data/deepseek-v41-1017-exl3-2.9bpw python3 /recipe/scripts/patch_template.py
+          ls -l /data/deepseek-v41-1017-exl3-2.9bpw/model/chat_template.jinja
+        resources:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {memory: 8Gi}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+      volumes:
+      - {name: data, hostPath: {path: /home/cboettig/tfv41, type: DirectoryOrCreate}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-tfv41-nimbus3
+  namespace: vllm
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      - {key: dedicated, operator: Equal, value: nimbus, effect: NoSchedule}
+      containers:
+      - name: fetch
+        image: python:3.12-bookworm
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          pip install -q 'huggingface_hub[cli]==0.36.0'
+          git clone -q https://github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark /recipe
+          git -C /recipe checkout -q --detach 887bec7bc0a45286d0d3ae7a2ed04fd067fb9d55
+          # download.sh reads .env; only MODEL_VIEW matters to these steps.
+          printf 'MODEL_VIEW=/data/deepseek-v41-1017-exl3-2.9bpw\nWORKER_SSH=unused\nBIND_HOST=127.0.0.1\nPORT=8100\nSERVED_NAME=x\n' > /recipe/.env
+          /recipe/scripts/download.sh download engram verify view
+          MODEL_VIEW=/data/deepseek-v41-1017-exl3-2.9bpw python3 /recipe/scripts/patch_template.py
+          ls -l /data/deepseek-v41-1017-exl3-2.9bpw/model/chat_template.jinja
+        resources:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {memory: 8Gi}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+      volumes:
+      - {name: data, hostPath: {path: /home/cboettig/tfv41, type: DirectoryOrCreate}}
