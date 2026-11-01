@@ -17,8 +17,19 @@
 #   2. MemAvailable low AND the kernel is in reclaim
 #      distress (or memory is critically low)        -> heading for the wedge
 #
-# Escalation is deliberately narrow: it only ever kills vLLM. Jupyter sessions
-# and other users' pods are never targeted.
+# Escalation is deliberately narrow: it only ever kills the model engine (vLLM,
+# or TensorFold for services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml).
+# Jupyter sessions and other users' pods are never targeted.
+#
+# --- 2026-11-01: TensorFold ---------------------------------------------------
+# Its process is `tensorfold` (comm), not VLLM::EngineCore, so before this the
+# memory trigger never ran under it and the kill rung was a no-op (a GPU hang
+# went straight to reboot). Under TensorFold MemAvailable sits at 0 on both
+# nodes (vm.min_free_kbytes, see 99-gb10-vm.conf), so the MEM_MIN branch is
+# always armed and a kill rests on reclaim distress or MemFree < FREE_CRIT --
+# which is what the 2026-09-09/09-21 fixes already require. Measured before
+# enabling: 60h min MemFree 2.8 GiB (nimbus3), direct reclaim ~0 pages/min
+# idle. Killing either rank takes down the TP pair; it restarts in place.
 #
 # --- 2026-09-09: why trigger 2 now needs corroboration -----------------------
 # Low MemAvailable alone is NOT evidence of danger, and acting on it killed a
@@ -106,11 +117,16 @@ drop_caches() {
     log "dropped clean page cache: MemAvailable $((before/1024)) -> $((after/1024)) MiB, MemFree $((fbefore/1024)) -> $((fafter/1024)) MiB"
 }
 
-kill_vllm() {
-    log "ESCALATION: killing vLLM (consecutive failures reached $KILL_AFTER)"
+engine_running() {
+    pgrep -f 'VLLM::EngineCore' >/dev/null 2>&1 || pgrep -x tensorfold >/dev/null 2>&1
+}
+
+kill_engine() {
+    log "ESCALATION: killing the model engine (consecutive failures reached $KILL_AFTER)"
     # SIGKILL directly -- a wedged EngineCore does not honour SIGTERM.
     pkill -9 -f 'VLLM::EngineCore' && log "killed VLLM::EngineCore"
     pkill -9 -f 'vllm serve'       && log "killed vllm serve"
+    pkill -9 -x tensorfold         && log "killed tensorfold"
 }
 
 force_reboot() {
@@ -142,7 +158,7 @@ escalate_gpu() {
     # No drop_caches rung here -- a wedged driver is not a memory shortage, and
     # dropping cache would not touch the semaphore that is actually stuck.
     if   [ "$n" -ge "$REBOOT_AFTER" ] && [ "$ALLOW_REBOOT" = 1 ]; then force_reboot
-    elif [ "$n" -ge "$KILL_AFTER" ];                              then kill_vllm
+    elif [ "$n" -ge "$KILL_AFTER" ];                              then kill_engine
     fi
 }
 
@@ -151,7 +167,7 @@ escalate_mem() {
     # Only ever reached when there is corroborated distress (or memory is
     # critically low), so the lossless rung is worth its cost here.
     if   [ "$n" -ge "$REBOOT_AFTER" ] && [ "$ALLOW_REBOOT" = 1 ]; then force_reboot
-    elif [ "$n" -ge "$KILL_AFTER" ];                              then kill_vllm
+    elif [ "$n" -ge "$KILL_AFTER" ];                              then kill_engine
     elif [ "$n" -ge "$DROP_CACHES_AFTER" ];                       then drop_caches
     fi
 }
@@ -198,9 +214,9 @@ else
 fi
 
 # --- trigger 2: is the unified pool about to be exhausted? ----------------
-# Only meaningful while vLLM is actually running -- otherwise whatever is
-# eating memory is not ours to kill.
-if pgrep -f 'VLLM::EngineCore' >/dev/null 2>&1; then
+# Only meaningful while a model engine is actually running -- otherwise
+# whatever is eating memory is not ours to kill.
+if engine_running; then
     avail=$(awk '/^MemAvailable:/ {print $2}' "$PROC/meminfo")
     avail=${avail:-0}
     free=$(awk '/^MemFree:/ {print $2}' "$PROC/meminfo")

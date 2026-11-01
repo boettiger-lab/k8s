@@ -37,9 +37,11 @@ exit 0
 EOF
     cat > "$TMP/bin/pgrep" <<'EOF'
 #!/bin/sh
-# Pretend vLLM is running, so the memory trigger is evaluated at all.
-echo 1234
-exit 0
+# Pretend $ENGINE is running (default vLLM), so the memory trigger is evaluated.
+case "${ENGINE:-vllm} $*" in
+    "vllm -f VLLM::EngineCore"|"tensorfold -x tensorfold") echo 1234; exit 0 ;;
+esac
+exit 1
 EOF
     chmod +x "$TMP/bin"/*
     PATH="$TMP/bin:$PATH" PROC="$TMP/proc" STATE_DIR="$TMP/state" ALLOW_REBOOT=0 \
@@ -81,19 +83,19 @@ mkvmstat 200000 10;  o2="$(tick)"
 mkvmstat 300000 10;  o3="$(tick)"
 check "tick 1 counts, no kill"  "!STUB-KILL" "$o1"
 check "tick 2 drops caches"     "dropped clean page cache" "$o2"
-check "tick 3 kills"            "ESCALATION: killing vLLM" "$o3"
+check "tick 3 kills"            "ESCALATION: killing the model engine" "$o3"
 check "kill targets EngineCore" "STUB-KILL -9 -f VLLM::EngineCore" "$o3"
 
 echo "== 4. low memory with SWAP thrash -- also counts as distress =="
 reset; mkmeminfo 8100000 8200000; mkvmstat 1000 10; tick >/dev/null
 mkvmstat 1000 20000; o1="$(tick)"; mkvmstat 1000 40000; o2="$(tick)"; mkvmstat 1000 60000; o3="$(tick)"
-check "swap distress escalates" "ESCALATION: killing vLLM" "$o3"
+check "swap distress escalates" "ESCALATION: killing the model engine" "$o3"
 
 echo "== 5. critically low MemFree too -- kills without waiting for distress =="
 reset; mkmeminfo 1000000 1000000; mkvmstat 1000 10; tick >/dev/null
 mkvmstat 1000 10; o1="$(tick)"; mkvmstat 1000 10; o2="$(tick)"; mkvmstat 1000 10; o3="$(tick)"
 check "flags CRITICAL"    "CRITICAL" "$o1"
-check "kills by 3rd tick" "ESCALATION: killing vLLM" "$o3"
+check "kills by 3rd tick" "ESCALATION: killing the model engine" "$o3"
 
 echo "== 5b. 2026-09-21: MemAvailable critical, MemFree healthy, no distress -- must NOT kill =="
 # The nimbus3 Laguna kill: MemAvailable ~1 GiB, MemFree ~8 GiB, direct_reclaim 0. On
@@ -109,6 +111,22 @@ mkvmstat 100000 10; tick >/dev/null          # 1 distress sample
 mkmeminfo 40000000 40000000; mkvmstat 100010 10; tick >/dev/null   # recovered
 mkmeminfo 8100000 8200000; mkvmstat 200000 10; o1="$(tick)"        # distress again
 check "counter restarted at 1" "consecutive: 1" "$o1"
+
+echo "== 7. TensorFold: same distress kills, and the kill reaches tensorfold =="
+# Under TensorFold MemAvailable sits at 0 (vm.min_free_kbytes), MemFree ~3-5 GiB.
+reset; mkmeminfo 3000000 0; mkvmstat 1000 10; ENGINE=tensorfold tick >/dev/null
+for i in 1 2 3; do mkvmstat 1000 10; out="$(ENGINE=tensorfold tick)"; done
+check "steady state does not escalate" "!ESCALATION" "$out"
+mkvmstat 100000 10; ENGINE=tensorfold tick >/dev/null
+mkvmstat 200000 10; ENGINE=tensorfold tick >/dev/null
+mkvmstat 300000 10; o3="$(ENGINE=tensorfold tick)"
+check "distress kills"            "ESCALATION: killing the model engine" "$o3"
+check "kill targets tensorfold"   "STUB-KILL -9 -x tensorfold" "$o3"
+
+echo "== 8. no model engine: memory is not ours to act on =="
+reset; mkmeminfo 1000000 1000000; mkvmstat 1000 10; ENGINE=none tick >/dev/null
+for i in 1 2 3; do mkvmstat $((1000 + i*100000)) 10; out="$(ENGINE=none tick)"; done
+check "does not escalate" "!ESCALATION" "$out"
 
 echo
 echo "passed $PASS, failed $FAIL"
