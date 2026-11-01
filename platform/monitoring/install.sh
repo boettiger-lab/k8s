@@ -40,11 +40,11 @@ if ! kubectl -n monitoring get secret grafana-admin >/dev/null 2>&1; then
 fi
 
 # Grafana — provisioned Prometheus datasource + ingress + dashboard sidecar
-# (see grafana-values.yaml). NOTE: chart version left unpinned because it was
-# not verifiable when authored; after the first successful install, pin it for
-# reproducibility (`helm -n monitoring list` shows the resolved version).
+# (see grafana-values.yaml). Pinned to the version the first install resolved,
+# so re-running this script for a Prometheus change doesn't upgrade Grafana.
 helm upgrade -i grafana grafana/grafana \
   --namespace monitoring \
+  --version 10.5.15 \
   --wait \
   --values grafana-values.yaml
 
