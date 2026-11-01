@@ -1,13 +1,25 @@
-# DeepSeek-V4-Flash-DSpark served tensor-parallel across nimbus2 + nimbus4.
+# DeepSeek-V4-Flash-0731 served tensor-parallel across nimbus2 + nimbus4.
+#
+# CHECKPOINT: -0731 since 2026-10-28, replacing -DSpark. The server config is otherwise
+# identical: 0731 also carries the DSpark draft head, so the dspark speculative config
+# below works unchanged. geo-agent-benchmark, thinking on, same pair:
+#
+#                     numeric (48 cells)   median/question   draft accepted (k=5)
+#   -DSpark           47/48                47 s              3.37 (67%)
+#   -0731             48/48                55 s              3.10 (62%)
+#
+# 0731 is 42/44 on hard-numeric (2026-10-30). DSpark's speed edge is its acceptance rate
+# plus fewer tool calls on the same questions, not the server. Roll back by swapping the
+# checkpoint name on both Deployments (start order below still applies).
 #
 # Endpoint: https://vllm-nimbus2.carlboettiger.info   (model id `deepseek-v4-flash`)
 # Auth: the shared `vllm-api-key` secret, same as every other vLLM endpoint here.
 #
 # THINKING IS ON by default (--default-chat-template-kwargs), with the same 32768-token
 # output ceiling as the single-GB10 models (open-llm-proxy#150). On the
-# geo-agent-benchmark numeric tier (2026-10-28) thinking took this pair from 42/48 to
-# 47/48 for a median of 47 s per question instead of 40 s: DSpark keeps the extra
-# tokens cheap. Clients can still send chat_template_kwargs {"thinking": false}.
+# geo-agent-benchmark numeric tier (2026-10-28) thinking took the DSpark checkpoint from
+# 42/48 to 47/48 for a median of 47 s per question instead of 40 s: speculative
+# decoding keeps the extra tokens cheap. Clients can still send chat_template_kwargs {"thinking": false}.
 #
 # WHY THIS IS TWO DEPLOYMENTS AND NOT ONE WITH replicas: 2
 # TP ranks are not interchangeable: rank 0 runs the API server, rank 1 is --headless,
@@ -68,8 +80,8 @@
 #      ordinary FP8 (E4M3, UE8M0 scales). Chasing NVFP4 *weights* was a dead end:
 #      nvidia/DeepSeek-V4-Flash-NVFP4 is 157 GB on disk, the same as FP8, and buys
 #      nothing. 11.22 GiB of this KV format holds 668,152 tokens.
-#   2. DSpark speculative decoding at k=5. Requires the DSpark checkpoint (it carries
-#      `dspark_noise_token_id = 128799`); the plain DeepSeek-V4-Flash config has only
+#   2. DSpark speculative decoding at k=5. Requires a checkpoint with the DSpark draft
+#      head (-DSpark and -0731 both carry `dspark_noise_token_id = 128799`); the plain DeepSeek-V4-Flash config has only
 #      `num_nextn_predict_layers: 1` and fails with
 #      "Model config must specify ... for parallel drafting".
 #   3. --moe-backend flashinfer_b12x  (selects B12X_MXFP4)
@@ -160,7 +172,7 @@ spec:
   # SCALED TO 0 2026-10-27: nimbus2 serves Nemotron 3.5 Super on its own
   # (nemotron35-super-nimbus2.yaml) behind this same Service. Restore with the
   # start order in the header, after scaling nemotron35-super to 0.
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -325,7 +337,7 @@ spec:
           # nodes, logs stopping dead after "world_size=2 rank=0". Anemll's compose
           # passes ${NODE_RANK} for this reason.
           exec vllm serve \
-          deepseek-ai/DeepSeek-V4-Flash-DSpark \
+          deepseek-ai/DeepSeek-V4-Flash-0731 \
           --served-model-name deepseek-v4-flash \
           --host 0.0.0.0 \
           --port 8000 \
@@ -407,7 +419,7 @@ spec:
   # SCALED TO 0 2026-10-27: nimbus2 serves Nemotron 3.5 Super on its own
   # (nemotron35-super-nimbus2.yaml) behind this same Service. Restore with the
   # start order in the header, after scaling nemotron35-super to 0.
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -573,7 +585,7 @@ spec:
           # nodes, logs stopping dead after "world_size=2 rank=0". Anemll's compose
           # passes ${NODE_RANK} for this reason.
           exec vllm serve \
-          deepseek-ai/DeepSeek-V4-Flash-DSpark \
+          deepseek-ai/DeepSeek-V4-Flash-0731 \
           --served-model-name deepseek-v4-flash \
           --host 0.0.0.0 \
           --port 8000 \

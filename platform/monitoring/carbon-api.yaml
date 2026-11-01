@@ -53,10 +53,10 @@ data:
         "description": "120B-A12B hybrid Mamba MoE on one GB10, LiLiCorr speculative decoding (k=3), 1M context"
       },
       "deepseek-v4-flash@nimbus2": {
-        "display_name": "DeepSeek-V4-Flash-DSpark",
+        "display_name": "DeepSeek-V4-Flash (DSpark, then 0731)",
         "power_hosts": ["nimbus2", "nimbus4"],
         "gpu_count": 2,
-        "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s"
+        "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s; checkpoint -DSpark until 2026-10-28, -0731 since. One card: both serve as deepseek-v4-flash"
       },
       "qwen3.6-35b-a3b@nimbus": {
         "display_name": "Qwen3.6-35B-A3B NVFP4",

@@ -29,7 +29,8 @@ metadata:
   labels:
     k8s-app: vllm-nimbus2
 spec:
-  replicas: 1
+  # Scaled to 0 2026-10-28: the DeepSeek pair has nimbus2 again.
+  replicas: 0
   # Recreate, as with every model Deployment here: a rolling update deadlocks
   # waiting for GPU the outgoing pod still holds.
   strategy:

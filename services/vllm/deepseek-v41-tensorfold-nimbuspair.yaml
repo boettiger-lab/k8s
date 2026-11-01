@@ -4,7 +4,7 @@
 # Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `deepseek-v41-flash`)
 # Auth: the shared `vllm-api-key` secret.
 #
-# SCALED TO 0: an option, not a production model. Translated from
+# SERVING since 2026-10-29, alongside the 0731 pair, for comparison tests. Translated from
 # 0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark @887bec7 (start.sh run_args).
 # V4.1 is ~2x V4-Flash's parameters (552B + 196B Engram tables) and fits two GB10s only as
 # this 2.9 bpw quantization, with the Engram tables read from NVMe.
@@ -52,7 +52,7 @@ metadata:
   name: tensorfold-dsv41-r0
   namespace: vllm
 spec:
-  replicas: 0
+  replicas: 1
   strategy: {type: Recreate}
   selector:
     matchLabels: {app: tensorfold-dsv41-r0}
@@ -171,7 +171,7 @@ metadata:
   name: tensorfold-dsv41-r1
   namespace: vllm
 spec:
-  replicas: 0
+  replicas: 1
   strategy: {type: Recreate}
   selector:
     matchLabels: {app: tensorfold-dsv41-r1}
