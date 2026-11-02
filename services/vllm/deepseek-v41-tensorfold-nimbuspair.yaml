@@ -26,8 +26,11 @@
 #   kubectl -n vllm rollout status deploy/tensorfold-dsv41-r0 --timeout=1s || true   # r0 pod Running
 #   kubectl -n vllm scale deploy/tensorfold-dsv41-r1 --replicas=1
 #
-# METRICS: /metrics requires the API key (401 to Prometheus), so the carbon dashboard
-# does not see this model.
+# METRICS: --metrics-open serves /metrics without the API key, as vLLM does (vLLM's is
+# already public through the ingress). Without it Prometheus gets 401 and ScrapeTargetMissing
+# fires. The engine's metrics carry no model name, so rank 0's pod labels feed the
+# `tensorfold` scrape job in platform/monitoring/prometheus-values.yaml: it adds model_name
+# and renames tensorfold:* to vllm:*, which gives this model its carbon dashboard card.
 #
 # MEMORY. After warm-up the engine caps its allocator at reserved + (MemAvailable - floor),
 # computed ONCE from the host. Our GB10s run vm.min_free_kbytes=2 GiB and
@@ -61,6 +64,9 @@ spec:
       labels:
         app: tensorfold-dsv41-r0
         vllm-endpoint: nimbus
+        # Read by the `tensorfold` scrape job (see METRICS in the header).
+        metrics-engine: tensorfold
+        model_name: deepseek-v41-flash
     spec:
       nodeSelector:
         kubernetes.io/hostname: nimbus
@@ -111,7 +117,7 @@ spec:
           install -m 600 /run/keys/api-key /tmp/api-key
           exec tensorfold serve /model --tp 2 --rank "$RANK" --master 192.168.200.12 \
             --host 0.0.0.0 --port 8000 --name DeepSeek-V4.1-Flash-1017 --alias deepseek-v41-flash \
-            --api-key-file /tmp/api-key \
+            --api-key-file /tmp/api-key --metrics-open \
             --context 262144 --vision --parallel 2 --mtp-drafts 5 \
             --temperature 0.4 --top-p 1.0 --thinking --reasoning-effort high --no-update-check
         env:

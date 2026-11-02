@@ -192,6 +192,43 @@ scrapeConfigs:
       - action: labeldrop
         regex: (id|name)
 
+  # TensorFold (services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml) serves
+  # vLLM-shaped metrics as tensorfold:* with no model_name, so the carbon
+  # dashboard (which reads vllm:* by model_name) would not see it. Pods that opt
+  # in with the label metrics-engine=tensorfold get model_name from their own
+  # model_name label and the vllm: prefix. A pod job, not the Service: the
+  # Service is shared with whatever vLLM model holds the endpoint, and its
+  # scrape (kubernetes-service-endpoints) still records the raw tensorfold:*.
+  tensorfold:
+    enabled: true
+    job_name: tensorfold
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [vllm]
+    relabel_configs:
+      - action: keep
+        source_labels: [__meta_kubernetes_pod_label_metrics_engine, __meta_kubernetes_pod_container_port_name]
+        regex: tensorfold;http
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_label_model_name]
+        target_label: model_name
+      - action: replace
+        source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+    metric_relabel_configs:
+      - action: replace
+        source_labels: [__name__]
+        regex: tensorfold:(.+)
+        target_label: __name__
+        replacement: vllm:$1
+
 # ---------------------------------------------------------------------------
 # Alert rules — TIER 1: built only from metrics already scraped here, so this
 # needs no new exporters and no kube-state-metrics. See k8s issue #73 for the

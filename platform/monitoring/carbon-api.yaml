@@ -48,6 +48,12 @@ data:
     ]
   models.json: |
     {
+      "deepseek-v41-flash@nimbus": {
+        "display_name": "DeepSeek-V4.1-Flash-1017 (TensorFold)",
+        "power_hosts": ["nimbus", "nimbus3"],
+        "gpu_count": 2,
+        "description": "EXL3 2.9 bpw on the TensorFold engine, MTP speculative decoding (5 drafts), tensor-parallel across two GB10s"
+      },
       "nemotron-3.5-super@nimbus2": {
         "display_name": "Nemotron 3.5 Super NVFP4",
         "description": "120B-A12B hybrid Mamba MoE on one GB10, LiLiCorr speculative decoding (k=3), 1M context"
@@ -96,7 +102,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-10-28-qwen36-qwen38-27b"
+        checksum/config: "2026-11-01-deepseek-v41-tensorfold"
     spec:
       securityContext:
         runAsNonRoot: true
