@@ -14,7 +14,11 @@
 #                model is serving there, so GPU time serving no LLM (cirrus's
 #                speech-to-text) is counted nowhere.
 #                power_hosts: every DCGM host whose watts belong to that node's
-#                models (default: the node itself). A host may be claimed once.
+#                models (default: the node itself). A host may be claimed once,
+#                so a node that only runs a tensor-parallel pair's second rank
+#                (nimbus3 for TensorFold, nimbus4 for the 0731 pair) is NOT listed
+#                here: it is in that model's power_hosts below. Listing it too
+#                fails validation and the pod crash-loops.
 #   models.json  optional display names, keyed by served model name, or
 #                "model@node" where a name is reused on two nodes ("qwen" has
 #                been more than one checkpoint on nimbus). A "model@node" entry
@@ -43,8 +47,7 @@ data:
     [
       {"name": "cirrus",  "gpu_hardware": "Quadro RTX 8000", "gpu_count": 2},
       {"name": "nimbus",  "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1},
-      {"name": "nimbus2", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1},
-      {"name": "nimbus3", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1}
+      {"name": "nimbus2", "gpu_hardware": "NVIDIA GB10",     "gpu_count": 1}
     ]
   models.json: |
     {
@@ -102,7 +105,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-11-01-deepseek-v41-tensorfold"
+        checksum/config: "2026-11-01-deepseek-v41-tensorfold-2"
     spec:
       securityContext:
         runAsNonRoot: true
