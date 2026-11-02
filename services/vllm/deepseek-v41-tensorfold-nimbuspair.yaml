@@ -4,7 +4,8 @@
 # Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `deepseek-v41-flash`)
 # Auth: the shared `vllm-api-key` secret.
 #
-# SERVING since 2026-10-29, alongside the 0731 pair, for comparison tests. Translated from
+# Served 2026-10-29 to 11-01 alongside the 0731 pair, for comparison tests; at 0 since
+# 2026-11-02 (see LOAD). Translated from
 # 0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark @887bec7 (start.sh run_args).
 # V4.1 is ~2x V4-Flash's parameters (552B + 196B Engram tables) and fits two GB10s only as
 # this 2.9 bpw quantization, with the Engram tables read from NVMe.
@@ -20,7 +21,8 @@
 # mcp-gpu-nimbus, as for Flash-Next -- see README).
 #
 # START ORDER: rank 0 FIRST -- it opens the rendezvous store on :29551 -- then rank 1.
-# This is the REVERSE of the vLLM pair (deepseek-v4-flash-gb10pair.yaml).
+# This is the REVERSE of the vLLM pair (deepseek-v4-flash-gb10pair.yaml). Both Deployments
+# are at replicas 0 here, so applying this file never starts a rank; start them with:
 #
 #   kubectl -n vllm scale deploy/tensorfold-dsv41-r0 --replicas=1
 #   kubectl -n vllm rollout status deploy/tensorfold-dsv41-r0 --timeout=1s || true   # r0 pod Running
@@ -31,6 +33,17 @@
 # fires. The engine's metrics carry no model name, so rank 0's pod labels feed the
 # `tensorfold` scrape job in platform/monitoring/prometheus-values.yaml: it adds model_name
 # and renames tensorfold:* to vllm:*, which gives this model its carbon dashboard card.
+#
+# LOAD. TensorFold 07aa02585f64 reads its weights with buffered I/O and never drops the pages:
+# the rank cache (/cache/tf-ds-rank, ~100 GiB a rank, every start after the first, 32 readers)
+# and the shards (first start). On a GB10 the page cache and the CUDA copy share one memory,
+# so a start asks for ~200 GiB of 119 at ~5 GB/s. On 2026-11-02 both nodes went 112 -> 6 GiB
+# free in 12 s and into heavy direct reclaim (the precursor of the 08-24 freezes); a safety
+# watcher stopped both ranks. The tensorfold-dsv41-patch ConfigMap (sitecustomize.py on
+# PYTHONPATH) fadvises each read span DONTNEED once read, so the cache holds only what is in
+# flight; the log shows "[tf-patch] weight reads drop their page cache" when it is active. It
+# patches at import because the rank cache's key hashes weights.py's own bytes -- editing that
+# file would invalidate the cache. Start under a reclaim watcher until a clean start is measured.
 #
 # MEMORY. After warm-up the engine caps its allocator at reserved + (MemAvailable - floor),
 # computed ONCE from the host. Our GB10s run vm.min_free_kbytes=2 GiB and
@@ -49,13 +62,90 @@
 #   V4-Flash-DSpark vLLM pair         47/48   47                  224
 # Short-prompt decode is ~2x the vLLM pair's (~90 tok/s SQL, ~60 prose), but per-call time
 # on agentic traffic is about the same: V4.1 makes more calls and longer prompts.
+---
+# The load patch (see LOAD in the header), on both ranks' PYTHONPATH.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tensorfold-dsv41-patch
+  namespace: vllm
+data:
+  sitecustomize.py: |
+    """Drop the page cache behind TensorFold's weight reads (services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml).
+
+    TensorFold 07aa02585f64 reads its weights with buffered I/O and never drops the pages: the rank cache
+    (RankCache._read, every start after the first) and the shards (Shards.get, the first start). On a GB10 the page
+    cache and the CUDA copy share one memory, so a start asks for the weights twice (~200 GiB of 119) at ~5 GB/s, and the
+    kernel can only keep up by direct reclaim. This wraps both readers to posix_fadvise(DONTNEED) each span once it is
+    read, so the cache holds only what is in flight.
+
+    It patches at import rather than editing weights.py, because the rank cache's key hashes weights.py's own bytes: an
+    edit there would invalidate the ~100 GiB cache file and the next start would rebuild it from the shards.
+    """
+
+    import importlib.abc
+    import importlib.util
+    import os
+    import sys
+
+    TARGET = "tensorfold.families.deepseek_v41.cuda.weights"
+
+
+    def _patch(m):
+        read, get = m.RankCache._read, m.Shards.get
+
+        def _read(self, off, n):
+            buf = read(self, off, n)
+            os.posix_fadvise(self.fd, off, n, os.POSIX_FADV_DONTNEED)
+            return buf
+
+        def _get(self, name, rows=None):
+            t = get(self, name, rows)
+            path, base, e = self.entries[name]
+            lo, hi = e["data_offsets"]
+            os.posix_fadvise(self._fh(path).fileno(), base + lo, hi - lo, os.POSIX_FADV_DONTNEED)
+            return t
+
+        m.RankCache._read, m.Shards.get = _read, _get
+        print("[tf-patch] weight reads drop their page cache (RankCache._read, Shards.get)", flush=True)
+
+
+    class _Finder(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name != TARGET:
+                return None
+            sys.meta_path.remove(self)
+            spec = importlib.util.find_spec(name)
+            if spec is None or spec.loader is None:
+                return spec
+            exec_module = spec.loader.exec_module
+
+            def exec_and_patch(module):
+                exec_module(module)
+                _patch(module)
+
+            spec.loader.exec_module = exec_and_patch
+            return spec
+
+
+    sys.meta_path.insert(0, _Finder())
+
+    # This file shadows any sitecustomize the image has: run that one too.
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _d in sys.path:
+        _p = os.path.join(_d or ".", "sitecustomize.py")
+        if os.path.abspath(_d or ".") != _here and os.path.isfile(_p):
+            _spec = importlib.util.spec_from_file_location("_image_sitecustomize", _p)
+            _spec.loader.exec_module(importlib.util.module_from_spec(_spec))
+            break
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tensorfold-dsv41-r0
   namespace: vllm
 spec:
-  replicas: 1
+  replicas: 0                     # started by `kubectl scale` (START ORDER), never by apply
   strategy: {type: Recreate}
   selector:
     matchLabels: {app: tensorfold-dsv41-r0}
@@ -115,6 +205,8 @@ spec:
           # The engine refuses a key file it cannot open safely (the secret mount is a 0644
           # symlink): copy it to a private regular file first.
           install -m 600 /run/keys/api-key /tmp/api-key
+          # The load patch (LOAD in the header), ahead of any PYTHONPATH the image sets.
+          export PYTHONPATH=/opt/tf-patch${PYTHONPATH:+:$PYTHONPATH}
           exec tensorfold serve /model --tp 2 --rank "$RANK" --master 192.168.200.12 \
             --host 0.0.0.0 --port 8000 --name DeepSeek-V4.1-Flash-1017 --alias deepseek-v41-flash \
             --api-key-file /tmp/api-key --metrics-open \
@@ -162,22 +254,24 @@ spec:
         - {name: cache, mountPath: /cache}
         - {name: dshm, mountPath: /dev/shm}
         - {name: infiniband, mountPath: /dev/infiniband}
+        - {name: patch, mountPath: /opt/tf-patch, readOnly: true}
         - {name: api-key, mountPath: /run/keys, readOnly: true}
       volumes:
       - {name: view, hostPath: {path: /home/cboettig/tfv41, type: Directory}}
       - {name: cache, hostPath: {path: /home/cboettig/tfv41/cache, type: DirectoryOrCreate}}
       - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
       - {name: infiniband, hostPath: {path: /dev/infiniband}}
+      - {name: patch, configMap: {name: tensorfold-dsv41-patch}}
       - {name: api-key, secret: {secretName: vllm-api-key, items: [{key: api-key, path: api-key}]}}
 ---
-# Rank 1 (nimbus3): no HTTP server. Start it after rank 0.
+# Rank 1 (nimbus3): serves no requests, but its server still listens on :8000. Start it after rank 0.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tensorfold-dsv41-r1
   namespace: vllm
 spec:
-  replicas: 1
+  replicas: 0                     # started by `kubectl scale` (START ORDER), never by apply
   strategy: {type: Recreate}
   selector:
     matchLabels: {app: tensorfold-dsv41-r1}
@@ -223,8 +317,13 @@ spec:
         args:
         - |
           set -euo pipefail
+          # Rank 1 also listens on :8000 (hostNetwork); without a key it is open. Same key as rank 0.
+          install -m 600 /run/keys/api-key /tmp/api-key
+          # The load patch (LOAD in the header), ahead of any PYTHONPATH the image sets.
+          export PYTHONPATH=/opt/tf-patch${PYTHONPATH:+:$PYTHONPATH}
           exec tensorfold serve /model --tp 2 --rank "$RANK" --master 192.168.200.12 \
             --host 0.0.0.0 --port 8000 --name DeepSeek-V4.1-Flash-1017 --alias deepseek-v41-flash \
+            --api-key-file /tmp/api-key \
             --context 262144 --vision --parallel 2 --mtp-drafts 5 \
             --temperature 0.4 --top-p 1.0 --thinking --reasoning-effort high --no-update-check
         env:
@@ -262,8 +361,12 @@ spec:
         - {name: cache, mountPath: /cache}
         - {name: dshm, mountPath: /dev/shm}
         - {name: infiniband, mountPath: /dev/infiniband}
+        - {name: patch, mountPath: /opt/tf-patch, readOnly: true}
+        - {name: api-key, mountPath: /run/keys, readOnly: true}
       volumes:
       - {name: view, hostPath: {path: /home/cboettig/tfv41, type: Directory}}
       - {name: cache, hostPath: {path: /home/cboettig/tfv41/cache, type: DirectoryOrCreate}}
       - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
       - {name: infiniband, hostPath: {path: /dev/infiniband}}
+      - {name: patch, configMap: {name: tensorfold-dsv41-patch}}
+      - {name: api-key, secret: {secretName: vllm-api-key, items: [{key: api-key, path: api-key}]}}
