@@ -4,8 +4,9 @@
 # Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `deepseek-v41-flash`)
 # Auth: the shared `vllm-api-key` secret.
 #
-# Served 2026-10-29 to 11-01 alongside the 0731 pair, for comparison tests; at 0 since
-# 2026-11-02 (see LOAD). Translated from
+# DOES NOT FIT SAFELY -- retired 2026-11-02 and kept at 0 for reference (see VERDICT). Do not
+# start it on nimbus+nimbus3 as configured. Served 2026-10-29 to 11-01 alongside the 0731 pair,
+# for comparison tests. Translated from
 # 0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark @887bec7 (start.sh run_args).
 # V4.1 is ~2x V4-Flash's parameters (552B + 196B Engram tables) and fits two GB10s only as
 # this 2.9 bpw quantization, with the Engram tables read from NVMe.
@@ -43,7 +44,18 @@
 # PYTHONPATH) fadvises each read span DONTNEED once read, so the cache holds only what is in
 # flight; the log shows "[tf-patch] weight reads drop their page cache" when it is active. It
 # patches at import because the rank cache's key hashes weights.py's own bytes -- editing that
-# file would invalidate the cache. Start under a reclaim watcher until a clean start is measured.
+# file would invalidate the cache.
+#
+# VERDICT (2026-11-02 watched start, patch active, 2 GiB floor). The weight load is clean:
+# 99 GiB in 21 s, free 110 -> 7.2 GiB, no direct reclaim. Warm-up then takes ~5 GiB more
+# (CUDA context and kernels, vision tower, warm-up prompts, CUDA graph pools -- nothing read
+# from disk), leaving 2.4 GiB free on nimbus (0.4 above min) and 3.35 on nimbus3, below the
+# 4.4 GiB low watermark on both; the watcher stopped both ranks before "engine ready". Serving
+# would sit there too: Engram prefill reads go through the page cache, and the 10-28/29
+# benchmark bottomed at 5.2 GiB. Dropping --vision and --parallel 2 -> 1 buys ~2 GiB, still
+# not a margin. Any retry: clear a leftover watermark boost first (it persists while the node
+# is idle, see 99-gb10-vm.conf), start under a reclaim watcher, and note that rank 0 does not
+# load until rank 1 joins, so the two always load together.
 #
 # MEMORY. After warm-up the engine caps its allocator at reserved + (MemAvailable - floor),
 # computed ONCE from the host. Our GB10s run vm.min_free_kbytes=2 GiB and
@@ -60,8 +72,11 @@
 #   V4.1-1017 TensorFold (this)       45/48   66                  244
 #   V4-Flash-0731 vLLM pair           48/48   55                  178
 #   V4-Flash-DSpark vLLM pair         47/48   47                  224
-# Short-prompt decode is ~2x the vLLM pair's (~90 tok/s SQL, ~60 prose), but per-call time
-# on agentic traffic is about the same: V4.1 makes more calls and longer prompts.
+# Hard-numeric tier (22 x 2): V4.1 31 pass / 2 close / 2 fail / 6 timeout / 3 no answer;
+# 0731 42/44, no timeouts. Short-prompt decode is ~2x the vLLM pair's (~90 tok/s SQL, ~60
+# prose), but on agentic traffic V4.1 ran 41-44 tok/s vs 0731's 48-50, made ~2x the tool calls
+# and tokens, and took 8.6 h of agent time vs 5.4 h. Raw runs: glen-benchmark-runs branch
+# incoming-2026-10-30-gb10. Engine: Elevatormusic/TensorFold dsv41-1.0.0 (07aa02585f64).
 ---
 # The load patch (see LOAD in the header), on both ranks' PYTHONPATH.
 apiVersion: v1
