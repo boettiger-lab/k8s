@@ -27,9 +27,11 @@
 # went straight to reboot). Under TensorFold MemAvailable sits at 0 on both
 # nodes (vm.min_free_kbytes, see 99-gb10-vm.conf), so the MEM_MIN branch is
 # always armed and a kill rests on reclaim distress or MemFree < FREE_CRIT --
-# which is what the 2026-09-09/09-21 fixes already require. Measured before
-# enabling: 60h min MemFree 2.8 GiB (nimbus3), direct reclaim ~0 pages/min
-# idle. Killing either rank takes down the TP pair; it restarts in place.
+# which is what the 2026-09-09/09-21 fixes already require. Measured so far
+# (idle only): 60h min MemFree 2.8 GiB (nimbus3), direct reclaim ~0 pages/min.
+# Under-load direct reclaim is NOT yet measured. Killing either rank takes down
+# the TP pair, and rank 0 must start before rank 1, so expect to restart the
+# pair by hand (scale both to 0, then r0, then r1).
 #
 # --- 2026-09-09: why trigger 2 now needs corroboration -----------------------
 # Low MemAvailable alone is NOT evidence of danger, and acting on it killed a
