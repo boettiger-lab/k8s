@@ -28,7 +28,9 @@ The launcher asks four questions.
 - **Both workstation GPUs:** two RTX 8000s, for multi-GPU work.
 - **GB10:** an NVIDIA Grace Blackwell machine. It is **arm64**, so a custom
   image must be multi-arch. GPU memory is the machine's unified memory, shared
-  with the CPU.
+  with the CPU and with at most one other GB10 server. These machines serve
+  language models first: you get one only when it is not serving a model, and
+  **your server is stopped if a model is started on it**. Save your work often.
 
 **Interface:** JupyterLab, VS Code or RStudio.
 

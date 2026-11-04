@@ -1,0 +1,19 @@
+# Models outrank notebooks on the GB10s.
+#
+# Every GB10 model claims all 8 nvidia.com/gpu slices of its node; a GB10 notebook
+# claims 4 (services/jupyterhub/public-config.yaml). So a notebook never lands on a
+# node holding a model, and up to two share a node that holds none. When a model
+# starts on a node with notebooks, this class makes the scheduler evict them
+# (notebook pods run at the default priority, 0) instead of leaving the model Pending.
+#
+# Set on every GB10 Deployment in services/vllm. Priority is read when a pod is
+# created, so a running model picks it up at its next restart; until then it only
+# matters that it already holds its slices.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: llm-serving
+value: 100000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "GB10 model servers: evict notebooks to get their node."

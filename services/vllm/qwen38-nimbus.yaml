@@ -24,6 +24,7 @@ spec:
         # another to 1 moves vllm-nimbus.carlboettiger.info with no ingress churn.
         vllm-endpoint: nimbus
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       runtimeClassName: nvidia
       imagePullSecrets:
       - name: ngc-pull

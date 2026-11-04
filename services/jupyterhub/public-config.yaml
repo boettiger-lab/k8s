@@ -169,13 +169,17 @@ singleuser:
                 extra_resource_limits:
                   nvidia.com/gpu: "9"
             gb10:
-              display_name: GB10 (NVIDIA Grace Blackwell, arm64, jupyter-pool node)
-              description: "Runs on a GB10 labelled gb10-pool=jupyter. arm64: the lab images are multi-arch, custom images must be too. GPU memory is the node's shared 121 GiB RAM."
+              display_name: GB10 (NVIDIA Grace Blackwell, arm64; stopped if a model needs the machine)
+              description: "Runs on any GB10 not serving a model, at most two servers to a machine. arm64: the lab images are multi-arch, custom images must be too. GPU memory is the machine's 121 GiB RAM, shared with the other server there. If a model is started on the machine, this server is stopped."
               kubespawner_override:
+                # 4 of the node's 8 slices: two notebooks a GB10. Every GB10 model
+                # claims all 8 and runs at priority llm-serving, so a notebook never
+                # lands beside a model and is evicted when one starts on its node
+                # (services/vllm/priorityclass.yaml).
                 extra_resource_limits:
-                  nvidia.com/gpu: "1"
+                  nvidia.com/gpu: "4"
                 node_selector:
-                  gb10-pool: jupyter
+                  node-class: gb10
                 # Replaces the spawner's tolerations, so the chart's jupyter
                 # defaults are restated alongside the GB10 taint.
                 tolerations:

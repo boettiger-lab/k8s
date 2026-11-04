@@ -14,7 +14,7 @@ touching workload manifests.
 | Role | Hardware | Runs | How it's marked |
 |---|---|---|---|
 | **Control plane and storage** | amd64 workstation (64-core Threadripper), 2× Quadro RTX 8000 48 GB, NVMe and SSD storage | the K3s server, all persistent storage, ingress, most services, CI runners, speech-to-text, CPU and GPU notebooks | untainted |
-| **GB10 pool** | NVIDIA GB10 (Grace Blackwell) machines: arm64, ~120 GB unified CPU/GPU memory each | LLM serving, or GPU notebooks, depending on the pool label | taint `dedicated=gb10:NoSchedule`; label `gb10-pool=llm` or `gb10-pool=jupyter` |
+| **GB10 pool** | NVIDIA GB10 (Grace Blackwell) machines: arm64, ~120 GB unified CPU/GPU memory each | LLM serving first; GPU notebooks on any machine not serving a model | taint `dedicated=gb10:NoSchedule`; label `node-class=gb10` |
 | **Notebook node** | amd64 workstation, consumer GPU | JupyterHub user servers only | taint `hub.jupyter.org/dedicated=user:NoSchedule` |
 
 Nothing schedules on a tainted node unless it tolerates the taint. JupyterHub
@@ -23,9 +23,11 @@ notebook option tolerate `dedicated=gb10`. DaemonSets that must run everywhere,
 such as GPU plugins, exporters and the storage client, list each taint
 explicitly.
 
-`gb10-pool` splits the GB10s by job. `llm` machines serve models and hold no
-user data. `jupyter` machines run notebooks and the shared-home storage client.
-Moving a machine between pools is a relabel.
+Models come first on the GB10s. A model claims all 8 GPU slices of its machine
+and runs at a higher scheduling priority than notebooks; a GB10 notebook claims
+4. So notebooks use only machines serving no model, two to a machine, and
+starting a model on a machine stops the notebooks there. Every GB10 runs the
+shared-home storage client; none holds other cluster data.
 
 ## GPUs
 

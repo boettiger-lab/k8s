@@ -11,8 +11,8 @@
 # (vLLM PR #60692) drops DFlash acceptance to ~0 on hybrid GDN targets like Qwen3.8,
 # ~3.7x slower with correct output (vLLM #63587; fix in open PR #64059).
 #
-# Targets nimbus3 by hostname: it is in gb10-pool=jupyter, and this test does not move
-# it to the llm pool. All 8 GPU slices are claimed so no notebook lands on its GPU.
+# Targets nimbus3 by hostname. All 8 GPU slices are claimed, so no notebook lands on its
+# GPU, and llm-serving evicts any notebook already there.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,6 +33,7 @@ spec:
         k8s-app: vllm-nimbus3-qwen38-27b
         vllm-endpoint: nimbus3
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       nodeSelector:
         kubernetes.io/hostname: nimbus3
       tolerations:
