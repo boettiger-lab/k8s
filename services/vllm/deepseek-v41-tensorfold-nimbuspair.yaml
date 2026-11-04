@@ -173,6 +173,7 @@ spec:
         metrics-engine: tensorfold
         model_name: deepseek-v41-flash
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       nodeSelector:
         kubernetes.io/hostname: nimbus
       tolerations:
@@ -295,6 +296,7 @@ spec:
       labels:
         app: tensorfold-dsv41-r1
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       nodeSelector:
         kubernetes.io/hostname: nimbus3
       tolerations:

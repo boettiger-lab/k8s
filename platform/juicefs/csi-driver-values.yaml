@@ -25,28 +25,19 @@ node:
       operator: Equal
       value: user
       effect: NoSchedule
-    # GB10s: tolerated, but the affinity below admits ONLY GB10s in the jupyter
-    # pool. A toleration grants permission, it does not attract.
+    # GB10s: every one runs the client, because any GB10 not serving a model can
+    # take hub servers (services/jupyterhub/public-config.yaml, GPU -> GB10).
     - key: dedicated
       operator: Equal
       value: gb10
       effect: NoSchedule
-  # GB10s serving LLMs hold no cluster storage (cluster/nodes/gb10/README.md).
-  # A GB10 moved into the jupyter pool (`gb10-pool=jupyter`) needs the JuiceFS
-  # client so hub servers can mount their juicefs-home. The two terms are ORed:
-  # every non-GB10 node, plus jupyter-pool GB10s.
-  #
-  # Moving a GB10 back to `llm`: stop its jupyter servers FIRST. A delvol Job for
-  # a volume last used there gets pinned to the node, and strands once the CSI
-  # node leaves (see #66 and the controller note below).
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - {key: node-class, operator: NotIn, values: [gb10]}
-          - matchExpressions:
-              - {key: gb10-pool, operator: In, values: [jupyter]}
+  # No node affinity: the CSI node runs everywhere. On a GB10 serving a model it
+  # is ~70 MiB and idle; mount pods and the /var/jfsCache read cache exist only
+  # where a hub server is mounted, and a notebook never shares a node with a
+  # model (services/vllm/priorityclass.yaml). Keeping the CSI node on every GB10
+  # also means a delvol Job for a volume last used there can always run there
+  # (see #66 and the controller note below). Until 2026-11 only GB10s labelled
+  # gb10-pool=jupyter ran it.
 
 # WHY THIS BLOCK EXISTS: the chart ships controller.resources.limits.memory=1Gi,
 # and that is not enough for this cluster. On 2026-09-13 both controller

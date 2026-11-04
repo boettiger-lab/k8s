@@ -183,6 +183,7 @@ spec:
       labels:
         app: deepseek-v4-flash-worker
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       # Pinned by hostname, not by a cache label: a TP rank's identity is its NODE
       # (--node-rank and the fabric address are both fixed), so this genuinely is
       # placement by machine rather than by where the weights happen to live.
@@ -431,6 +432,7 @@ spec:
         app: deepseek-v4-flash-head
         vllm-endpoint: nimbus2
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       # Pinned by hostname, not by a cache label: a TP rank's identity is its NODE
       # (--node-rank and the fabric address are both fixed), so this genuinely is
       # placement by machine rather than by where the weights happen to live.

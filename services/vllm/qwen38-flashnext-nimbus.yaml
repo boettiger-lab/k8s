@@ -24,6 +24,7 @@ spec:
         # 1 moves vllm-nimbus.carlboettiger.info with no ingress churn.
         vllm-endpoint: nimbus
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       # Placement follows the WEIGHTS, not the box. The 126 GiB checkpoint is a
       # hostPath (`type: Directory`, so a node without it fails to mount rather
       # than downloading), and the GB10s may not mount cirrus-backed storage --
@@ -43,9 +44,6 @@ spec:
       # Label after staging, never before.
       nodeSelector:
         vllm-cache/qwen38-flashnext: "true"
-        # Only GB10s in the LLM pool. A node lent to JupyterHub (gb10-pool=jupyter)
-        # keeps its weight-cache label, but must not be picked for a model.
-        gb10-pool: llm
       # Prefer nimbus, its home. The selector above also matches nimbus2 and
       # nimbus4, and deepseek-v4-flash is hostname-pinned to exactly that pair.
       # Today it holds all 8 slices on both, so nothing else fits there. But a

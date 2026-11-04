@@ -44,12 +44,12 @@ spec:
         k8s-app: vllm-nimbus2-nemotron35
         vllm-endpoint: nimbus2
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       # Placement follows the WEIGHTS (hostPath HF cache, `type: Directory`).
       # Label a node only AFTER staging both repos (target + LiLiCorr drafter):
       #   kubectl label node <n> vllm-cache/nemotron35-super=true
       nodeSelector:
         vllm-cache/nemotron35-super: "true"
-        gb10-pool: llm
       tolerations:
       - key: dedicated
         operator: Equal

@@ -55,6 +55,7 @@ spec:
         # node is scale-to-0 / scale-to-1 with no ingress churn.
         vllm-endpoint: nimbus3
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       # Placement follows the WEIGHTS, as with qwen38-flashnext. Deliberately NOT
       # `node-class: gb10` -- that asserts "any GB10 works", false the moment an
       # unstaged box joins. Label a node only AFTER staging the checkpoint:
@@ -62,9 +63,6 @@ spec:
       # Staged on nimbus3 2026-09-21 (65 GB, 15 shards).
       nodeSelector:
         vllm-cache/laguna: "true"
-        # Only GB10s in the LLM pool. A node lent to JupyterHub (gb10-pool=jupyter)
-        # keeps its weight-cache label, but must not be picked for a model.
-        gb10-pool: llm
       tolerations:
       - key: dedicated
         operator: Equal

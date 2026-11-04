@@ -11,13 +11,13 @@ databases, LLM inference, and CI runners — on campus GPU workstations.
 ## The cluster
 
 **One K3s cluster** of campus workstations, each with a distinct role. The live
-roster is `kubectl get nodes -L kubernetes.io/arch,node-class,gb10-pool`; host
+roster is `kubectl get nodes -L kubernetes.io/arch,node-class`; host
 configuration and per-node rationale are under [`cluster/nodes/`](cluster/nodes/).
 
 | Role | Node(s) | Notes |
 |------|---------|-------|
 | **Control plane, storage, ingress** | cirrus (amd64, 2× Quadro RTX 8000) | Holds the ZFS pool `tank`, Traefik, MinIO and the JuiceFS backends. **Never cordon it.** |
-| **GB10 GPU workers** | nimbus, nimbus2, … (arm64, unified memory) | Tainted `dedicated=gb10:NoSchedule` fleet-wide; LLM inference, or jupyter where labelled `gb10-pool=jupyter`. |
+| **GB10 GPU workers** | nimbus, nimbus2, … (arm64, unified memory) | Tainted `dedicated=gb10:NoSchedule` fleet-wide; LLM inference; a GB10 serving no model takes up to two GB10 notebooks, which a starting model evicts. |
 | **Jupyter-only GPU worker** | thelio (amd64, RTX 2080) | Tainted `hub.jupyter.org/dedicated=user:NoSchedule`; one exclusive GPU, not time-sliced. |
 
 Nodes differ in ways that matter when scheduling: the GB10s are **arm64**, so an

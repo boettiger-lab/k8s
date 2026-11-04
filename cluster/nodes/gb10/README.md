@@ -81,19 +81,19 @@ window matters.
   with `nodeSelector: {node-class: gb10}`; reserve `kubernetes.io/hostname` for
   cases with a real per-box reason, such as a model tied to one box's local
   weight cache. Each such pin is a place the fleet stops behaving like a pool.
-- **Two pools, tracked by the `gb10-pool` label** (from 2026-09-29):
-  `kubectl get nodes -L gb10-pool`.
-  - `llm`: serves models. **Holds no cluster data**: no JuiceFS, no RustFS, no
-    ZFS-LocalPV. (The `juicefs-csi-node` DaemonSet once landed on nimbus by
-    accident; reverted in helm rev 6.)
-  - `jupyter`: open to JupyterHub via the launcher's *GPU → GB10* option. It runs
-    the JuiceFS **client only** (CSI node + mount pods, a local read cache in
-    `/var/jfsCache`) so hub homes on `juicefs-home` can mount. It still holds no
-    RustFS, Postgres or ZFS-LocalPV. `platform/juicefs/csi-driver-values.yaml`
-    admits only this pool.
-  - **Moving a node between pools:** stop the node's jupyter servers (or scale
-    its model to 0) first, then relabel. Going `jupyter` → `llm` with a home still
-    mounted strands its delvol Jobs (#66).
+- **Models first, notebooks in the gaps** (from 2026-11; replaced the
+  `gb10-pool` llm/jupyter split of 2026-09-29, whose labels are now unused).
+  Every GB10 model claims all 8 GPU slices at priority `llm-serving`
+  (`services/vllm/priorityclass.yaml`); the JupyterHub *GPU → GB10* option claims
+  4 at priority 0. So a notebook lands only on a GB10 serving no model, two to a
+  node, and a model starting on its node evicts it. The unified 121 GiB is
+  shared by those two notebooks: their GPU allocations are not charged to their
+  memory limits.
+  - **Cluster data:** no RustFS, Postgres or ZFS-LocalPV on any GB10. The JuiceFS
+    **client** (CSI node, ~70 MiB) runs on every GB10 so hub homes on
+    `juicefs-home` can mount wherever a notebook lands; its mount pods and
+    `/var/jfsCache` exist only where a home is mounted. Being on every GB10 also
+    keeps delvol Jobs from stranding (#66).
 - **Wired only.** `join-gb10.sh` sets any Wi-Fi device down and unmanaged. A
   second interface is how a node registers an unroutable address and flannel
   silently blackholes cross-node traffic; `disconnected` is not sufficient,

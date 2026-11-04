@@ -12,6 +12,6 @@ cluster itself:
 |---|---|
 | Which model is behind an endpoint? | `GET /v1/models` on that endpoint ([LLM and speech APIs]({{< relref "llm-api" >}})) |
 | Are the machines healthy? | [Grafana](https://grafana-cirrus.carlboettiger.info) node and GPU dashboards |
-| What's running, and where? | with a kubeconfig: `kubectl get nodes -L gb10-pool,nvidia.com/gpu.product` and `kubectl get pods -A -o wide` |
+| What's running, and where? | with a kubeconfig: `kubectl get nodes -L node-class,nvidia.com/gpu.product` and `kubectl get pods -A -o wide` |
 | How much power is each model using? | [Carbon dashboard](https://carbon.carlboettiger.info) |
 | Is something broken or planned? | [GitHub issues](https://github.com/boettiger-lab/k8s/issues) |

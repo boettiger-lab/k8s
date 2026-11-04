@@ -30,6 +30,7 @@ spec:
         k8s-app: vllm-nimbus-qwen36
         vllm-endpoint: nimbus
     spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
       nodeSelector:
         kubernetes.io/hostname: nimbus
       tolerations:
