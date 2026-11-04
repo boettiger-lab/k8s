@@ -45,7 +45,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: server
-        image: ghcr.io/boettiger-lab/mcp-data-server:gpu-arm64
+        image: ghcr.io/schmidtdse/geo-query:gpu-arm64
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
