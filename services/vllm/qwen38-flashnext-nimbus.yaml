@@ -6,8 +6,9 @@ metadata:
   labels:
     k8s-app: vllm-nimbus
 spec:
-  # Scaled to 0 2026-10-29: nimbus is rank 0 of the TensorFold DeepSeek-V4.1 pair.
-  replicas: 0
+  # Back up 2026-11-04 after the TensorFold DeepSeek-V4.1 pair (2026-10-29 to
+  # 2026-11-02) was retired.
+  replicas: 1
   # Recreate, as with every model Deployment here: a rolling update deadlocks
   # waiting for GPU the outgoing pod still holds.
   strategy:
