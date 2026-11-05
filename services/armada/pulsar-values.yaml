@@ -1,49 +1,32 @@
-# Minimal single-node Pulsar for development/small clusters.
-# For production, increase replication factors and replica counts.
-# Uses the official Apache Pulsar chart (https://pulsar.apache.org/charts)
+# Single-pod Pulsar for Armada (apache/pulsar chart 4.8.0, standalone mode).
+# One Deployment (Recreate) runs ZooKeeper + BookKeeper + broker in-process;
+# Armada only needs a durable broker, not a Pulsar cluster.
+# Service: armada-pulsar-standalone.armada.svc.cluster.local:6650
 
-components:
-  functions: false
-  proxy: false
-  toolset: false
-  pulsar_manager: false
-
-monitoring:
-  prometheus: false
-  grafana: false
-  node_exporter: false
-  alert_manager: false
-
-autoRecovery:
-  enabled: false
-
-zookeeper:
-  replicaCount: 1
+standalone:
+  enabled: true
+  # The chart gives zookeeper/bookkeeper fsGroup 0 but standalone an empty
+  # securityContext, so the non-root pulsar user cannot write /pulsar/data on
+  # a fresh openebs-zfs volume (AccessDeniedException). local-path hides this.
+  securityContext:
+    fsGroup: 0
+    fsGroupChangePolicy: OnRootMismatch
   podMonitor:
     enabled: false
   volumes:
     data:
-      storageClassName: local-path
-      size: 5Gi
-
-bookkeeper:
-  replicaCount: 1
-  podMonitor:
-    enabled: false
-  volumes:
-    journal:
-      storageClassName: local-path
-      size: 5Gi
-    ledgers:
-      storageClassName: local-path
       size: 10Gi
+      storageClassName: openebs-zfs
 
-broker:
-  replicaCount: 1
-  podMonitor:
-    enabled: false
-  configData:
-    # Single-replica ledger settings — required when bookkeeper replicaCount=1
-    managedLedgerDefaultEnsembleSize: "1"
-    managedLedgerDefaultWriteQuorum: "1"
-    managedLedgerDefaultAckQuorum: "1"
+components:
+  autorecovery: false
+  proxy: false
+  toolset: false
+  functions: false
+
+# Without this the chart installs a full victoria-metrics-k8s-stack (operator,
+# 23 CRDs, grafana, node-exporter DaemonSet on every node). Its uninstall hook
+# pulls rancher/kubectl:<cluster version>, which does not exist, so
+# `helm uninstall` hangs.
+victoria-metrics-k8s-stack:
+  enabled: false

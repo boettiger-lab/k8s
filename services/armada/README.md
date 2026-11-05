@@ -1,17 +1,8 @@
 # Armada Batch Scheduler
 
-> **STATUS: TORN DOWN 2026-07-11 (recipe kept for redeploy).** Armada was never
-> successfully running on this cluster — armada *core* (server/scheduler/executor/
-> lookout) was never deployed; only the dependencies were installed, and Pulsar
-> itself was broken (bookie/broker crashlooping, and a `helm uninstall` had hung
-> on a bitnami-image cleanup hook, leaving the release stuck `uninstalling`).
-> Likely broke when `thelio` joined the cluster and took over scheduling
-> unsuccessfully, then got cordoned. We removed it all: `helm uninstall`
-> pulsar/postgresql/redis, deleted dex, the VictoriaMetrics CRs/CRDs (their
-> operator's finalizers had to be stripped by hand), and the `armada`/`armada-jobs`
-> namespaces. **To redeploy cleanly later:** `cd armada/ && bash install.sh`
-> (pulsar-values.yaml already has monitoring + autoRecovery disabled). Root-cause
-> the Pulsar bookie/broker crashloop as part of that effort.
+> **STATUS: NOT DEPLOYED (torn down 2026-07-11; recipe kept for redeploy).**
+> Redeploy work is tracked in k8s#55. Pulsar now runs as a single standalone
+> pod — see [Pulsar](#pulsar-standalone-mode) below for why.
 
 [Armada](https://armadaproject.io/) is a CNCF sandbox project for high-throughput batch job scheduling across Kubernetes clusters. It provides fair-share queuing, gang scheduling, and a web UI (Lookout) for job monitoring.
 
@@ -27,7 +18,7 @@ armada namespace
 ├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
 ├── armada-redis             — Queue caching
-└── armada-pulsar            — Message broker / event streaming (Apache chart)
+└── armada-pulsar-standalone — Message broker / event streaming (Apache chart, standalone mode)
 
 armada-jobs namespace        — where batch jobs run as pods
 ```
@@ -37,7 +28,7 @@ armada-jobs namespace        — where batch jobs run as pods
 All already present on this cluster:
 - cert-manager (`letsencrypt-production` ClusterIssuer)
 - Traefik ingress controller
-- `local-path` storage class
+- `openebs-zfs` storage class (Pulsar, Postgres, Redis volumes on cirrus `tank`)
 
 ## Install
 
@@ -246,14 +237,27 @@ the `"everyone"` group. Queue/job operations require explicit grants in
 `auth.permissionGroupMapping` — NOT the `permissions` array format. This must
 be set on both `armada-server` and `armada-scheduler` CRs.
 
-### Duplicate Pulsar release
+### Pulsar: standalone mode
 
-A failed first install attempt left a second Pulsar release (`pulsar`). The
-active release is `armada-pulsar`. The duplicate can be cleaned up:
-```bash
-helm delete pulsar -n armada
-kubectl delete pvc -n armada -l app.kubernetes.io/instance=pulsar
-```
+Pulsar is installed from `apache/pulsar` chart **4.8.0** in standalone mode:
+one Deployment running ZooKeeper, BookKeeper and the broker in one process.
+The three-StatefulSet layout is unnecessary for Armada on one node. Three
+problems with the chart, all handled in `pulsar-values.yaml`:
+
+- **Unwanted monitoring stack.** Unless `victoria-metrics-k8s-stack.enabled: false`
+  is set, the chart installs a VictoriaMetrics operator, 23 CRDs, Grafana and a
+  node-exporter DaemonSet on every node. (The old `monitoring.*` and
+  `autoRecovery.enabled` keys are ignored; autorecovery is `components.autorecovery`.)
+- **`helm uninstall` hangs.** That stack's cleanup hook pulls
+  `rancher/kubectl:<cluster k8s version>`, a tag that does not exist. If the
+  stack is ever installed, tear down in this order: delete the `operator.victoriametrics.com`
+  CRs while the operator still runs, then `helm uninstall --no-hooks`, then the CRDs.
+  Deleting the operator first leaves CRs and RBAC stuck on
+  `apps.victoriametrics.com/finalizer`.
+- **Standalone volume permissions.** The chart sets `fsGroup: 0` for zookeeper
+  and bookkeeper but not for standalone, so Pulsar gets `AccessDeniedException:
+  /pulsar/data/standalone` on an `openebs-zfs` volume. `local-path` hides this
+  because its directories are world-writable.
 
 ## Traefik + gRPC Notes
 

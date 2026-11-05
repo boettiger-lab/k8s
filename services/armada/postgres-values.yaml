@@ -9,7 +9,7 @@ auth:
 
 primary:
   persistence:
-    storageClass: local-path
+    storageClass: openebs-zfs
     size: 10Gi
   # Default bitnami "nano" preset (192Mi limit) OOM-killed postgres (16 restarts).
   resources:
