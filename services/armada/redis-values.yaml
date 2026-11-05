@@ -5,7 +5,7 @@ auth:
 
 master:
   persistence:
-    storageClass: local-path
+    storageClass: openebs-zfs
     size: 5Gi
   # Default bitnami "nano" preset (192Mi limit) OOM-killed redis in a tight loop
   # (8,547 restarts). Redis holds Armada job events — give it real headroom.

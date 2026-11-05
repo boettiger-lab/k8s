@@ -71,18 +71,14 @@ helm upgrade -i armada-redis bitnami/redis \
   --wait --timeout 5m
 
 # ---------------------------------------------------------------------------
-# 5. Apache Pulsar (minimal single-node config)
-# NOTE: The chart installs a victoria-metrics monitoring stack alongside Pulsar.
+# 5. Apache Pulsar (single-pod standalone mode, see pulsar-values.yaml)
 # ---------------------------------------------------------------------------
-echo "==> Installing Pulsar (this takes several minutes)..."
+echo "==> Installing Pulsar..."
 helm upgrade -i armada-pulsar apache/pulsar \
+  --version 4.8.0 \
   --namespace "$NAMESPACE" \
   --values pulsar-values.yaml \
-  --timeout 15m || true  # helm may time out but pods continue starting
-
-echo "==> Waiting for Pulsar broker to be ready..."
-kubectl wait --for=condition=ready pod \
-  -l component=broker -n "$NAMESPACE" --timeout=10m
+  --wait --timeout 6m
 
 # ---------------------------------------------------------------------------
 # 6. Kubernetes PriorityClasses required by Armada

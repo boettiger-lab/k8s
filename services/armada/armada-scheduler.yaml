@@ -12,7 +12,7 @@ spec:
 
   applicationConfig:
     pulsar:
-      URL: "pulsar://armada-pulsar-broker.armada.svc.cluster.local:6650"
+      URL: "pulsar://armada-pulsar-standalone.armada.svc.cluster.local:6650"
 
     postgres:
       connection:
