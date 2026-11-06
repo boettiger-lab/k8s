@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
+    # main only: the merge job tags :latest, and the hub pulls :latest with
+    # pullPolicy Always, so a branch push would ship unreviewed images.
+    branches: [main]
     # Trigger on the files the CPU Dockerfile actually consumes. The previous
     # list referenced install.r / spatial-env.yml / jupyter-ai.yml (which don't
     # exist) and omitted the install-*.sh scripts the Dockerfile COPYs and runs,
