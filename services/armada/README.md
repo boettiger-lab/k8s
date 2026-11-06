@@ -71,8 +71,11 @@ contexts:
       cmd: armada-dex-token
 ```
 
-The first command prints a Dex link: open it and approve with GitHub. After that,
-commands just work. The helper keeps the 1h ID token and the refresh token in
+Log in once by running `armada-dex-token > /dev/null` on its own: it prints a Dex link;
+open it and approve with GitHub. Do this before the first `armadactl` command:
+armadactl gives every call a fixed 10 s deadline that includes the login, so a
+login started from inside `armadactl` fails that command with `DeadlineExceeded`.
+The login still succeeds and is saved, and re-running the command works. The helper keeps the 1h ID token and the refresh token in
 `~/.config/armada/dex-token.json` (directory 0700, file 0600) and renews silently.
 You log in again only after 7 days unused or 30 days total (`platform/dex/values.yaml`).
 `armada-dex-token --logout` deletes the cache.
