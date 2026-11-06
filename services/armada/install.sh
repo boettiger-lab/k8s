@@ -93,7 +93,16 @@ helm upgrade -i armada-pulsar apache/pulsar \
 # ---------------------------------------------------------------------------
 # 6. Kubernetes PriorityClasses required by Armada
 # ---------------------------------------------------------------------------
+# preemptionPolicy: Never: Armada jobs wait for free capacity and never evict
+# anything (notebooks run at priority 0, models at llm-serving 100000).
+# preemptionPolicy is immutable, so recreate any class created without it.
 echo "==> Creating Armada PriorityClasses..."
+for pc in armada-default armada-preemptible armada-resilient; do
+  policy=$(kubectl get priorityclass "$pc" -o jsonpath='{.preemptionPolicy}' 2>/dev/null || true)
+  if [ -n "$policy" ] && [ "$policy" != "Never" ]; then
+    kubectl delete priorityclass "$pc"
+  fi
+done
 kubectl apply -f - <<'YAML'
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
@@ -101,6 +110,7 @@ metadata:
   name: armada-default
 value: 1000
 globalDefault: false
+preemptionPolicy: Never
 description: "Default priority class for Armada jobs"
 ---
 apiVersion: scheduling.k8s.io/v1
@@ -109,6 +119,7 @@ metadata:
   name: armada-preemptible
 value: 900
 globalDefault: false
+preemptionPolicy: Never
 description: "Preemptible priority class for Armada jobs"
 ---
 apiVersion: scheduling.k8s.io/v1
@@ -117,6 +128,7 @@ metadata:
   name: armada-resilient
 value: 1100
 globalDefault: false
+preemptionPolicy: Never
 description: "Resilient (high priority) class for Armada jobs"
 YAML
 

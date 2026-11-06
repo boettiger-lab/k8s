@@ -211,15 +211,19 @@ If you see the operator reconcile timing out:
 kubectl delete job wait-for-pulsar -n armada
 ```
 
-### PriorityClasses required
+### PriorityClasses: required, and never preempting
 
 Armada's default config requires three Kubernetes PriorityClasses:
-`armada-default`, `armada-preemptible`, and `armada-resilient`. These are created
-by `install.sh` but must exist before job submission. If jobs fail with
-`forbidden: no PriorityClass with name armada-default was found`:
-```bash
-kubectl apply -f priority-classes.yaml  # created inline in install.sh
-```
+`armada-default`, `armada-preemptible`, and `armada-resilient`, created by
+`install.sh`. All three use `preemptionPolicy: Never`: Armada jobs wait for free
+capacity and never evict non-Armada pods. Notebooks run at priority 0 and would
+otherwise be preemptible by Armada's 900–1100. Armada can still preempt its own
+jobs (fair share between queues). `preemptionPolicy` is immutable, so `install.sh`
+recreates any class that lacks it.
+
+Placement follows normal taint rules. The executor reports every node to the
+scheduler, and a job lands on a tainted node (the GB10s, `dedicated=gb10`) only if
+its pod spec tolerates the taint.
 
 ### Watch events: `eventsApiRedis` key (not `redis`)
 
