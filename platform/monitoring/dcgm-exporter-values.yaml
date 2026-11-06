@@ -33,9 +33,9 @@ podAnnotations:
 # Every GPU node needs an entry here, and this is ONE list -- a second
 # `tolerations:` key does not add to it, YAML takes the last and drops the rest.
 #
-# cirrus is the control plane. thelio is jupyter-only
-# (hub.jupyter.org/dedicated=user:NoSchedule) and hosts GPU notebook pods on its
-# RTX 2080. nimbus is a worker tainted `dedicated=gb10:NoSchedule` (see
+# cirrus is the control plane. thelio is untainted and hosts GPU notebook pods
+# on its RTX 2080; its hub.jupyter.org/dedicated=user toleration is kept for if it
+# is re-tainted jupyter-only. nimbus is a worker tainted `dedicated=gb10:NoSchedule` (see
 # ../cluster/nodes/nimbus/join/); GPU telemetry is one of the few things we *do* want
 # there. Miss any one of them and that node's GPU utilisation never reaches
 # Prometheus -- the dashboard silently covers part of the fleet and looks fine.
