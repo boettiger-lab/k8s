@@ -60,11 +60,12 @@ spec:
         providerUrl: https://dex.carlboettiger.info
         groupsClaim: groups
         clientId: armadactl
+      # Admin rights (any queue) are owners-only. Members act only on queues whose
+      # `permissions` name them: add-user.sh gives each member their own queue.
       permissionGroupMapping:
-        create_queue: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        delete_queue: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        cancel_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        reprioritize_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        watch_all_events: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        submit_any_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
-        execute_jobs: ["boettiger-lab:owners", "boettiger-lab:current-members"]
+        create_queue: ["boettiger-lab:owners"]
+        delete_queue: ["boettiger-lab:owners"]
+        cancel_any_jobs: ["boettiger-lab:owners"]
+        reprioritize_any_jobs: ["boettiger-lab:owners"]
+        watch_all_events: ["boettiger-lab:owners"]
+        submit_any_jobs: ["boettiger-lab:owners"]
