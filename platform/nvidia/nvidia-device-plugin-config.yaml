@@ -59,9 +59,10 @@ gfd:
 # the last and silently drops the first.
 #
 # nimbus is a worker tainted `dedicated=gb10:NoSchedule` (see
-# ../../cluster/nodes/nimbus/join/). thelio carries `hub.jupyter.org/dedicated=user:NoSchedule`
-# so it hosts jupyter user pods and nothing else. Without a matching toleration
-# the plugin never runs on that node, it advertises zero nvidia.com/gpu, and
+# ../../cluster/nodes/nimbus/join/). thelio is untainted now; its
+# `hub.jupyter.org/dedicated=user` toleration stays so re-tainting it (as it was
+# while jupyter-only) cannot drop its GPU. Without a matching toleration
+# the plugin never runs on a tainted node, it advertises zero nvidia.com/gpu, and
 # every GPU pod pinned to it sits Pending forever with no obvious cause -- on
 # thelio that means GPU notebook profiles silently cannot use its RTX 2080.
 #

@@ -4,9 +4,9 @@
 #     -n kube-system --version 0.31.10 -f juicefs/csi-driver-values.yaml
 #
 # WHY THIS FILE EXISTS: the CSI *node* DaemonSet must run on every node that
-# might mount a JuiceFS volume. thelio carries the taint
+# might mount a JuiceFS volume. thelio carried the taint
 #   hub.jupyter.org/dedicated=user:NoSchedule
-# so that it hosts jupyter user pods and nothing else. The chart's default node
+# while it was jupyter-only (it is untainted now; the toleration stays). The chart's default node
 # tolerations are only [CriticalAddonsOnly], which does not match that taint --
 # so juicefs-csi-node dropped to desired=1 (cirrus) the moment the taint was
 # applied, and a jupyter pod scheduled to thelio would have had no CSI node

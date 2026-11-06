@@ -18,7 +18,7 @@ configuration and per-node rationale are under [`cluster/nodes/`](cluster/nodes/
 |------|---------|-------|
 | **Control plane, storage, ingress** | cirrus (amd64, 2× Quadro RTX 8000) | Holds the ZFS pool `tank`, Traefik, MinIO and the JuiceFS backends. **Never cordon it.** |
 | **GB10 GPU workers** | nimbus, nimbus2, … (arm64, unified memory) | Tainted `dedicated=gb10:NoSchedule` fleet-wide; LLM inference; a GB10 serving no model takes up to two GB10 notebooks, which a starting model evicts. |
-| **Jupyter-only GPU worker** | thelio (amd64, RTX 2080) | Tainted `hub.jupyter.org/dedicated=user:NoSchedule`; one exclusive GPU, not time-sliced. |
+| **General GPU worker** | thelio (amd64, RTX 2080) | Untainted: takes jupyter user pods, Armada jobs and other workloads; one exclusive GPU, not time-sliced. |
 
 Nodes differ in ways that matter when scheduling: the GB10s are **arm64**, so an
 image must be multi-arch to run there, and their taint must be tolerated explicitly;
