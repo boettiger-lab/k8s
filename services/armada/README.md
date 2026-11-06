@@ -55,27 +55,33 @@ Install `armadactl`:
 go install github.com/armadaproject/armada/cmd/armadactl@latest
 ```
 
-Configure `~/.armadactl.yaml` (OIDC via GitHub — boettiger-lab org membership required).
-Dex is shared infrastructure in [`../../platform/dex/`](../../platform/dex/), where
-`armadactl` is registered as a public client:
+Install the login helper [`armada-dex-token`](armada-dex-token) (Python 3, standard
+library only) somewhere on your `PATH`, then configure `~/.armadactl.yaml`. Login is
+OIDC via Dex: GitHub, membership in `boettiger-lab:owners` or
+`boettiger-lab:current-members`.
+```bash
+install -m 0755 armada-dex-token ~/.local/bin/
+```
 ```yaml
 currentContext: cirrus
 contexts:
   cirrus:
     armadaUrl: armada-api.carlboettiger.info:443
-    openIdDeviceAuth:
-      providerUrl: https://dex.carlboettiger.info
-      clientId: armadactl
-      scopes: [openid, profile, email, groups, offline_access]
-    cacheRefreshToken: true
+    execAuth:
+      cmd: armada-dex-token
 ```
 
-On first use, armadactl will prompt you to authenticate via GitHub in a browser.
-Only the refresh token is cached, in the OS keyring (Secret Service / GNOME Keyring;
-the release binaries support it, no CGO build needed). **The keyring must be
-unlocked**: a locked one makes the save fail silently, and every command then
-asks for a new device login. Dex refresh tokens expire after 7 days unused or 30
-days total (`platform/dex/values.yaml`).
+The first command prints a Dex link: open it and approve with GitHub. After that,
+commands just work. The helper keeps the 1h ID token and the refresh token in
+`~/.config/armada/dex-token.json` (directory 0700, file 0600) and renews silently.
+You log in again only after 7 days unused or 30 days total (`platform/dex/values.yaml`).
+`armada-dex-token --logout` deletes the cache.
+
+Why not armadactl's own `openIdDeviceAuth` + `cacheRefreshToken`? That caches in the
+OS keyring (Secret Service), which is locked or absent on headless machines (SSH
+sessions, JupyterHub containers). There the save fails silently and *every*
+command asks for a new device login. It is fine on a desktop with an unlocked
+keyring.
 
 ## Cirrus Cluster Notes
 

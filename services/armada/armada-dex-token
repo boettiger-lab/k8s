@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Print a Dex ID token for armadactl's `execAuth`, caching it on disk.
+
+For headless machines (SSH sessions, JupyterHub containers) where armadactl's
+built-in cache cannot work: it stores the refresh token in the OS keyring, and
+there is no unlocked keyring there.
+
+Cache: ~/.config/armada/dex-token.json (directory 0700, file 0600).
+  - The ID token (1h) is reused until a minute before it expires.
+  - Then it is renewed with the refresh token; Dex rotates the refresh token on
+    every use and re-checks GitHub org/team membership.
+  - Only when the refresh token is gone (7 days idle / 30 days total, set in
+    platform/dex/values.yaml) is a device login needed; its link goes to stderr.
+
+Standard library only. Prints the token on stdout, everything else on stderr.
+`armada-dex-token --logout` deletes the cache.
+"""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import base64
+
+ISSUER = os.environ.get("ARMADA_DEX_ISSUER", "https://dex.carlboettiger.info")
+CLIENT_ID = os.environ.get("ARMADA_DEX_CLIENT_ID", "armadactl")
+SCOPES = "openid profile email groups offline_access"
+CACHE = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "armada", "dex-token.json")
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def post(path, data):
+    req = urllib.request.Request(
+        ISSUER + path, data=urllib.parse.urlencode(data).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return json.load(e)
+        except ValueError:
+            raise SystemExit(f"armada-dex-token: {path} returned HTTP {e.code}")
+
+
+def jwt_exp(token):
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))["exp"]
+    except (IndexError, KeyError, ValueError):
+        return 0
+
+
+def load():
+    try:
+        with open(CACHE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save(tok):
+    os.makedirs(os.path.dirname(CACHE), mode=0o700, exist_ok=True)
+    os.chmod(os.path.dirname(CACHE), 0o700)
+    tmp = CACHE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"id_token": tok["id_token"],
+                   "refresh_token": tok.get("refresh_token", "")}, f)
+    os.replace(tmp, CACHE)
+
+
+def refresh(rt):
+    tok = post("/token", {"grant_type": "refresh_token",
+                          "refresh_token": rt, "client_id": CLIENT_ID})
+    return tok if "id_token" in tok else None
+
+
+def device_login():
+    code = post("/device/code", {"client_id": CLIENT_ID, "scope": SCOPES})
+    if "device_code" not in code:
+        raise SystemExit(f"armada-dex-token: device request failed: {code}")
+    log("Armada login: open this link and approve with GitHub:\n\n    "
+        + code["verification_uri_complete"] + "\n")
+    deadline = time.time() + code.get("expires_in", 300)
+    interval = code.get("interval", 5)
+    while time.time() < deadline:
+        time.sleep(interval)
+        tok = post("/token", {
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "device_code": code["device_code"], "client_id": CLIENT_ID})
+        if "id_token" in tok:
+            return tok
+        err = tok.get("error")
+        if err == "slow_down":
+            interval += 5
+        elif err != "authorization_pending":
+            raise SystemExit(f"armada-dex-token: login failed: {err}")
+    raise SystemExit("armada-dex-token: login link expired; run the command again")
+
+
+def main():
+    if sys.argv[1:] == ["--logout"]:
+        try:
+            os.remove(CACHE)
+        except FileNotFoundError:
+            pass
+        log("armada-dex-token: cache removed")
+        return
+    cached = load()
+    tok = None
+    if jwt_exp(cached.get("id_token", "")) > time.time() + 60:
+        tok = cached
+    elif cached.get("refresh_token"):
+        tok = refresh(cached["refresh_token"])
+        if tok:
+            tok.setdefault("refresh_token", cached["refresh_token"])
+            save(tok)
+    if not tok:
+        tok = device_login()
+        save(tok)
+    print(tok["id_token"])
+
+
+if __name__ == "__main__":
+    main()
