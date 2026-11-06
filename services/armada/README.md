@@ -55,7 +55,15 @@ Install `armadactl`:
 go install github.com/armadaproject/armada/cmd/armadactl@latest
 ```
 
-Install the login helper [`armada-dex-token`](armada-dex-token) (Python 3, standard
+**In lab JupyterHub notebooks** (the CPU and GPU images) this is already set up:
+the images ship `armadactl`, `armada-dex-token` and `armada-config-merge`, and the
+hub runs `armada-config-merge` at every server start. That adds a `cirrus` context to
+your `~/.armadactl.yaml` and leaves NRP's `main` context and your `currentContext`
+alone. NRP stays the default; the lab cluster is `armadactl -c cirrus ...`. Log in
+with `armada-dex-token > /dev/null`; the login is kept in your home and lasts until
+7 days unused or 30 days total.
+
+**Elsewhere** (a laptop, cirrus over SSH): install the login helper [`armada-dex-token`](armada-dex-token) (Python 3, standard
 library only) somewhere on your `PATH`, then configure `~/.armadactl.yaml`. Login is
 OIDC via Dex: GitHub, membership in `boettiger-lab:owners` or
 `boettiger-lab:current-members`.

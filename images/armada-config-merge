@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Add the lab's `cirrus` Armada context to ~/.armadactl.yaml if it is missing.
+
+Run at notebook start (JupyterHub postStart hook). Home directories are
+volumes that hide the image's own ~/.armadactl.yaml, so existing users never
+see new contexts unless something merges them into *their* file.
+
+- No file: write one with the NRP context (`main`, as the image ships it) and
+  `cirrus`; currentContext stays `main`, as before.
+- File without a `cirrus` context: insert one under `contexts:` as plain text,
+  so everything else (other contexts, currentContext, comments) is untouched.
+  The original is copied to ~/.armadactl.yaml.pre-cirrus first.
+- File that already has `cirrus` (or that we can't parse safely): leave it.
+
+Standard library only. Always exits 0: it must never block a server start.
+"""
+import os
+import re
+import shutil
+import sys
+
+PATH = os.path.expanduser("~/.armadactl.yaml")
+BACKUP = PATH + ".pre-cirrus"
+
+CIRRUS = """\
+cirrus:
+  # Lab Armada on cirrus. Log in once with `armada-dex-token > /dev/null`.
+  armadaUrl: armada-api.carlboettiger.info:443
+  execAuth:
+    cmd: armada-dex-token
+"""
+
+FRESH = """\
+currentContext: main
+contexts:
+  main:
+    cacheRefreshToken: true
+    armadaUrl: armada.nrp-nautilus.io:50051
+    openIdDeviceAuth:
+      providerUrl: "https://authentik.nrp-nautilus.io/application/o/armada/"
+      clientId: "8AeUAhsM1rA8WRJoX586BhJk8t5Icfrm169ESz8Y"
+      scopes:
+        - "openid"
+        - "profile_prefixed"
+        - "offline_access"
+""" + "".join("  " + line + "\n" for line in CIRRUS.splitlines())
+
+
+def log(msg):
+    print(f"armada-config-merge: {msg}", file=sys.stderr)
+
+
+def write(text):
+    tmp = PATH + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, PATH)
+
+
+def merge(text):
+    lines = text.splitlines(keepends=True)
+    try:
+        i = next(n for n, l in enumerate(lines) if re.match(r"contexts:\s*(#.*)?$", l))
+    except StopIteration:
+        return None  # no block-style top-level `contexts:`
+    # Indentation of the existing children, so the new context matches them.
+    child = next((l for l in lines[i + 1:] if l.strip() and not l.lstrip().startswith("#")), "")
+    indent = len(child) - len(child.lstrip(" "))
+    if indent == 0:
+        return None  # empty or flow-style contexts; not safe to edit as text
+    names = {m.group(1) for l in lines[i + 1:]
+             if (m := re.match(r" {%d}([A-Za-z0-9_.-]+):" % indent, l))}
+    if "cirrus" in names:
+        return ""
+    block = "".join(" " * indent + l + "\n" for l in CIRRUS.splitlines())
+    # Append after the last line of the contexts block (the next top-level key
+    # or end of file), so existing contexts keep their order.
+    end = next((n for n in range(i + 1, len(lines))
+                if lines[n].strip() and not lines[n].startswith((" ", "#"))), len(lines))
+    if end and lines[end - 1] and not lines[end - 1].endswith("\n"):
+        lines[end - 1] += "\n"
+    return "".join(lines[:end]) + block + "".join(lines[end:])
+
+
+def main():
+    if not os.path.exists(PATH):
+        write(FRESH)
+        log("wrote ~/.armadactl.yaml with contexts main (NRP) and cirrus")
+        return
+    with open(PATH) as f:
+        text = f.read()
+    new = merge(text)
+    if new is None:
+        log("~/.armadactl.yaml not in the expected layout; left unchanged")
+    elif new == "":
+        pass  # cirrus already present
+    else:
+        if not os.path.exists(BACKUP):
+            shutil.copy2(PATH, BACKUP)
+        write(new)
+        log("added the cirrus context (backup: ~/.armadactl.yaml.pre-cirrus)")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:  # never fail a server start
+        log(f"skipped: {e}")
+    sys.exit(0)

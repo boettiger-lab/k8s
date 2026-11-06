@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
+    # main only: the merge job tags :latest, and the hub pulls :latest with
+    # pullPolicy Always, so a branch push would ship unreviewed images.
+    branches: [main]
     # Trigger on the files the CPU Dockerfile actually consumes. The previous
     # list referenced install.r / spatial-env.yml / jupyter-ai.yml (which don't
     # exist) and omitted the install-*.sh scripts the Dockerfile COPYs and runs,
@@ -16,6 +19,9 @@ on:
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
       - 'images/install-themes.sh'
+      - 'images/install-armada.sh'
+      - 'images/armada-dex-token'
+      - 'images/armada-config-merge'
       - '.github/workflows/docker-image.yml'
 
 # Build each architecture on its own native runner (arm64 on ubuntu-24.04-arm,

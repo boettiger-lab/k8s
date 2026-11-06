@@ -88,6 +88,18 @@ rm -rf /tmp/armadactl.tar.gz /tmp/armadactl-extract
 echo "    armadactl ${ARMADA_VERSION} installed to /usr/local/bin/armadactl"
 
 # --------------------------------------------------------------------------
+# Lab Armada on cirrus: login helper + config merger (shipped next to this
+# script in the build context). armada-dex-token is armadactl's execAuth for
+# the cirrus context (Dex device flow, token cached in ~/.config/armada, 0600).
+# armada-config-merge adds that context to ~/.armadactl.yaml; JupyterHub runs
+# it at every server start (postStart), because homes hide this image's file.
+# --------------------------------------------------------------------------
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+install -m 0755 "${SRC}/armada-dex-token" /usr/local/bin/armada-dex-token
+install -m 0755 "${SRC}/armada-config-merge" /usr/local/bin/armada-config-merge
+echo "    armada-dex-token, armada-config-merge installed to /usr/local/bin"
+
+# --------------------------------------------------------------------------
 # Ship a default NRP config
 #
 # This uses openIdDeviceAuth, NOT the openIdAuth (PKCE) flow that NRP's own
@@ -123,7 +135,12 @@ install -o "${NB_USER}" -g "${NB_USER}" -m 0600 \
     /tmp/armadactl.yaml "${HOME}/.armadactl.yaml"
 rm /tmp/armadactl.yaml
 
-echo "    config installed to ${HOME}/.armadactl.yaml"
+# Add the cirrus context the same way existing homes get it.
+python3 /usr/local/bin/armada-config-merge
+rm -f "${HOME}/.armadactl.yaml.pre-cirrus"
+chown "${NB_USER}:${NB_USER}" "${HOME}/.armadactl.yaml"
+
+echo "    config installed to ${HOME}/.armadactl.yaml (contexts: main = NRP, cirrus)"
 
 # --------------------------------------------------------------------------
 # Verify installs
@@ -146,8 +163,11 @@ echo ""
 echo "Queues correspond to cluster namespaces; submit to the ones you"
 echo "normally access. You do not create a queue."
 echo ""
-echo "  armadactl get queues"
+echo "  armadactl get queues                  # NRP (context main, the default)"
 echo "  armadactl submit jobs.yaml"
+echo ""
+echo "  Lab cluster: log in once with  armada-dex-token > /dev/null"
+echo "  then use  armadactl -c cirrus ..."
 echo ""
 echo "Monitor at https://armada-lookout.nrp-nautilus.io"
 echo ""

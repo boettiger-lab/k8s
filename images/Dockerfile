@@ -23,8 +23,8 @@ RUN install -d -o "${NB_USER}" -g "${NB_USER}" -m 0700 "${HOME}/.kube" && \
 # armadactl, for the Armada batch queue on NRP. Also installs the D-Bus +
 # Secret Service stack it needs to cache its OIDC token; without that it
 # re-authenticates on every invocation, and NRP's device codes expire in 60s.
-COPY install-armada.sh /tmp/install-armada.sh
-RUN bash /tmp/install-armada.sh && rm /tmp/install-armada.sh
+COPY install-armada.sh armada-dex-token armada-config-merge /tmp/armada/
+RUN bash /tmp/armada/install-armada.sh && rm -rf /tmp/armada
 
 COPY install-claude.sh /tmp/install-claude.sh
 RUN bash /tmp/install-claude.sh && rm /tmp/install-claude.sh
