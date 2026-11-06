@@ -61,6 +61,13 @@ config:
     public: true
     redirectURIs:
     - /device/callback
+  # armadactl (services/armada/): public, device-grant login. armada-server
+  # checks `aud` == armadactl (auth.openIdAuth.clientId).
+  - id: armadactl
+    name: Armada CLI
+    public: true
+    redirectURIs:
+    - /device/callback
 
 envVars:
 - name: GITHUB_CLIENT_SECRET

@@ -42,7 +42,8 @@ ID, so a service that checks `aud` won't accept a token minted for another one.
   env the same way as the GitHub secret (`$VAR` in config, `envVars` from a
   Secret) and keep it out of this file.
 
-Clients today: `openshell-cli` (see `../../services/openshell/`).
+Clients today: `openshell-cli` (see `../../services/openshell/`) and `armadactl`
+(see `../../services/armada/`).
 
 ## Storage
 

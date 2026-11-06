@@ -55,8 +55,8 @@ go install github.com/armadaproject/armada/cmd/armadactl@latest
 ```
 
 Configure `~/.armadactl.yaml` (OIDC via GitHub — boettiger-lab org membership required).
-Dex is shared infrastructure in [`../../platform/dex/`](../../platform/dex/); if Armada
-is revived, add an `armadactl` public client there first (it is not registered today):
+Dex is shared infrastructure in [`../../platform/dex/`](../../platform/dex/), where
+`armadactl` is registered as a public client:
 ```yaml
 currentContext: cirrus
 contexts:
