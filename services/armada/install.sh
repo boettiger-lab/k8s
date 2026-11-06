@@ -151,6 +151,7 @@ envsubst "$SUBST" < armada-server.yaml            | kubectl apply -f -
 envsubst "$SUBST" < armada-scheduler.yaml         | kubectl apply -f -
 envsubst "$SUBST" < armada-scheduleringester.yaml | kubectl apply -f -
 envsubst "$SUBST" < armada-lookout.yaml           | kubectl apply -f -
+envsubst "$SUBST" < armada-lookoutingester.yaml   | kubectl apply -f -
 kubectl apply -f armada-eventingester.yaml
 # External gRPC route. The operator's Ingress puts serverScheme on the Ingress,
 # where Traefik ignores it, so it speaks HTTP/1.1 to the gRPC port (HTTP 500).
@@ -176,7 +177,7 @@ kubectl patch secret armada-lookout -n "$NAMESPACE" \
 
 echo ""
 echo "==> Waiting for Armada pods to be ready..."
-for dep in armada-server armada-scheduler armada-scheduleringester armada-eventingester armada-lookout armada-executor; do
+for dep in armada-server armada-scheduler armada-scheduleringester armada-eventingester armada-lookout armada-lookoutingester armada-executor; do
   kubectl rollout status deployment/$dep -n "$NAMESPACE" --timeout=3m 2>/dev/null || true
 done
 

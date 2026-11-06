@@ -16,6 +16,7 @@ armada namespace
 ├── armada-eventingester     — Ingests Pulsar events → Redis streams (required for armadactl watch)
 ├── armada-executor          — Watches this k3s cluster; submits jobs as pods (own Helm chart)
 ├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
+├── armada-lookoutingester   — Ingests Pulsar events → lookout DB (what the UI lists)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
 ├── armada-redis             — Queue caching
 └── armada-pulsar-standalone — Message broker / event streaming (Apache chart, standalone mode)
@@ -70,8 +71,11 @@ contexts:
 ```
 
 On first use, armadactl will prompt you to authenticate via GitHub in a browser.
-Token is cached in the OS keyring for subsequent calls (requires CGO-enabled binary;
-build with `CGO_ENABLED=1 go install github.com/armadaproject/armada/cmd/armadactl@latest`).
+Only the refresh token is cached, in the OS keyring (Secret Service / GNOME Keyring;
+the release binaries support it, no CGO build needed). **The keyring must be
+unlocked**: a locked one makes the save fail silently, and every command then
+asks for a new device login. Dex refresh tokens expire after 7 days unused or 30
+days total (`platform/dex/values.yaml`).
 
 ## Cirrus Cluster Notes
 

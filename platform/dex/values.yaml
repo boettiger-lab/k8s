@@ -28,6 +28,17 @@ config:
   oauth2:
     skipApprovalScreen: true
 
+  # CLIs (armadactl, openshell) keep only the refresh token, in the OS keyring,
+  # and mint a fresh ID token per command. Each refresh re-reads GitHub org/team
+  # membership, so removing someone from the org cuts them off at their next
+  # refresh. Rotation stays on (Dex default): every refresh retires the old token.
+  expiry:
+    idTokens: 1h
+    refreshTokens:
+      validIfNotUsedFor: 168h   # 7 days idle -> log in again
+      absoluteLifetime: 720h    # 30 days regardless
+      reuseInterval: 3s
+
   enablePasswordDB: false
 
   connectors:
