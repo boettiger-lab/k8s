@@ -36,6 +36,16 @@ fi
 PGPASS=$(kubectl get secret armada-postgres-secret -n "$NAMESPACE" \
   -o jsonpath='{.data.password}' | base64 -d)
 
+# Basic-auth password the scheduler uses to read queues from the server
+if ! kubectl get secret armada-scheduler-api-secret -n "$NAMESPACE" &>/dev/null; then
+  kubectl create secret generic armada-scheduler-api-secret \
+    --namespace "$NAMESPACE" \
+    --from-literal=password="$(openssl rand -base64 24)"
+  echo "  Generated scheduler API password and stored in secret armada-scheduler-api-secret"
+fi
+SCHEDPASS=$(kubectl get secret armada-scheduler-api-secret -n "$NAMESPACE" \
+  -o jsonpath='{.data.password}' | base64 -d)
+
 # ---------------------------------------------------------------------------
 # 3. PostgreSQL (Bitnami)
 # ---------------------------------------------------------------------------
@@ -83,7 +93,16 @@ helm upgrade -i armada-pulsar apache/pulsar \
 # ---------------------------------------------------------------------------
 # 6. Kubernetes PriorityClasses required by Armada
 # ---------------------------------------------------------------------------
+# preemptionPolicy: Never: Armada jobs wait for free capacity and never evict
+# anything (notebooks run at priority 0, models at llm-serving 100000).
+# preemptionPolicy is immutable, so recreate any class created without it.
 echo "==> Creating Armada PriorityClasses..."
+for pc in armada-default armada-preemptible armada-resilient; do
+  policy=$(kubectl get priorityclass "$pc" -o jsonpath='{.preemptionPolicy}' 2>/dev/null || true)
+  if [ -n "$policy" ] && [ "$policy" != "Never" ]; then
+    kubectl delete priorityclass "$pc"
+  fi
+done
 kubectl apply -f - <<'YAML'
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
@@ -91,6 +110,7 @@ metadata:
   name: armada-default
 value: 1000
 globalDefault: false
+preemptionPolicy: Never
 description: "Default priority class for Armada jobs"
 ---
 apiVersion: scheduling.k8s.io/v1
@@ -99,6 +119,7 @@ metadata:
   name: armada-preemptible
 value: 900
 globalDefault: false
+preemptionPolicy: Never
 description: "Preemptible priority class for Armada jobs"
 ---
 apiVersion: scheduling.k8s.io/v1
@@ -107,6 +128,7 @@ metadata:
   name: armada-resilient
 value: 1100
 globalDefault: false
+preemptionPolicy: Never
 description: "Resilient (high priority) class for Armada jobs"
 YAML
 
@@ -119,24 +141,24 @@ helm upgrade -i armada-operator gresearch/armada-operator \
   --wait --timeout 5m
 
 # ---------------------------------------------------------------------------
-# 8. Armada components (Server, Scheduler, SchedulerIngester, Lookout, Executor)
+# 8. Armada components (Server, Scheduler, ingesters, Lookout via the operator;
+#    Executor via its own chart; see executor-values.yaml)
 # ---------------------------------------------------------------------------
 echo "==> Applying Armada component CRs..."
-ARMADA_POSTGRES_PASSWORD="$PGPASS" envsubst < armada-server.yaml          | kubectl apply -f -
-ARMADA_POSTGRES_PASSWORD="$PGPASS" envsubst < armada-scheduler.yaml       | kubectl apply -f -
-ARMADA_POSTGRES_PASSWORD="$PGPASS" envsubst < armada-scheduleringester.yaml | kubectl apply -f -
-ARMADA_POSTGRES_PASSWORD="$PGPASS" envsubst < armada-lookout.yaml         | kubectl apply -f -
-kubectl apply -f armada-executor.yaml
+export ARMADA_POSTGRES_PASSWORD="$PGPASS" ARMADA_SCHEDULER_API_PASSWORD="$SCHEDPASS"
+SUBST='$ARMADA_POSTGRES_PASSWORD $ARMADA_SCHEDULER_API_PASSWORD'
+envsubst "$SUBST" < armada-server.yaml            | kubectl apply -f -
+envsubst "$SUBST" < armada-scheduler.yaml         | kubectl apply -f -
+envsubst "$SUBST" < armada-scheduleringester.yaml | kubectl apply -f -
+envsubst "$SUBST" < armada-lookout.yaml           | kubectl apply -f -
+kubectl apply -f armada-eventingester.yaml
 
-# Executor Deployment created manually due to armada-operator v0.7.0 bug
-# (operator generates invalid port spec for the executor Deployment).
-# Wait for operator to create ServiceAccount and RBAC first.
-echo "==> Waiting for executor RBAC to be created..."
-for i in $(seq 1 12); do
-  kubectl get serviceaccount armada-executor -n "$NAMESPACE" &>/dev/null && break
-  sleep 5
-done
-kubectl apply -f armada-executor-deployment.yaml
+echo "==> Installing Armada Executor..."
+helm upgrade -i armada-executor gresearch/armada-executor \
+  --version 0.22.16 \
+  --namespace "$NAMESPACE" \
+  --values executor-values.yaml \
+  --wait --timeout 5m
 
 # ---------------------------------------------------------------------------
 # 9. Fix Lookout secret key (operator uses old 'lookoutapiPort' key;
@@ -151,7 +173,7 @@ kubectl patch secret armada-lookout -n "$NAMESPACE" \
 
 echo ""
 echo "==> Waiting for Armada pods to be ready..."
-for dep in armada-server armada-scheduler armada-scheduleringester armada-lookout armada-executor; do
+for dep in armada-server armada-scheduler armada-scheduleringester armada-eventingester armada-lookout armada-executor; do
   kubectl rollout status deployment/$dep -n "$NAMESPACE" --timeout=3m 2>/dev/null || true
 done
 

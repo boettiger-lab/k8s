@@ -49,6 +49,13 @@ spec:
 
     auth:
       anonymousAuth: false
+      # Service account for the scheduler's queue lookups (in-cluster only).
+      # Password from secret armada-scheduler-api-secret via envsubst in install.sh.
+      basicAuth:
+        users:
+          armada-scheduler:
+            password: ${ARMADA_SCHEDULER_API_PASSWORD}
+            groups: ["armada-system"]
       openIdAuth:
         providerUrl: https://dex.carlboettiger.info
         groupsClaim: groups

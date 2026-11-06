@@ -32,6 +32,10 @@ spec:
     armadaApi:
       armadaUrl: "armada-server.armada.svc.cluster.local:50051"
       forceNoTls: true
+      # The server only accepts OIDC (users) or basic auth (this service account).
+      basicAuth:
+        username: armada-scheduler
+        password: ${ARMADA_SCHEDULER_API_PASSWORD}
 
     auth:
       anonymousAuth: true

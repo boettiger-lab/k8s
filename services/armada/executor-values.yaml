@@ -1,0 +1,12 @@
+# gresearch/armada-executor chart (pinned in install.sh). Replaces the
+# armada-operator Executor CR: operator v0.7.0 renders an invalid Deployment
+# (ports[2].containerPort empty) and keeps reconciling over a hand-made one.
+applicationConfig:
+  application:
+    # Unique ID for this k8s cluster, used in Armada job submissions
+    clusterId: cirrus
+  executorApiConnection:
+    armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
+    forceNoTls: true
+# install.sh owns the PriorityClasses (kubectl apply); helm cannot adopt them.
+priorityClasses: []
