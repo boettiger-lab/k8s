@@ -34,6 +34,17 @@ cull:
   enabled: false
 singleuser:
   allowPrivilegeEscalation: true
+  # Add the lab's `cirrus` Armada context to the user's ~/.armadactl.yaml at
+  # every start (the home volume hides the image's own copy). Only our images
+  # ship armada-config-merge; in any other image this is a no-op. The command
+  # always exits 0: a failing postStart hook would kill the server.
+  lifecycleHooks:
+    postStart:
+      exec:
+        command:
+          - sh
+          - -c
+          - command -v armada-config-merge >/dev/null 2>&1 && armada-config-merge >/dev/null 2>&1; exit 0
   image:
     pullPolicy: Always
   storage:

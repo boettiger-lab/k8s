@@ -21,6 +21,10 @@ RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 COPY install-themes.sh /tmp/install-themes.sh
 RUN bash /tmp/install-themes.sh && rm /tmp/install-themes.sh
 
+# armadactl for both Armada queues (NRP + the lab's cirrus), as in the CPU image.
+COPY install-armada.sh armada-dex-token armada-config-merge /tmp/armada/
+RUN bash /tmp/armada/install-armada.sh && rm -rf /tmp/armada
+
 RUN /opt/venv/bin/pip install \
     huggingface_hub \
     nox \

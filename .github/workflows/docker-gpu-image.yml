@@ -13,6 +13,9 @@ on:
       - 'images/install-claude.sh'
       - 'images/install-jupyter-ai.sh'
       - 'images/install-themes.sh'
+      - 'images/install-armada.sh'
+      - 'images/armada-dex-token'
+      - 'images/armada-config-merge'
       - '.github/workflows/docker-gpu-image.yml'
 
 # Build each architecture on its own native runner (arm64 on ubuntu-24.04-arm,
