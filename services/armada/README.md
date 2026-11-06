@@ -16,6 +16,7 @@ armada namespace
 ├── armada-eventingester     — Ingests Pulsar events → Redis streams (required for armadactl watch)
 ├── armada-executor          — Watches this k3s cluster; submits jobs as pods (own Helm chart)
 ├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
+├── armada-lookoutingester   — Ingests Pulsar events → lookout DB (what the UI lists)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
 ├── armada-redis             — Queue caching
 └── armada-pulsar-standalone — Message broker / event streaming (Apache chart, standalone mode)
@@ -55,8 +56,8 @@ go install github.com/armadaproject/armada/cmd/armadactl@latest
 ```
 
 Configure `~/.armadactl.yaml` (OIDC via GitHub — boettiger-lab org membership required).
-Dex is shared infrastructure in [`../../platform/dex/`](../../platform/dex/); if Armada
-is revived, add an `armadactl` public client there first (it is not registered today):
+Dex is shared infrastructure in [`../../platform/dex/`](../../platform/dex/), where
+`armadactl` is registered as a public client:
 ```yaml
 currentContext: cirrus
 contexts:
@@ -70,8 +71,11 @@ contexts:
 ```
 
 On first use, armadactl will prompt you to authenticate via GitHub in a browser.
-Token is cached in the OS keyring for subsequent calls (requires CGO-enabled binary;
-build with `CGO_ENABLED=1 go install github.com/armadaproject/armada/cmd/armadactl@latest`).
+Only the refresh token is cached, in the OS keyring (Secret Service / GNOME Keyring;
+the release binaries support it, no CGO build needed). **The keyring must be
+unlocked**: a locked one makes the save fail silently, and every command then
+asks for a new device login. Dex refresh tokens expire after 7 days unused or 30
+days total (`platform/dex/values.yaml`).
 
 ## Cirrus Cluster Notes
 
@@ -272,11 +276,19 @@ problems with the chart, all handled in `pulsar-values.yaml`:
 
 ## Traefik + gRPC Notes
 
-The Armada gRPC API requires HTTP/2. Traefik needs the `h2c` backend scheme
-annotation — set in `armada-server.yaml`:
+The Armada gRPC API requires HTTP/2 to the backend. The operator's
+`armada-server-grpc` Ingress carries `service.serverScheme: h2c`, but Traefik
+reads that annotation only from a Service, so through that Ingress every call
+gets **HTTP 500** and never reaches the server. `armada-server-ingressroute.yaml`
+(applied by `install.sh`) routes the whole `armada-api.carlboettiger.info` host
+to port 50051 with `scheme: h2c` and a ServersTransport with no response
+timeout, so `armadactl watch` streams stay open. It shadows the operator's
+external REST path on that host; Lookout reaches the server in-cluster.
 
-```yaml
-traefik.ingress.kubernetes.io/service.serverScheme: h2c
+Check: a bare request should be a gRPC `Unauthenticated`, not a 500:
+```bash
+curl -s -D - -o /dev/null --http2 -X POST -H 'content-type: application/grpc' \
+  https://armada-api.carlboettiger.info/api.Submit/GetQueues | grep -i grpc-status   # 16
 ```
 
 ## Tear Down
