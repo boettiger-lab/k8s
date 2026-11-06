@@ -152,6 +152,9 @@ envsubst "$SUBST" < armada-scheduler.yaml         | kubectl apply -f -
 envsubst "$SUBST" < armada-scheduleringester.yaml | kubectl apply -f -
 envsubst "$SUBST" < armada-lookout.yaml           | kubectl apply -f -
 kubectl apply -f armada-eventingester.yaml
+# External gRPC route. The operator's Ingress puts serverScheme on the Ingress,
+# where Traefik ignores it, so it speaks HTTP/1.1 to the gRPC port (HTTP 500).
+kubectl apply -f armada-server-ingressroute.yaml
 
 echo "==> Installing Armada Executor..."
 helm upgrade -i armada-executor gresearch/armada-executor \

@@ -272,11 +272,19 @@ problems with the chart, all handled in `pulsar-values.yaml`:
 
 ## Traefik + gRPC Notes
 
-The Armada gRPC API requires HTTP/2. Traefik needs the `h2c` backend scheme
-annotation — set in `armada-server.yaml`:
+The Armada gRPC API requires HTTP/2 to the backend. The operator's
+`armada-server-grpc` Ingress carries `service.serverScheme: h2c`, but Traefik
+reads that annotation only from a Service, so through that Ingress every call
+gets **HTTP 500** and never reaches the server. `armada-server-ingressroute.yaml`
+(applied by `install.sh`) routes the whole `armada-api.carlboettiger.info` host
+to port 50051 with `scheme: h2c` and a ServersTransport with no response
+timeout, so `armadactl watch` streams stay open. It shadows the operator's
+external REST path on that host; Lookout reaches the server in-cluster.
 
-```yaml
-traefik.ingress.kubernetes.io/service.serverScheme: h2c
+Check: a bare request should be a gRPC `Unauthenticated`, not a 500:
+```bash
+curl -s -D - -o /dev/null --http2 -X POST -H 'content-type: application/grpc' \
+  https://armada-api.carlboettiger.info/api.Submit/GetQueues | grep -i grpc-status   # 16
 ```
 
 ## Tear Down
