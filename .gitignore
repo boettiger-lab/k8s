@@ -53,3 +53,7 @@ hugo_extended_*.tar.gz
 
 # Local-only secret material (import to Bitwarden, never commit)
 /secrets/
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -14,6 +14,11 @@ Cache: ~/.config/armada/dex-token.json (directory 0700, file 0600).
 
 Standard library only. Prints the token on stdout, everything else on stderr.
 `armada-dex-token --logout` deletes the cache.
+
+Log in by running `armada-dex-token` on its own (the token it prints can be
+ignored). armadactl gives each call a fixed 10 s deadline that includes this
+helper, so a device login started from inside armadactl times out the command
+(DeadlineExceeded) even though the login itself succeeds and is saved.
 """
 import json
 import os
@@ -90,6 +95,10 @@ def device_login():
         raise SystemExit(f"armada-dex-token: device request failed: {code}")
     log("Armada login: open this link and approve with GitHub:\n\n    "
         + code["verification_uri_complete"] + "\n")
+    if not sys.stdout.isatty():
+        log("(armadactl gives up after 10 s and may report DeadlineExceeded. Approve\n"
+            " anyway: the login is saved, and re-running the command then works.\n"
+            " To avoid this, log in first by running `armada-dex-token` on its own.)\n")
     deadline = time.time() + code.get("expires_in", 300)
     interval = code.get("interval", 5)
     while time.time() < deadline:
