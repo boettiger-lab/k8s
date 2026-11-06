@@ -14,7 +14,7 @@ armada namespace
 ├── armada-scheduler         — Batch job scheduler (owns scheduler DB schema)
 ├── armada-scheduleringester — Ingests Pulsar events → Scheduler DB
 ├── armada-eventingester     — Ingests Pulsar events → Redis streams (required for armadactl watch)
-├── armada-executor          — Watches this k3s cluster; submits jobs as pods
+├── armada-executor          — Watches this k3s cluster; submits jobs as pods (own Helm chart)
 ├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
 ├── armada-redis             — Queue caching
@@ -130,16 +130,23 @@ not publish semver-tagged images; SHA tags are available for pinning).
 
 ## Known Workarounds
 
-### Executor: operator v0.7.0 port bug
+### Executor: installed from its own chart, not the operator
 
-The armada-operator v0.7.0 generates an invalid Executor Deployment (missing
-`containerPort` on the profiling port). The Deployment is therefore managed
-manually via `armada-executor-deployment.yaml` instead of by the operator.
+armada-operator v0.7.0 renders an invalid executor Deployment
+(`ports[2].containerPort: Required value`) and keeps reconciling, so a
+hand-made Deployment with the same name gets replaced. The executor is
+therefore installed from the `gresearch/armada-executor` chart (pinned in
+`install.sh`, values in `executor-values.yaml`) and there is no `Executor` CR.
+The chart's `priorityClasses` are disabled because `install.sh` creates them.
 
-If the executor pod disappears, re-apply:
-```bash
-kubectl apply -f armada-executor-deployment.yaml
-```
+### Scheduler → server auth (basic auth service account)
+
+The server accepts OIDC (people, via Dex) and basic auth for one service
+account, `armada-scheduler`, which the scheduler uses to read queues. Without
+it the scheduler logs `Unauthenticated` and `no queues available` every cycle.
+The password lives in secret `armada-scheduler-api-secret` (generated once by
+`install.sh`) and is substituted into both CRs. Anonymous auth stays off: the
+server API is published through Traefik.
 
 ### Lookout: `apiPort` vs `lookoutapiPort` key rename
 
@@ -273,9 +280,8 @@ traefik.ingress.kubernetes.io/service.serverScheme: h2c
 ```bash
 kubectl delete -f armada-server.yaml -f armada-scheduler.yaml \
   -f armada-scheduleringester.yaml -f armada-eventingester.yaml \
-  -f armada-lookout.yaml -f armada-executor.yaml \
-  -f armada-executor-deployment.yaml
-helm uninstall armada-operator armada-pulsar armada-redis armada-postgresql -n armada
+  -f armada-lookout.yaml
+helm uninstall armada-executor armada-operator armada-pulsar armada-redis armada-postgresql -n armada
 kubectl delete namespace armada armada-jobs
 kubectl delete priorityclass armada-default armada-preemptible armada-resilient
 ```
