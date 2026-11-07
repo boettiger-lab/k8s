@@ -10,16 +10,12 @@ spec:
     repository: gresearch/armada-lookout
     tag: "latest"
 
-  ingress:
-    ingressClass: traefik
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-production
-      external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
-
-  hostNames:
-    - armada.carlboettiger.info
-
-  clusterIssuer: letsencrypt-production
+  # No ingress, hostNames or clusterIssuer: Lookout is private. It has no
+  # per-user view, so anyone who can open it sees every job's full pod spec,
+  # env vars included. Owners reach it with
+  #   kubectl -n armada port-forward svc/armada-lookout 8080:8080
+  # and open http://localhost:8080. Users follow their own jobs with
+  # `armadactl watch` / `armadactl get job-report`, which enforce queue permissions.
 
   applicationConfig:
     # Override API port to match what the operator's liveness probe expects (port 8080)

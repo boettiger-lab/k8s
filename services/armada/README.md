@@ -15,7 +15,7 @@ armada namespace
 ├── armada-scheduleringester — Ingests Pulsar events → Scheduler DB
 ├── armada-eventingester     — Ingests Pulsar events → Redis streams (required for armadactl watch)
 ├── armada-executor          — Watches this k3s cluster; submits jobs as pods (own Helm chart)
-├── armada-lookout           — Web UI dashboard (https://armada.carlboettiger.info)
+├── armada-lookout           — Web UI dashboard (private: owners port-forward, see below)
 ├── armada-lookoutingester   — Ingests Pulsar events → lookout DB (what the UI lists)
 ├── armada-postgresql        — Job state storage: databases scheduler, lookout (server uses lookout DB)
 ├── armada-redis             — Queue caching
@@ -44,7 +44,7 @@ The script installs dependencies in order, then applies all component CRs.
 
 | Service | URL |
 |---------|-----|
-| Lookout UI | https://armada.carlboettiger.info |
+| Lookout UI | private: `kubectl -n armada port-forward svc/armada-lookout 8080:8080`, then http://localhost:8080 (owners only) |
 | gRPC API | `armada-api.carlboettiger.info:443` |
 
 ## Submitting Jobs
@@ -142,7 +142,8 @@ Or check job status with:
 armadactl get job-report -q test --jobset my-first-jobs
 ```
 
-Or open the Lookout UI at https://armada.carlboettiger.info.
+Lookout is not public: it has no per-user view, so it would show every user's job
+specs, env vars included. Owners can port-forward to it (see Endpoints).
 
 ## Component Image Tags
 
