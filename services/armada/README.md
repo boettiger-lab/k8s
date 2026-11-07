@@ -99,7 +99,7 @@ keyring.
 Key constraints discovered through testing:
 
 - **Namespace:** `armada-jobs` (jobs must specify this explicitly)
-- **Queues:** one per user, named after their GitHub login, created by an owner with `./add-user.sh <github-login>`. Only that user (and lab owners) can submit to, cancel in or watch it. Each queue is capped at about 56 CPU, 90 GiB and 4 GPU slices (`armada-scheduler.yaml`); jobs over the cap wait in the queue. `test` is an owners-only smoke-test queue.
+- **Queues:** one per user, named after their GitHub login, created by an owner with `./add-user.sh <github-login>`. Only that user (and lab owners) can submit to, cancel in or watch it. Each queue may use at most half of the capacity Armada sees (untainted nodes, minus what models and notebooks hold; about 65 CPU, 38 GiB and 5 GPU slices on 2026-11-07; `armada-scheduler.yaml`). Jobs over the cap wait in the queue. `test` is an owners-only smoke-test queue.
 - **Minimum resources:** `cpu: 1, memory: 1Gi` — smaller requests (e.g. cpu: 100m) are not scheduled
 - **No opportunistic priority class** — only `armada-default`, `armada-preemptible`, `armada-resilient`
 - **No pool annotation needed** — the default pool works without explicit annotation

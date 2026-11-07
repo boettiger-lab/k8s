@@ -39,10 +39,12 @@ spec:
 
     # Per-queue cap. Every job runs as armada-default (the image's
     # priorityClassNameOverride), so this one class carries the limit. Fractions
-    # are of the whole pool the executor reports, which INCLUDES the tainted GB10s
-    # (2026-11-06: 224 CPU, 751 GiB, 49 GPU slices; untainted cirrus+thelio alone
-    # are 152 CPU, 312 GiB, 17 slices). So these give each queue about 56 CPU,
-    # 90 GiB and 4 GPU slices. Jobs over the cap stay queued, they are not rejected.
+    # are of the pool's capacity as the scheduler logs it ("Scheduling on pool
+    # default with capacity ..."): untainted nodes only, minus what non-Armada
+    # pods (models, notebooks) already hold. It moves with cluster load; on
+    # 2026-11-07 it was 130 CPU, 77 GiB, 10 GPU slices, so 0.5 gave each queue
+    # about 65 CPU, 38 GiB and 5 slices. Jobs over the cap stay queued with
+    # "resource limit exceeded"; they are not rejected.
     # One queue can get a different cap with resourceLimitsByPriorityClassName in
     # its Queue spec (armadactl update -f), which overrides these fractions.
     scheduling:
@@ -51,9 +53,9 @@ spec:
           priority: 1000
           preemptible: false
           maximumResourceFractionPerQueue:
-            cpu: 0.25
-            memory: 0.12
-            nvidia.com/gpu: 0.1
+            cpu: 0.5
+            memory: 0.5
+            nvidia.com/gpu: 0.5
 
     auth:
       anonymousAuth: true
