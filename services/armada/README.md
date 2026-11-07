@@ -99,7 +99,7 @@ keyring.
 Key constraints discovered through testing:
 
 - **Namespace:** `armada-jobs` (jobs must specify this explicitly)
-- **Queue:** `test` (already exists; create new queues with `armadactl create queue <name> --priority-factor 1`)
+- **Queues:** one per user, named after their GitHub login, created by an owner with `./add-user.sh <github-login>`. Only that user (and lab owners) can submit to, cancel in or watch it. Each queue is capped at about 56 CPU, 90 GiB and 4 GPU slices (`armada-scheduler.yaml`); jobs over the cap wait in the queue. `test` is an owners-only smoke-test queue.
 - **Minimum resources:** `cpu: 1, memory: 1Gi` — smaller requests (e.g. cpu: 100m) are not scheduled
 - **No opportunistic priority class** — only `armada-default`, `armada-preemptible`, `armada-resilient`
 - **No pool annotation needed** — the default pool works without explicit annotation
@@ -107,12 +107,12 @@ Key constraints discovered through testing:
 
 ## Submitting Jobs
 
-Create a queue (one-time):
+Get a queue (one-time; an owner runs this from this directory):
 ```bash
-armadactl create queue test --priority-factor 1
+./add-user.sh <github-login>      # queue name = login, lowercased
 ```
 
-Submit a job:
+Submit a job (replace `test` with your queue):
 ```bash
 cat > job.yaml <<EOF
 queue: test
@@ -268,6 +268,12 @@ Anonymous users (when `auth.anonymousAuth: true`) are automatically members of
 the `"everyone"` group. Queue/job operations require explicit grants in
 `auth.permissionGroupMapping` — NOT the `permissions` array format. This must
 be set on both `armada-server` and `armada-scheduler` CRs.
+
+On the server the `*_any_*`, `create_queue` and `delete_queue` grants go to
+`boettiger-lab:owners` only. Members get rights per queue through the queue's
+own `permissions` (verbs `submit`, `cancel`, `reprioritize`, `watch`), which name
+the user's Dex `sub`. `add-user.sh` computes the `sub` from the GitHub id, so a
+queue can be granted before the user's first login.
 
 ### Pulsar: standalone mode
 

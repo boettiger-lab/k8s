@@ -37,6 +37,24 @@ spec:
         username: armada-scheduler
         password: ${ARMADA_SCHEDULER_API_PASSWORD}
 
+    # Per-queue cap. Every job runs as armada-default (the image's
+    # priorityClassNameOverride), so this one class carries the limit. Fractions
+    # are of the whole pool the executor reports, which INCLUDES the tainted GB10s
+    # (2026-11-06: 224 CPU, 751 GiB, 49 GPU slices; untainted cirrus+thelio alone
+    # are 152 CPU, 312 GiB, 17 slices). So these give each queue about 56 CPU,
+    # 90 GiB and 4 GPU slices. Jobs over the cap stay queued, they are not rejected.
+    # One queue can get a different cap with resourceLimitsByPriorityClassName in
+    # its Queue spec (armadactl update -f), which overrides these fractions.
+    scheduling:
+      priorityClasses:
+        armada-default:
+          priority: 1000
+          preemptible: false
+          maximumResourceFractionPerQueue:
+            cpu: 0.25
+            memory: 0.12
+            nvidia.com/gpu: 0.1
+
     auth:
       anonymousAuth: true
       permissionGroupMapping:
