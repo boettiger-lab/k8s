@@ -7,7 +7,7 @@ weight: 3
 
 | Piece | Role |
 |---|---|
-| [Traefik](https://traefik.io/) (bundled with K3s) | ingress controller for every public hostname, pinned to the storage node so traffic to storage stays local |
+| [Traefik](https://traefik.io/) (bundled with K3s) | ingress controller for every public hostname, pinned to the storage node so traffic to storage stays local. It is the cluster's only public entry point: DNS points at that node alone, plain HTTP redirects to HTTPS, every response carries HSTS, and unknown hostnames are refused at the TLS handshake |
 | [cert-manager](https://cert-manager.io/) | Let's Encrypt certificates via DNS-01 on Cloudflare (ClusterIssuer `letsencrypt-production`) |
 | [external-dns](https://github.com/kubernetes-sigs/external-dns) | creates Cloudflare DNS records from Ingress hostnames |
 | Cloudflare | DNS for `*.carlboettiger.info`; most web services are proxied, the Kubernetes API is DNS-only |
