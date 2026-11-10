@@ -42,7 +42,8 @@ Every service under `services/` follows the same pattern.
    ```
 
    external-dns creates the DNS record, and cert-manager issues the
-   certificate.
+   certificate. The `tls:` block is required: Traefik redirects all plain
+   HTTP to HTTPS and refuses hostnames it has no certificate for.
 5. **Secrets** come from a setup script in the service directory and are never
    committed.
 6. **GPU workloads** request `nvidia.com/gpu`, set `runtimeClassName: nvidia`,

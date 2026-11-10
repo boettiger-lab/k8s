@@ -19,6 +19,20 @@
 # the accepted price of one ingress/cert/DNS path, and it makes cirrus a hard
 # dependency for every endpoint.
 #
+# The LoadBalancer IP must be cirrus's too. k3s servicelb runs an svclb
+# forwarder on every untainted node, puts each one's IP into the Service
+# status, and external-dns publishes all of them. Without a node label, thelio
+# (128.32.85.7) ends up in every A record, and the traffic that lands there
+# crosses the 1Gb wire to reach cirrus. The fix is a label outside this file:
+#   kubectl label node cirrus svccontroller.k3s.cattle.io/enablelb=true
+# Once any node carries that label, servicelb runs ONLY on labelled nodes.
+# Traefik is the only LoadBalancer Service, so nothing else is affected.
+#
+# With one entry node, externalTrafficPolicy: Local is safe. It keeps the
+# client source IP (access logs, rate limits) instead of SNATing to 10.42.x.
+# Do NOT set Local while DNS still lists a node with no Traefik pod: those
+# connections would be dropped.
+#
 # CoreDNS, by contrast, is deliberately left floating: DNS is not
 # bandwidth-bound, so its placement does not affect throughput, and it is a
 # k3s-managed addon, which makes pinning it awkward.
@@ -31,6 +45,10 @@ spec:
   valuesContent: |-
     nodeSelector:
       kubernetes.io/hostname: cirrus
+
+    service:
+      spec:
+        externalTrafficPolicy: Local
 
     # --- Hardening ---
     # Every ingress has TLS and certs come via DNS-01 (no HTTP-01 solver), so
