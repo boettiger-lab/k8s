@@ -31,3 +31,51 @@ spec:
   valuesContent: |-
     nodeSelector:
       kubernetes.io/hostname: cirrus
+
+    # --- Hardening ---
+    # Every ingress has TLS and certs come via DNS-01 (no HTTP-01 solver), so
+    # :80 has no legitimate plaintext use. Redirect it at the entrypoint so no
+    # bearer token / basicAuth / login cookie ever crosses the wire in cleartext.
+    ports:
+      web:
+        http:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
+      websecure:
+        http:
+          middlewares:
+            - kube-system-security-headers@kubernetescrd
+
+    # Reject TLS handshakes for unknown SNI instead of serving the
+    # "TRAEFIK DEFAULT CERT" + 404.
+    tlsOptions:
+      default:
+        sniStrict: true
+
+    # Error-only access log. Headers are dropped by default (no Authorization);
+    # query params are dropped too, since some apps take ?token=.
+    accessLog:
+      enabled: true
+      format: json
+      filters:
+        statusCodes: "400-599"
+      fields:
+        queryParameters:
+          defaultMode: drop
+
+    # HSTS + nosniff on every websecure route. No frameDeny: some of our apps
+    # embed each other.
+    extraObjects:
+      - apiVersion: traefik.io/v1alpha1
+        kind: Middleware
+        metadata:
+          name: security-headers
+          namespace: kube-system
+        spec:
+          headers:
+            stsSeconds: 31536000
+            stsIncludeSubdomains: true
+            contentTypeNosniff: true
