@@ -30,8 +30,11 @@ ACCEPT_SHARED_KEY = os.environ.get("ACCEPT_SHARED_KEY", "true") == "true"
 # a revoked hub token stops working within CACHE_TTL seconds.
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "60"))
 NEGATIVE_TTL = int(os.environ.get("NEGATIVE_TTL", "10"))
-# Paths vLLM itself serves without a key; keep them open so probes keep working.
-OPEN_PATHS = ("/health", "/ping", "/metrics", "/version")
+# Paths open without a token on the public hosts. /metrics is deliberately NOT
+# here (#162): Prometheus scrapes the pods in-cluster, never through Traefik, so
+# there is no reason to publish load and usage figures. Kubelet probes also hit
+# the pod directly; these entries are for external uptime checks.
+OPEN_PATHS = ("/health", "/ping", "/version")
 
 _cache = {}
 _lock = threading.Lock()
