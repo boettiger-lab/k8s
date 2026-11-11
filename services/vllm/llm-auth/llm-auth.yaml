@@ -105,6 +105,11 @@ metadata:
 spec:
   forwardAuth:
     address: http://llm-auth.vllm.svc.cluster.local:8080/auth
+    # Never pass client-supplied X-Forwarded-* through: llm-auth.py decides open
+    # paths from X-Forwarded-Uri/-Method, which Traefik must set itself.
+    trustForwardHeader: false
+    # llm-auth replies with headers and at most a ~200-byte JSON error.
+    maxResponseBodySize: 4096
     # Replace the caller's token with vLLM's own key, and name the caller.
     authResponseHeaders:
       - Authorization
