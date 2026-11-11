@@ -215,32 +215,38 @@ singleuser:
                 default_url: /rstudio
         resource_allocation:
           display_name: Resource Allocation
+          # mem_limit is what a server can use; mem_guarantee is what it
+          # reserves. Servers use far less than their limit most of the time
+          # (2026-11-11: 7 servers reserved 168 GiB and used 48), and a
+          # reservation is idle memory nothing else (Armada backfill) can use.
+          # Trade-off: under node memory pressure the kubelet evicts pods using
+          # more than their guarantee first.
           choices:
             mem_8:
               display_name: 8 GB RAM
               kubespawner_override:
-                mem_guarantee: 8G
+                mem_guarantee: 2G
                 mem_limit: 8G
               default: true
             mem_16:
               display_name: 16 GB RAM
               kubespawner_override:
-                mem_guarantee: 16G
+                mem_guarantee: 4G
                 mem_limit: 16G
             mem_32:
               display_name: 32 GB RAM
               kubespawner_override:
-                mem_guarantee: 32G
+                mem_guarantee: 8G
                 mem_limit: 32G 
             mem_64:
               display_name: 64 GB RAM (preemptable)
               kubespawner_override:
-                mem_guarantee: 32G
+                mem_guarantee: 8G
                 mem_limit: 64G 
             special:
               display_name: special use
               kubespawner_override:
-                mem_guarantee: 32G
+                mem_guarantee: 8G
                 mem_limit: 120G 
 
 hub:
