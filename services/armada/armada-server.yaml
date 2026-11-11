@@ -84,3 +84,6 @@ spec:
         reprioritize_any_jobs: ["boettiger-lab:owners"]
         watch_all_events: ["boettiger-lab:owners"]
         submit_any_jobs: ["boettiger-lab:owners"]
+        create_retry_policy: ["boettiger-lab:owners"]
+        update_retry_policy: ["boettiger-lab:owners"]
+        delete_retry_policy: ["boettiger-lab:owners"]
