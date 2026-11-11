@@ -6,7 +6,8 @@
 # The key can list every bucket and read every object, and nothing else. At the
 # RustFS cutover it is carried over by the IAM import, so the Secret stays valid.
 #
-# Usage: bash platform/offbox-backup/mint-minio-key.sh
+# Usage: bash platform/offbox-backup/mint-minio-key.sh   (safe to re-run: rotates the secret)
+# The MinIO image has no grep/sed; keep the in-pod part to mc and sh builtins.
 set -euo pipefail
 NS=offbox-backup
 USER_NAME=offbox-read
@@ -30,7 +31,7 @@ printf '%s\n%s\n' "$SECRET" "$POLICY_JSON" | "${MINIO[@]}" sh -c '
   mc admin policy create l '"$POLICY"' /tmp/offbox-policy.json
   mc admin user add l '"$USER_NAME"' "$SK" >/dev/null && echo "user '"$USER_NAME"' set"
   mc admin policy attach l '"$POLICY"' --user '"$USER_NAME"' >/dev/null 2>&1 || true
-  mc admin user info l '"$USER_NAME"' | grep -E "Status|PolicyName"
+  mc admin user info l '"$USER_NAME"'
 '
 
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
