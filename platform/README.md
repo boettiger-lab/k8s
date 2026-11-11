@@ -12,6 +12,7 @@ cluster *provides*, that is [`../services/`](../services/); the machines themsel
 | [`openebs/`](openebs/) | ZFS-LocalPV — node-local volumes with enforced per-PVC quotas |
 | [`juicefs/`](juicefs/) | ReadWriteMany home directories over S3, so a session can start on any node |
 | [`rustfs/`](rustfs/) | RustFS object store — the S3 backend JuiceFS writes to |
+| [`offbox-backup/`](offbox-backup/) | Daily copy of the object store's primary data to thelio's HDD pool |
 | [`nvidia/`](nvidia/) | GPU device plugin; per-node sharing (time-slicing vs exclusive) |
 | [`monitoring/`](monitoring/) | Prometheus, Grafana, DCGM / SMART / node exporters, carbon API |
 | [`users/`](users/) | Namespace-scoped user access: ServiceAccount, RBAC, kubeconfig generation |
