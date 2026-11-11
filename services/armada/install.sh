@@ -93,13 +93,22 @@ helm upgrade -i armada-pulsar apache/pulsar \
 # ---------------------------------------------------------------------------
 # 6. Kubernetes PriorityClasses required by Armada
 # ---------------------------------------------------------------------------
+# Armada is backfill: it runs on whatever is idle and gives way to everything
+# else. Negative values put its pods below every pod without a class (notebooks,
+# services: priority 0, preemptionPolicy PreemptLowerPriority by default) and
+# far below models (llm-serving 100000), so kube-scheduler evicts Armada pods
+# to place a notebook or model. The executor tags those evictions and the
+# backfill retry policy requeues the job (executor-values.yaml,
+# retry-policy-backfill.yaml).
 # preemptionPolicy: Never: Armada jobs wait for free capacity and never evict
-# anything (notebooks run at priority 0, models at llm-serving 100000).
-# preemptionPolicy is immutable, so recreate any class created without it.
+# anything themselves.
+# value and preemptionPolicy are immutable, so recreate any class that differs.
+# Running pods keep the priority they were created with.
 echo "==> Creating Armada PriorityClasses..."
-for pc in armada-default armada-preemptible armada-resilient; do
-  policy=$(kubectl get priorityclass "$pc" -o jsonpath='{.preemptionPolicy}' 2>/dev/null || true)
-  if [ -n "$policy" ] && [ "$policy" != "Never" ]; then
+declare -A PC_VALUE=([armada-default]=-1000 [armada-preemptible]=-1100 [armada-resilient]=-900)
+for pc in "${!PC_VALUE[@]}"; do
+  current=$(kubectl get priorityclass "$pc" -o jsonpath='{.value}/{.preemptionPolicy}' 2>/dev/null || true)
+  if [ -n "$current" ] && [ "$current" != "${PC_VALUE[$pc]}/Never" ]; then
     kubectl delete priorityclass "$pc"
   fi
 done
@@ -108,28 +117,28 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: armada-default
-value: 1000
+value: -1000
 globalDefault: false
 preemptionPolicy: Never
-description: "Default priority class for Armada jobs"
+description: "Armada backfill jobs: evicted by notebooks, services and models"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: armada-preemptible
-value: 900
+value: -1100
 globalDefault: false
 preemptionPolicy: Never
-description: "Preemptible priority class for Armada jobs"
+description: "Armada backfill jobs: evicted by notebooks, services and models"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: armada-resilient
-value: 1100
+value: -900
 globalDefault: false
 preemptionPolicy: Never
-description: "Resilient (high priority) class for Armada jobs"
+description: "Armada backfill jobs: evicted by notebooks, services and models"
 YAML
 
 # ---------------------------------------------------------------------------

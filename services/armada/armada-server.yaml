@@ -37,6 +37,21 @@ spec:
         dbname: lookout
         sslmode: disable
 
+    # Let every job reach the GB10s (taint dedicated=gb10, arm64) when they are
+    # idle; models (llm-serving) and GB10 notebooks evict Armada jobs. Jobs need
+    # a multi-arch image to run there. This list replaces Armada's default, so it
+    # repeats the armadaproject.io/armada toleration.
+    submission:
+      defaultJobTolerations:
+        - key: "armadaproject.io/armada"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+        - key: "dedicated"
+          operator: "Equal"
+          value: "gb10"
+          effect: "NoSchedule"
+
     eventsApiRedis:
       addrs:
         - armada-redis-master.armada.svc.cluster.local:6379

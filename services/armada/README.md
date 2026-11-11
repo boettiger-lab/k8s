@@ -233,19 +233,36 @@ If you see the operator reconcile timing out:
 kubectl delete job wait-for-pulsar -n armada
 ```
 
-### PriorityClasses: required, and never preempting
+### Backfill: Armada fills idle hardware and gives way to everything else
 
 Armada's default config requires three Kubernetes PriorityClasses:
 `armada-default`, `armada-preemptible`, and `armada-resilient`, created by
-`install.sh`. All three use `preemptionPolicy: Never`: Armada jobs wait for free
-capacity and never evict non-Armada pods. Notebooks run at priority 0 and would
-otherwise be preemptible by Armada's 900–1100. Armada can still preempt its own
-jobs (fair share between queues). `preemptionPolicy` is immutable, so `install.sh`
-recreates any class that lacks it.
+`install.sh`. They have negative values (-1100 to -900) and
+`preemptionPolicy: Never`:
 
-Placement follows normal taint rules. The executor reports every node to the
-scheduler, and a job lands on a tainted node (the GB10s, `dedicated=gb10`) only if
-its pod spec tolerates the taint.
+- Armada jobs never evict anything. They wait for free capacity.
+- Anything else evicts them. Notebooks and services run at priority 0 and models
+  at `llm-serving` 100000, all with the default `PreemptLowerPriority`. If one
+  can't fit, kube-scheduler evicts Armada pods to make room.
+- Evicted jobs go back in the queue. The executor tags a scheduler preemption
+  (`Preempted` pod event) as `k8s-preemption` and a kubelet eviction as
+  `node-pressure`, and deletes the failed pod (`executor-values.yaml`). The
+  scheduler's default retry policy `backfill` (`retry-policy-backfill.yaml`)
+  requeues those jobs, up to 20 times. Other failures fail at once.
+- No per-queue cap. Fair share decides which queue's job starts next.
+  `armada-default` stays `preemptible: false` because Armada does not retry runs
+  it preempts itself, so rebalancing between queues would lose work.
+- The server adds a `dedicated=gb10` toleration to every job, so idle GB10s
+  (arm64) take jobs too. Jobs need a multi-arch image to run there.
+
+`value` and `preemptionPolicy` are immutable, so `install.sh` recreates any class
+that differs. Running pods keep the priority they started with.
+
+The retry policy is an API object, not config. After install, an owner with
+armadactl >= 0.22 runs
+`armadactl create retry-policy -f retry-policy-backfill.yaml` (`update` after
+edits). Until it exists, every queue keeps the old behaviour: an evicted job
+fails.
 
 ### Watch events: `eventsApiRedis` key (not `redis`)
 
