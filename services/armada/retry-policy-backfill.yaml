@@ -1,0 +1,27 @@
+# Default retry policy for every queue (scheduler retryPolicy.defaultPolicyName).
+# Armada jobs are backfill: notebooks and models evict them, and this policy
+# puts the job back in the queue instead of failing it. Real failures (the
+# job's own errors, OOM) still fail at once.
+# Categories come from executor-values.yaml (errorCategories); internal/* are
+# set by Armada itself.
+# Needs armadactl >= 0.22 and owner rights. Create once, update after edits:
+#   armadactl create retry-policy -f retry-policy-backfill.yaml
+#   armadactl update retry-policy -f retry-policy-backfill.yaml
+apiVersion: armadaproject.io/v1beta1
+kind: RetryPolicy
+name: backfill
+retryLimit: 20
+defaultAction: Fail
+rules:
+  - action: Retry
+    onCategory: k8s-preemption
+  - action: Retry
+    onCategory: node-pressure
+  # Pod deleted before the executor saw it fail (also covers a preemption
+  # whose pod vanished quickly).
+  - action: Retry
+    onCategory: internal
+    onSubcategory: externally-deleted
+  - action: Retry
+    onCategory: internal
+    onSubcategory: lease-expired

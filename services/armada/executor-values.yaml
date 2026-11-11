@@ -5,6 +5,29 @@ applicationConfig:
   application:
     # Unique ID for this k8s cluster, used in Armada job submissions
     clusterId: cirrus
+    # Tag the failures the backfill retry policy requeues
+    # (retry-policy-backfill.yaml). action: Delete removes the failed pod at
+    # once so the retry can reuse the pod name armada-<jobId>-0; a retained pod
+    # would make the retry's lease fail with AlreadyExists.
+    errorCategories:
+      enabled: true
+      defaultCategory: unknown
+      defaultSubcategory: unknown
+      categories:
+        # kube-scheduler evicted the pod to place a higher-priority pod
+        # (notebook, service or model; Armada classes are negative).
+        - name: k8s-preemption
+          action: Delete
+          rules:
+            - onPodEvents:
+                reason: Preempted
+                type: Normal
+                regexp: "Preempted by"
+        # kubelet evicted the pod under node memory or disk pressure.
+        - name: node-pressure
+          action: Delete
+          rules:
+            - onConditions: ["Evicted"]
   executorApiConnection:
     armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
     forceNoTls: true

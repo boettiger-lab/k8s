@@ -37,25 +37,31 @@ spec:
         username: armada-scheduler
         password: ${ARMADA_SCHEDULER_API_PASSWORD}
 
-    # Per-queue cap. Every job runs as armada-default (the image's
-    # priorityClassNameOverride), so this one class carries the limit. Fractions
-    # are of the pool's capacity as the scheduler logs it ("Scheduling on pool
-    # default with capacity ..."): untainted nodes only, minus what non-Armada
-    # pods (models, notebooks) already hold. It moves with cluster load; on
-    # 2026-11-07 it was 130 CPU, 77 GiB, 10 GPU slices, so 0.5 gave each queue
-    # about 65 CPU, 38 GiB and 5 slices. Jobs over the cap stay queued with
-    # "resource limit exceeded"; they are not rejected.
-    # One queue can get a different cap with resourceLimitsByPriorityClassName in
-    # its Queue spec (armadactl update -f), which overrides these fractions.
+    # No per-queue cap: Armada is backfill and should fill every idle node.
+    # The pool "capacity" a fraction applies to is only what non-Armada pods
+    # leave free, so a fractional cap left jobs queued on idle hardware.
+    # When several queues compete, fair share orders which queue's job starts
+    # next as capacity frees up.
+    # Every job runs as armada-default (the image's priorityClassNameOverride).
+    # preemptible: false means Armada itself never kills a running job to
+    # rebalance queues: Armada does not retry runs it preempts, so that work
+    # would be lost. Notebooks and models still evict Armada jobs through
+    # Kubernetes priority (install.sh), and the retry policy requeues those.
+    # One queue can still be capped with resourceLimitsByPriorityClassName in its
+    # Queue spec (armadactl update -f).
     scheduling:
       priorityClasses:
         armada-default:
           priority: 1000
           preemptible: false
-          maximumResourceFractionPerQueue:
-            cpu: 0.5
-            memory: 0.5
-            nvidia.com/gpu: 0.5
+      # Requeue jobs that Kubernetes evicted for a notebook or model. Rules are
+      # in retry-policy-backfill.yaml (created with armadactl), applied to every
+      # queue that has no policy of its own. globalMaxRetries caps retries per
+      # job; there is no unlimited setting.
+      retryPolicy:
+        enabled: true
+        globalMaxRetries: 20
+        defaultPolicyName: backfill
 
     auth:
       anonymousAuth: true
