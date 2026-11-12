@@ -12,6 +12,7 @@ Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS stor
 > | `s3-cutover-ingress.yaml` | `rustfs-s3` | | `minio.` (alias) and `data.` (console), applied only at the cutover |
 > | `bulk-copy.yaml` | `rustfs-s3` | | MinIO → rustfs-s3 copy passes, run by hand until the cutover (key: `mint-copy-source.sh`) |
 > | `copy-bucket-settings.sh` | `rustfs-s3` | | anonymous policies, lifecycle, versioning, quota from MinIO; re-run at the cutover |
+> | `sts-check-setup.sh`, `sts-check.sh` | `rustfs-s3` | | Dex → STS check: GitHub device login, temporary keys, allow/deny tests |
 >
 > At step 5 the `rustfs` Service's selector moves to `app: rustfs-s3`, so JuiceFS's
 > endpoint never changes.

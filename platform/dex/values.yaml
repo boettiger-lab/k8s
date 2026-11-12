@@ -79,6 +79,11 @@ config:
     public: true
     redirectURIs:
     - /device/callback
+  - id: rustfs-s3
+    name: S3 (rustfs-s3)
+    public: true                # STS: AssumeRoleWithWebIdentity from CLIs; token aud = rustfs-s3
+    redirectURIs:
+    - /device/callback
 
 envVars:
 - name: GITHUB_CLIENT_SECRET
