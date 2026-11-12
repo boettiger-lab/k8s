@@ -86,11 +86,14 @@ spec:
           requests:
             cpu: 4
             # Scheduler accounting only: 0.60 x 121.7 GiB ~= 73 GiB.
-            memory: 80Gi
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
             nvidia.com/gpu: 8
           limits:
             cpu: 12
-            memory: 80Gi
+            memory: 108Gi
             nvidia.com/gpu: 8
         volumeMounts:
         - name: dshm

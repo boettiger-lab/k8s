@@ -378,12 +378,15 @@ spec:
             cpu: 8
             # Scheduler accounting only -- cgroups do not see CUDA allocations on
             # unified memory. ~79 GiB weights + KV.
-            memory: 96Gi
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
             # All 8 slices: how we tell the scheduler to put nothing else on this GPU.
             nvidia.com/gpu: 8
           limits:
             cpu: 16
-            memory: 96Gi
+            memory: 108Gi
             nvidia.com/gpu: 8
         securityContext:
           capabilities:
@@ -626,12 +629,15 @@ spec:
             cpu: 8
             # Scheduler accounting only -- cgroups do not see CUDA allocations on
             # unified memory. ~79 GiB weights + KV.
-            memory: 96Gi
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
             # All 8 slices: how we tell the scheduler to put nothing else on this GPU.
             nvidia.com/gpu: 8
           limits:
             cpu: 16
-            memory: 96Gi
+            memory: 108Gi
             nvidia.com/gpu: 8
         # Readiness only, no liveness: a hang at load leaves the pod NotReady for
         # debugging instead of crash-looping a 79 GiB load. Cold start measured ~6 min.
