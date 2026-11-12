@@ -312,7 +312,10 @@ spec:
             cpu: 4
             # Scheduler accounting only -- cgroups do not see CUDA allocations on
             # unified memory (dgx-spark-memory.md). ~76 weights + 16 KV + 4.
-            memory: 96Gi
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
             # All 8 slices, deliberately. A slice is a co-tenancy slot, not a
             # memory partition, so this frees no memory (mcp-gpu holds 178Mi) --
             # it is how we tell the scheduler to put NOTHING else on this GPU.
@@ -324,7 +327,7 @@ spec:
             nvidia.com/gpu: 8
           limits:
             cpu: 8
-            memory: 96Gi
+            memory: 108Gi
             nvidia.com/gpu: 8
         volumeMounts:
         - name: dshm

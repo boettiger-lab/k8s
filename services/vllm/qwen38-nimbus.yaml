@@ -231,13 +231,16 @@ spec:
             # 67 GiB vLLM reservation + ~4 GiB CPU-side overhead. This does NOT cap
             # CUDA allocations (cgroups don't see them on unified memory -- see
             # dgx-spark-memory.md); it exists so the scheduler won't stack other
-            # large pods on top of vLLM. Keep it in sync with gpu-memory-utilization.
-            memory: 72Gi
+            # large pods on top of vLLM.
+            # Whole node minus mcp-gpu's 2Gi (its co-tenant on the other 2 slices):
+            # 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi beyond those
+            # two, too small for any notebook or job.
+            memory: 106Gi
             nvidia.com/gpu: 6
           limits:
             cpu: 4
             # Must match requests above.
-            memory: 72Gi
+            memory: 106Gi
             nvidia.com/gpu: 6
         securityContext:
           capabilities:
