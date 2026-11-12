@@ -1,8 +1,22 @@
 # offbox-backup — the object store's primary data, copied to thelio
 
-The S3 store on cirrus holds data that exists nowhere else: `private-*`, `shared-*`,
-`backup-archive` and a few unprefixed buckets. This is its off-box copy: a daily
-`rclone sync` to a ZFS dataset on thelio's HDD pool, a different machine from cirrus.
+Two things on cirrus's `tank` exist nowhere else: the S3 store's primary buckets
+(`private-*`, `shared-*`, `backup-archive`, …) and the JuiceFS home directories (their
+chunk bucket `juicefs-homes` on the pilot RustFS, and the Postgres metadata DB that
+indexes it). This is their off-box copy, on a ZFS dataset on thelio's HDD pool, a
+different machine from cirrus.
+
+One CronJob, `offbox-sync`, daily at 10:30 UTC, one pod in two steps:
+
+1. init container `juicefs-meta`: `pg_dump -Fc` of the JuiceFS metadata DB →
+   `juicefs/meta/`, 30 days. A failed dump does not stop the copy; it fails the Job
+   at the end instead.
+2. `sync`: S3 store buckets → `buckets/`; `juicefs-homes` → `juicefs/chunks/`.
+
+The dump runs first, so every chunk it references is in that day's sync; chunks
+deleted in between are in `history/`. Both steps share one pod because zfs-localpv
+refuses a second mount of the volume while another pod holds it, so separate Jobs
+can't overlap.
 
 - **Scope:** every bucket except the `public-*` buckets in NRP's STAC catalog (those
   are mirrors of NRP and come back from there). New buckets are picked up
@@ -26,16 +40,27 @@ namespace's PVC, `Retain`). Don't add a class for it.
 
 | file | |
 |---|---|
-| `offbox-backup.yaml` | static volume, PVC, sync script, daily CronJob (10:30 UTC) |
-| `mint-minio-key.sh` | creates or rotates the read-only `offbox-read` key and the Secret |
+| `offbox-data-zfsvolume.yaml` | the dataset; `kubectl create` once, never apply (apply resets its state to Pending) |
+| `offbox-backup.yaml` | static PV and PVC, sync script, daily CronJob (10:30 UTC) |
+| `mint-minio-key.sh` | read-only `offbox-read` key on MinIO → Secret `offbox-source` |
+| `mint-juicefs-access.sh` | read-only `offbox-read` key on the pilot RustFS (`juicefs-homes` only) and Postgres role `offbox_dump` (`pg_read_all_data`) → Secret `offbox-juicefs` |
 
 ## Set up
 
 ```bash
 bash platform/offbox-backup/mint-minio-key.sh
+bash platform/offbox-backup/mint-juicefs-access.sh
+kubectl create -f platform/offbox-backup/offbox-data-zfsvolume.yaml
 kubectl apply -f platform/offbox-backup/offbox-backup.yaml
 kubectl -n offbox-backup create job --from=cronjob/offbox-sync offbox-sync-first
 ```
 
 Check: `kubectl -n offbox-backup logs -f job/<name>`; the last good run is recorded in
 `/backup/state/last-success` on the volume.
+
+## Restoring the homes
+
+A home restore needs both halves from the same day or earlier: `pg_restore` the dump
+into a fresh database, then point the volume at the copied chunks (`juicefs config
+<meta-url> --storage file --bucket /backup/juicefs/chunks/`) and mount read-only. If a
+file's chunk is missing, look in `history/<run>/juicefs-homes/`.

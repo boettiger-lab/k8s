@@ -1,9 +1,15 @@
 # Off-box copy of the object store's primary data, on thelio's HDD pool.
 #
-# Daily `rclone sync` from the S3 store on cirrus (MinIO now; RustFS after the
-# migration: change SRC_ENDPOINT, keep the key) to a ZFS dataset on thelio.
-# Scope: every bucket EXCEPT the `public-*` buckets NRP's STAC catalog mirrors,
-# which are re-creatable from NRP. That leaves the data that lives only here.
+# One daily CronJob, `offbox-sync` (10:30 UTC), on thelio, in two steps in one pod:
+#   1. init container `juicefs-meta`: `pg_dump` of the JuiceFS metadata DB (the
+#      homes' directory tree). It runs BEFORE the chunk copy, so every chunk a dump
+#      references gets copied; chunks deleted in between are kept in history/.
+#   2. `sync`: `rclone sync` of (a) the S3 store on cirrus (MinIO now; RustFS after
+#      the migration: change the SRC endpoint, keep the key), every bucket EXCEPT
+#      the `public-*` buckets NRP's STAC catalog mirrors, and (b) the JuiceFS homes'
+#      chunk bucket `juicefs-homes` on the pilot RustFS.
+# They share one pod because zfs-localpv refuses a second mount of the volume
+# while another pod holds it: separate Jobs cannot overlap.
 #
 # Safety:
 #   - Overwritten or deleted objects move to /backup/history/<run>/<bucket>/ and are
@@ -12,16 +18,25 @@
 #     good run (MinIO's hostPaths are `DirectoryOrCreate`; on a failed mount it
 #     serves an EMPTY store, which a plain sync would mirror).
 #   - Per-bucket --max-delete.
-#   - The source key is read-only (mint-minio-key.sh).
+#   - Source credentials are read-only (mint-minio-key.sh; mint-juicefs-access.sh for
+#     the homes: a RustFS key on `juicefs-homes` and a `pg_read_all_data` role).
+#
+# Layout on the volume:
+#   buckets/<bucket>/          MinIO buckets
+#   juicefs/chunks/            the `juicefs-homes` bucket (its `<volume>/chunks/...`)
+#   juicefs/meta/*.dump        pg_dump -Fc, 30 days
+#   history/<run>/...          overwritten/deleted objects, 90 days
+#   state/                     last-success stamps, guards
 #
 # Storage: thelio's HDD pool is reserved for this copy. There is deliberately NO
 # StorageClass for it (one would let any workload claim those drives). The volume
-# below is static: a ZFSVolume the node agent turns into dataset
-# `openebs-zpool/offbox-data`, and a PV pre-bound by claimRef to this one PVC.
-# To grow it: raise spec.capacity on the ZFSVolume (it is the dataset quota) and
-# the PV/PVC sizes to match.
+# below is static: a ZFSVolume (offbox-data-zfsvolume.yaml, created once) the node
+# agent turns into dataset `openebs-zpool/offbox-data`, and a PV pre-bound by
+# claimRef to this one PVC. To grow it: raise spec.capacity on the live ZFSVolume
+# (kubectl edit; it is the dataset quota) and the PV/PVC sizes to match.
 #
 # Apply:      bash platform/offbox-backup/mint-minio-key.sh   # namespace + Secret
+#             kubectl create -f platform/offbox-backup/offbox-data-zfsvolume.yaml   # once
 #             kubectl apply -f platform/offbox-backup/offbox-backup.yaml
 # Manual run: kubectl -n offbox-backup create job --from=cronjob/offbox-sync offbox-sync-manual-$(date -u +%Y%m%d%H%M)
 # Restore:    files are plain objects under /backup/buckets/<bucket>/; copy them
@@ -31,26 +46,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: offbox-backup
----
-apiVersion: zfs.openebs.io/v1
-kind: ZFSVolume
-metadata:
-  name: offbox-data
-  namespace: openebs
-  labels: {kubernetes.io/nodename: thelio}
-  finalizers: [zfs.openebs.io/finalizer]
-spec:
-  capacity: "4398046511104"     # 4 TiB quota; the pool has ~9 TB
-  compression: lz4
-  dedup: "off"
-  fsType: zfs
-  ownerNodeID: thelio
-  poolName: openebs-zpool
-  quotaType: quota
-  recordsize: 1M                # whole objects, mostly large
-  volumeType: DATASET
-status:
-  state: Pending                # the node agent creates the dataset, then sets Ready
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -143,6 +138,27 @@ data:
     # 4. Expire old history (whole runs).
     find "$B/history" -mindepth 1 -maxdepth 1 -type d -mtime +"$HISTORY_DAYS" -exec rm -rf {} +
 
+    # 4a. The metadata dump from the init container.
+    meta=$(cat "$B/state/juicefs-meta-status" 2>/dev/null || echo missing)
+    log "juicefs metadata dump: $meta"
+    case "$meta" in ok*|skipped*) ;; *) fail="$fail juicefs-meta" ;; esac
+
+    # 4b. JuiceFS homes' chunks (skipped until the Secret exists).
+    if [ -n "${RCLONE_CONFIG_HOMES_ACCESS_KEY_ID:-}" ]; then
+      if [ -z "$(rclone lsf "homes:$HOMES_BUCKET" --max-depth 1 2>/dev/null | head -1)" ]; then
+        log "ERROR: homes:$HOMES_BUCKET lists empty or unreadable; not syncing it"; fail="$fail juicefs-homes"
+      else
+        log "== juicefs-homes"
+        rclone sync "homes:$HOMES_BUCKET" "$B/juicefs/chunks" \
+          --backup-dir "$B/history/$STAMP/juicefs-homes" \
+          --max-delete "$MAX_DELETE" \
+          --fast-list --transfers 8 --checkers 16 --stats 10m --stats-one-line \
+          || fail="$fail juicefs-homes"
+      fi
+    else
+      log "WARNING: no homes credentials (Secret offbox-juicefs); JuiceFS chunks NOT copied"
+    fi
+
     if [ -n "$fail" ]; then log "FAILED:$fail"; exit 1; fi
     echo "$n" > "$B/state/source-bucket-count"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$B/state/last-success"
@@ -169,6 +185,36 @@ spec:
           restartPolicy: Never
           nodeSelector:
             kubernetes.io/hostname: thelio
+          initContainers:
+            # Never fails the pod: a failed dump must not stop the copy. It
+            # records its outcome, and `sync` turns a failure into a failed Job.
+            - name: juicefs-meta
+              image: postgres:16.14          # match the server (16.14)
+              env:
+                - {name: PGHOST, value: juicefs-pg.juicefs.svc}   # direct, not pgbouncer
+                - {name: PGUSER, value: offbox_dump}
+                - {name: PGDATABASE, value: juicefs}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: pg-password, optional: true}}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  d=/backup/juicefs/meta; s=/backup/state/juicefs-meta-status
+                  mkdir -p "$d" /backup/state; echo running > "$s"
+                  if [ -z "${PGPASSWORD:-}" ]; then echo "skipped: no Secret offbox-juicefs" | tee "$s"; exit 0; fi
+                  ts=$(date -u +%Y%m%dT%H%M%SZ); f="$d/juicefs-meta-$ts.dump"
+                  if pg_dump -Fc -f "$f.part" && pg_restore -l "$f.part" > /dev/null; then
+                    mv "$f.part" "$f"
+                    find "$d" -name 'juicefs-meta-*.dump' -mtime +30 -delete
+                    echo "ok $ts $(du -h "$f" | cut -f1)" | tee "$s"
+                  else
+                    rm -f "$f.part"; echo "failed $ts" | tee "$s"
+                  fi
+              resources:
+                requests: {cpu: 500m, memory: 512Mi}
+                limits: {memory: 2Gi}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
           containers:
             - name: sync
               image: rclone/rclone:1.75.2
@@ -184,6 +230,16 @@ spec:
                   valueFrom: {secretKeyRef: {name: offbox-source, key: access-key-id}}
                 - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
                   valueFrom: {secretKeyRef: {name: offbox-source, key: secret-access-key}}
+                # JuiceFS homes' chunk store: the pilot RustFS (path-style).
+                - {name: HOMES_BUCKET, value: juicefs-homes}
+                - {name: RCLONE_CONFIG_HOMES_TYPE, value: s3}
+                - {name: RCLONE_CONFIG_HOMES_PROVIDER, value: Other}
+                - {name: RCLONE_CONFIG_HOMES_FORCE_PATH_STYLE, value: "true"}
+                - {name: RCLONE_CONFIG_HOMES_ENDPOINT, value: "http://rustfs.rustfs.svc:9000"}
+                - name: RCLONE_CONFIG_HOMES_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: homes-access-key, optional: true}}
+                - name: RCLONE_CONFIG_HOMES_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: homes-secret-key, optional: true}}
               resources:
                 requests: {cpu: "1", memory: 1Gi}
                 limits: {memory: 4Gi}
