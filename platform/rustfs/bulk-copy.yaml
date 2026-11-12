@@ -1,0 +1,113 @@
+# Bulk copy MinIO -> rustfs-s3, run by hand before the cutover (plan step 2,
+# cluster-ops object-store-migration.md). Read-only on MinIO; safe to re-run.
+#
+# Every bucket MinIO lists is synced into a bucket of the same name, with object
+# metadata (Content-Type, Cache-Control, user metadata, mtime). The first pass is
+# hours; repeat it until a pass is short, then do the last one with writers frozen
+# at the cutover. Deletions on MinIO propagate (sync), capped per bucket by
+# MAX_DELETE, and a bucket that suddenly lists empty is skipped, not emptied.
+#
+# Not copied: older object versions (only shared-ca30x30-app has versioning) and
+# bucket settings (lifecycle, quota, anonymous policy, versioning): those are set
+# on rustfs-s3 separately. IAM comes from the import at the cutover.
+#
+# Credentials (NOT in this file):
+#   bash platform/rustfs/mint-copy-source.sh   # Secret rustfs/minio-copy-source (read-only MinIO key)
+#   rustfs-s3's root key, Secret rustfs/rustfs-s3-root (mint-s3-root.sh)
+#
+# Run a pass:  kubectl apply -f platform/rustfs/bulk-copy.yaml
+#              kubectl -n rustfs create job --from=cronjob/s3-bulk-copy s3-copy-$(date -u +%m%d%H%M)
+# Watch:       kubectl -n rustfs logs -f job/s3-copy-<stamp>
+# The CronJob is suspended: it is only a template for manual passes.
+# Delete this file (and the MinIO user rustfs-copy) after the cutover.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-bulk-copy-script
+  namespace: rustfs
+data:
+  copy.sh: |
+    #!/bin/sh
+    set -u
+    log() { echo "$(date -u +%H:%M:%S) $*"; }
+
+    buckets=$(rclone lsf src: --dirs-only | sed 's#/$##')
+    n=$(echo "$buckets" | grep -c .)
+    if [ "$n" -lt "$MIN_BUCKETS" ]; then
+      log "ABORT: MinIO lists $n buckets (expected >= $MIN_BUCKETS)"; exit 1
+    fi
+    log "MinIO: $n buckets"
+
+    failed=""
+    for b in $buckets; do
+      log "== $b"
+      rclone mkdir "dst:$b" || { failed="$failed $b"; continue; }
+      if [ -z "$(rclone lsf "src:$b" --max-depth 1 | head -1)" ] && \
+         [ -n "$(rclone lsf "dst:$b" --max-depth 1 | head -1)" ]; then
+        log "SKIP $b: lists empty on MinIO but not on rustfs-s3"; failed="$failed $b"; continue
+      fi
+      rclone sync "src:$b" "dst:$b" --metadata --max-delete "$MAX_DELETE" \
+        --transfers 16 --checkers 32 --s3-chunk-size 32M --s3-upload-concurrency 4 \
+        --stats 15m --stats-one-line --stats-log-level NOTICE \
+        || failed="$failed $b"
+    done
+
+    log "== counts (src vs dst; live buckets drift while writers run)"
+    for b in $buckets; do
+      s=$(rclone size "src:$b" --json 2>/dev/null)
+      d=$(rclone size "dst:$b" --json 2>/dev/null)
+      echo "$b src=$s dst=$d"
+    done | sed 's/"bytes"://g; s/"count"://g; s/,"sizeless":[0-9]*//g'
+
+    if [ -n "$failed" ]; then log "FAILED:$failed"; exit 1; fi
+    log "done"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: s3-bulk-copy
+  namespace: rustfs
+spec:
+  suspend: true                   # template only; passes are started by hand
+  schedule: "0 0 1 1 *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: cirrus   # both stores are on cirrus
+          containers:
+            - name: copy
+              image: rclone/rclone:1.75.2
+              command: ["/bin/sh", "/scripts/copy.sh"]
+              env:
+                - {name: MIN_BUCKETS, value: "100"}
+                - {name: MAX_DELETE, value: "5000"}
+                - {name: RCLONE_CONFIG_SRC_TYPE, value: s3}
+                - {name: RCLONE_CONFIG_SRC_PROVIDER, value: Minio}
+                - {name: RCLONE_CONFIG_SRC_ENDPOINT, value: "http://minio-svc.minio.svc:9000"}
+                - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: minio-copy-source, key: access-key-id}}
+                - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: minio-copy-source, key: secret-access-key}}
+                - {name: RCLONE_CONFIG_DST_TYPE, value: s3}
+                - {name: RCLONE_CONFIG_DST_PROVIDER, value: Other}
+                - {name: RCLONE_CONFIG_DST_FORCE_PATH_STYLE, value: "true"}
+                - {name: RCLONE_CONFIG_DST_ENDPOINT, value: "http://rustfs-s3.rustfs.svc:9000"}
+                - name: RCLONE_CONFIG_DST_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: access-key}}
+                - name: RCLONE_CONFIG_DST_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: secret-key}}
+              resources:
+                requests: {cpu: "2", memory: 2Gi}
+                limits: {memory: 8Gi}
+              volumeMounts:
+                - {name: scripts, mountPath: /scripts, readOnly: true}
+          volumes:
+            - name: scripts
+              configMap: {name: s3-bulk-copy-script}
