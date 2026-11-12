@@ -20,7 +20,7 @@ while :; do
   jq -e .id_token "$T/tok" >/dev/null 2>&1 && break
   case $(jq -r .error "$T/tok") in authorization_pending|slow_down) ;; *) jq . "$T/tok"; exit 1;; esac
 done
-jq -r .id_token "$T/tok" > "$T/id"
+jq -j .id_token "$T/tok" > "$T/id"   # -j: no trailing newline, or STS rejects the signature
 cut -d. -f2 "$T/id" | tr '_-' '/+' | awk '{n=length($0)%4; if(n) $0=$0 substr("===",1,4-n); print}' \
   | base64 -d 2>/dev/null | jq -c '{preferred_username, aud, groups}'
 U=$(cut -d. -f2 "$T/id" | tr '_-' '/+' | awk '{n=length($0)%4; if(n) $0=$0 substr("===",1,4-n); print}' | base64 -d 2>/dev/null | jq -r .preferred_username)
