@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy bucket settings MinIO -> rustfs-s3: anonymous policy, lifecycle rules,
-# versioning, quota. Creates any missing bucket. The bulk copy (bulk-copy.yaml)
+# versioning (quotas are reported, not copied; see below). Creates any missing bucket. The bulk copy (bulk-copy.yaml)
 # moves objects only; this moves the rest. Re-runnable: run it now and again at
 # the cutover to pick up buckets and changes made since.
 #
@@ -56,8 +56,11 @@ for b, s in sorted(buckets.items()):
         out.append(f"mc ilm import d/{q(b)} >/dev/null <<'JSON'\n{json.dumps(s['ilm'])}\nJSON"); summary["ilm"] += 1
     if s.get("versioning") == "Enabled":
         out.append(f"mc version enable d/{q(b)} >/dev/null"); summary["versioning"] += 1
+    # Quotas are NOT copied (owner decision 2026-11-12): RustFS 1.0.4 fails every write to
+    # a bucket with a hard quota (503) until its usage scanner has measured the bucket,
+    # which had not happened after 4 h. public-output relies on its 30-day expiry for now.
     if s.get("quota"):
-        out.append(f"mc quota set d/{q(b)} --size {int(s['quota'])}B >/dev/null"); summary["quota"] += 1
+        out.append(f"echo 'quota on {b} not copied ({int(s['quota'])} B)' >&2"); summary["quota"] += 1
     out.append(f"echo ok {q(b)}")
 print("\n".join(out))
 print(f"# {len(buckets)} buckets; " + ", ".join(f"{k} {v}" for k, v in summary.items()), file=sys.stderr)
