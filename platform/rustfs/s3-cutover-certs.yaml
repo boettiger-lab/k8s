@@ -1,0 +1,25 @@
+# Certificates for the cutover hosts, issued AHEAD of the cutover so the switch never
+# waits on ACME (DNS-01 via Cloudflare, so issuing does not touch MinIO's routes).
+# The Ingresses in s3-cutover-ingress.yaml use these Secrets.
+#
+#   kubectl apply -f platform/rustfs/s3-cutover-certs.yaml     # any time before the cutover
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: minio-alias-tls
+  namespace: rustfs
+spec:
+  secretName: minio-alias-tls
+  dnsNames: [minio.carlboettiger.info]
+  issuerRef: {name: letsencrypt-production, kind: ClusterIssuer}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: data-console-tls
+  namespace: rustfs
+spec:
+  secretName: data-console-tls
+  dnsNames: [data.carlboettiger.info]
+  issuerRef: {name: letsencrypt-production, kind: ClusterIssuer}

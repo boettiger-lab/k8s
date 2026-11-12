@@ -1,0 +1,14 @@
+# At the cutover, MinIO's in-cluster name becomes an alias of rustfs-s3, so every
+# client of http://minio-svc.minio.svc:9000 (open-llm-proxy, duckdb-mcp, sdm-mcp,
+# offbox-sync, ...) keeps working with no config change. SigV4 is fine: RustFS
+# checks the signature against the Host the client used (RUSTFS_SERVER_DOMAINS unset).
+# NetworkPolicies must admit the rustfs-s3 pods first; cutover.sh checks that.
+# Applied by cutover.sh after deleting the ClusterIP Service of the same name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-svc
+  namespace: minio
+spec:
+  type: ExternalName
+  externalName: rustfs-s3.rustfs.svc.cluster.local
