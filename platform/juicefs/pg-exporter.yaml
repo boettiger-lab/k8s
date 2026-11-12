@@ -3,7 +3,7 @@
 # this DB saturating its connections took every JuiceFS mount down on 2026-09-13,
 # unnoticed for hours.
 #
-# Connects as `pg_exporter` (role pg_monitor only; created with
+# Connects as `juicefs_exporter` (role pg_monitor only; created with
 # mint-pg-exporter-role.sh, which also writes Secret juicefs/pg-exporter).
 # Scraped through the Service's prometheus.io annotations
 # (kubernetes-service-endpoints job). Per-table collectors are off: they add
@@ -37,7 +37,7 @@ spec:
             - --no-collector.statio_user_tables
           env:
             - {name: DATA_SOURCE_URI, value: "juicefs-pg.juicefs.svc:5432/juicefs?sslmode=disable"}
-            - {name: DATA_SOURCE_USER, value: pg_exporter}
+            - {name: DATA_SOURCE_USER, value: juicefs_exporter}
             - name: DATA_SOURCE_PASS
               valueFrom: {secretKeyRef: {name: pg-exporter, key: password}}
           ports:
