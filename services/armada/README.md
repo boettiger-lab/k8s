@@ -253,7 +253,10 @@ Armada's default config requires three Kubernetes PriorityClasses:
   `armada-default` stays `preemptible: false` because Armada does not retry runs
   it preempts itself, so rebalancing between queues would lose work.
 - The server adds a `dedicated=gb10` toleration to every job, so idle GB10s
-  (arm64) take jobs too. Jobs need a multi-arch image to run there.
+  (arm64) take jobs too. Jobs need a multi-arch image to run there. The
+  executor must also list `dedicated` in `toleratedTaints`
+  (`executor-values.yaml`): it reports any node with an unlisted NoSchedule
+  taint as unschedulable, and the scheduler then drops it from pool capacity.
 
 `value` and `preemptionPolicy` are immutable, so `install.sh` recreates any class
 that differs. Running pods keep the priority they started with.

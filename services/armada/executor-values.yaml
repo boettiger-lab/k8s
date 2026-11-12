@@ -28,6 +28,13 @@ applicationConfig:
           action: Delete
           rules:
             - onConditions: ["Evicted"]
+  kubernetes:
+    # The executor reports a node with any other NoSchedule taint as
+    # unschedulable, so the scheduler leaves it out of pool capacity whatever
+    # the job tolerates. The server adds the matching dedicated=gb10
+    # toleration to every job (armada-server.yaml).
+    toleratedTaints:
+      - dedicated
   executorApiConnection:
     armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
     forceNoTls: true
