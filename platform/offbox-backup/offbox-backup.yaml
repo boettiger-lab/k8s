@@ -1,9 +1,16 @@
 # Off-box copy of the object store's primary data, on thelio's HDD pool.
 #
-# Daily `rclone sync` from the S3 store on cirrus (MinIO now; RustFS after the
-# migration: change SRC_ENDPOINT, keep the key) to a ZFS dataset on thelio.
-# Scope: every bucket EXCEPT the `public-*` buckets NRP's STAC catalog mirrors,
-# which are re-creatable from NRP. That leaves the data that lives only here.
+# Two jobs, both writing to one ZFS dataset on thelio:
+#   offbox-sync         10:30 UTC  `rclone sync` of (a) the S3 store on cirrus (MinIO
+#                                  now; RustFS after the migration: change the SRC
+#                                  endpoint, keep the key), every bucket EXCEPT the
+#                                  `public-*` buckets NRP's STAC catalog mirrors, and
+#                                  (b) the JuiceFS homes' chunk bucket `juicefs-homes`
+#                                  on the pilot RustFS.
+#   offbox-juicefs-meta 05:00 UTC  `pg_dump` of the JuiceFS metadata DB (the homes'
+#                                  directory tree). It runs BEFORE the chunk sync, so
+#                                  every chunk a dump references gets copied; chunks
+#                                  deleted in between are kept in history/.
 #
 # Safety:
 #   - Overwritten or deleted objects move to /backup/history/<run>/<bucket>/ and are
@@ -12,7 +19,15 @@
 #     good run (MinIO's hostPaths are `DirectoryOrCreate`; on a failed mount it
 #     serves an EMPTY store, which a plain sync would mirror).
 #   - Per-bucket --max-delete.
-#   - The source key is read-only (mint-minio-key.sh).
+#   - Source credentials are read-only (mint-minio-key.sh; mint-juicefs-access.sh for
+#     the homes: a RustFS key on `juicefs-homes` and a `pg_read_all_data` role).
+#
+# Layout on the volume:
+#   buckets/<bucket>/          MinIO buckets
+#   juicefs/chunks/            the `juicefs-homes` bucket (its `<volume>/chunks/...`)
+#   juicefs/meta/*.dump        pg_dump -Fc, 30 days
+#   history/<run>/...          overwritten/deleted objects, 90 days
+#   state/                     last-success stamps, guards
 #
 # Storage: thelio's HDD pool is reserved for this copy. There is deliberately NO
 # StorageClass for it (one would let any workload claim those drives). The volume
@@ -143,6 +158,22 @@ data:
     # 4. Expire old history (whole runs).
     find "$B/history" -mindepth 1 -maxdepth 1 -type d -mtime +"$HISTORY_DAYS" -exec rm -rf {} +
 
+    # 4b. JuiceFS homes' chunks (skipped until the Secret exists).
+    if [ -n "${RCLONE_CONFIG_HOMES_ACCESS_KEY_ID:-}" ]; then
+      if [ -z "$(rclone lsf "homes:$HOMES_BUCKET" --max-depth 1 2>/dev/null | head -1)" ]; then
+        log "ERROR: homes:$HOMES_BUCKET lists empty or unreadable; not syncing it"; fail="$fail juicefs-homes"
+      else
+        log "== juicefs-homes"
+        rclone sync "homes:$HOMES_BUCKET" "$B/juicefs/chunks" \
+          --backup-dir "$B/history/$STAMP/juicefs-homes" \
+          --max-delete "$MAX_DELETE" \
+          --fast-list --transfers 8 --checkers 16 --stats 10m --stats-one-line \
+          || fail="$fail juicefs-homes"
+      fi
+    else
+      log "WARNING: no homes credentials (Secret offbox-juicefs); JuiceFS chunks NOT copied"
+    fi
+
     if [ -n "$fail" ]; then log "FAILED:$fail"; exit 1; fi
     echo "$n" > "$B/state/source-bucket-count"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$B/state/last-success"
@@ -184,6 +215,16 @@ spec:
                   valueFrom: {secretKeyRef: {name: offbox-source, key: access-key-id}}
                 - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
                   valueFrom: {secretKeyRef: {name: offbox-source, key: secret-access-key}}
+                # JuiceFS homes' chunk store: the pilot RustFS (path-style).
+                - {name: HOMES_BUCKET, value: juicefs-homes}
+                - {name: RCLONE_CONFIG_HOMES_TYPE, value: s3}
+                - {name: RCLONE_CONFIG_HOMES_PROVIDER, value: Other}
+                - {name: RCLONE_CONFIG_HOMES_FORCE_PATH_STYLE, value: "true"}
+                - {name: RCLONE_CONFIG_HOMES_ENDPOINT, value: "http://rustfs.rustfs.svc:9000"}
+                - name: RCLONE_CONFIG_HOMES_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: homes-access-key, optional: true}}
+                - name: RCLONE_CONFIG_HOMES_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: homes-secret-key, optional: true}}
               resources:
                 requests: {cpu: "1", memory: 1Gi}
                 limits: {memory: 4Gi}
@@ -195,3 +236,55 @@ spec:
               persistentVolumeClaim: {claimName: offbox-data}
             - name: scripts
               configMap: {name: offbox-sync-script}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offbox-juicefs-meta
+  namespace: offbox-backup
+spec:
+  schedule: "0 5 * * *"           # daily 05:00 UTC, before offbox-sync (10:30)
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: thelio   # same node as the RWO volume
+          containers:
+            - name: dump
+              image: postgres:16.14          # match the server (16.14)
+              env:
+                - {name: PGHOST, value: juicefs-pg.juicefs.svc}   # direct, not pgbouncer
+                - {name: PGUSER, value: offbox_dump}
+                - {name: PGDATABASE, value: juicefs}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: offbox-juicefs, key: pg-password}}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  d=/backup/juicefs/meta; mkdir -p "$d" /backup/state
+                  ts=$(date -u +%Y%m%dT%H%M%SZ)
+                  pg_dump -Fc -f "$d/juicefs-meta-$ts.dump.part"
+                  pg_restore -l "$d/juicefs-meta-$ts.dump.part" > /dev/null   # readable archive
+                  mv "$d/juicefs-meta-$ts.dump.part" "$d/juicefs-meta-$ts.dump"
+                  find "$d" -name 'juicefs-meta-*.dump' -mtime +30 -delete
+                  find "$d" -name '*.part' -mmin +600 -delete
+                  echo "$ts" > /backup/state/juicefs-meta-last-success
+                  ls -lh "$d" | tail -3
+              resources:
+                requests: {cpu: 500m, memory: 512Mi}
+                limits: {memory: 2Gi}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+          volumes:
+            - name: backup
+              persistentVolumeClaim: {claimName: offbox-data}
