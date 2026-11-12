@@ -6,13 +6,17 @@ chunk bucket `juicefs-homes` on the pilot RustFS, and the Postgres metadata DB t
 indexes it). This is their off-box copy, on a ZFS dataset on thelio's HDD pool, a
 different machine from cirrus.
 
-| job | when (UTC) | copies |
-|---|---|---|
-| `offbox-juicefs-meta` | 05:00 | `pg_dump -Fc` of the JuiceFS metadata DB → `juicefs/meta/`, 30 days |
-| `offbox-sync` | 10:30 | S3 store buckets → `buckets/`; `juicefs-homes` → `juicefs/chunks/` |
+One CronJob, `offbox-sync`, daily at 10:30 UTC, one pod in two steps:
+
+1. init container `juicefs-meta`: `pg_dump -Fc` of the JuiceFS metadata DB →
+   `juicefs/meta/`, 30 days. A failed dump does not stop the copy; it fails the Job
+   at the end instead.
+2. `sync`: S3 store buckets → `buckets/`; `juicefs-homes` → `juicefs/chunks/`.
 
 The dump runs first, so every chunk it references is in that day's sync; chunks
-deleted in between are in `history/`.
+deleted in between are in `history/`. Both steps share one pod because zfs-localpv
+refuses a second mount of the volume while another pod holds it, so separate Jobs
+can't overlap.
 
 - **Scope:** every bucket except the `public-*` buckets in NRP's STAC catalog (those
   are mirrors of NRP and come back from there). New buckets are picked up
