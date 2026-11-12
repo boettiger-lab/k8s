@@ -1,0 +1,64 @@
+# postgres_exporter for the JuiceFS metadata DB (juicefs-pg). Feeds the
+# JuiceFsPgConnections* alerts in ../monitoring/prometheus-values.yaml (#73):
+# this DB saturating its connections took every JuiceFS mount down on 2026-09-13,
+# unnoticed for hours.
+#
+# Connects as `pg_exporter` (role pg_monitor only; created with
+# mint-pg-exporter-role.sh, which also writes Secret juicefs/pg-exporter).
+# Scraped through the Service's prometheus.io annotations
+# (kubernetes-service-endpoints job). Per-table collectors are off: they add
+# ~20 series per JuiceFS table and no alert reads them.
+#
+# Apply: bash platform/juicefs/mint-pg-exporter-role.sh
+#        kubectl apply -f platform/juicefs/pg-exporter.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pg-exporter
+  namespace: juicefs
+  labels: {app: pg-exporter}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: pg-exporter}
+  template:
+    metadata:
+      labels: {app: pg-exporter}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cirrus      # beside the DB
+      securityContext: {runAsNonRoot: true, runAsUser: 65534}
+      containers:
+        - name: exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+          args:
+            - --no-collector.stat_user_tables
+            - --no-collector.statio_user_tables
+          env:
+            - {name: DATA_SOURCE_URI, value: "juicefs-pg.juicefs.svc:5432/juicefs?sslmode=disable"}
+            - {name: DATA_SOURCE_USER, value: pg_exporter}
+            - name: DATA_SOURCE_PASS
+              valueFrom: {secretKeyRef: {name: pg-exporter, key: password}}
+          ports:
+            - {name: metrics, containerPort: 9187}
+          readinessProbe:
+            httpGet: {path: /metrics, port: 9187}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-exporter
+  namespace: juicefs
+  labels: {app: pg-exporter}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+spec:
+  selector: {app: pg-exporter}
+  ports:
+    - {name: metrics, port: 9187, targetPort: 9187}
