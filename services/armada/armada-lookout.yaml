@@ -8,7 +8,7 @@ spec:
 
   image:
     repository: gresearch/armada-lookout
-    tag: "latest"
+    tag: "0.22.16"
 
   # No ingress, hostNames or clusterIssuer: Lookout is private. It has no
   # per-user view, so anyone who can open it sees every job's full pod spec,

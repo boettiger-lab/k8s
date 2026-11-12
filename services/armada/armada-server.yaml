@@ -9,7 +9,7 @@ spec:
 
   image:
     repository: gresearch/armada-server
-    tag: "latest"
+    tag: "0.22.16"
 
   # gRPC API ingress — Traefik requires h2c (HTTP/2 cleartext) backend scheme
   ingress:
