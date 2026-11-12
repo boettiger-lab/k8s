@@ -70,6 +70,17 @@ spec:
               valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: access-key}}
             - name: RUSTFS_SECRET_KEY
               valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: secret-key}}
+            # Dex as OIDC issuer for STS (AssumeRoleWithWebIdentity). Each value of
+            # the token's `groups` claim (GitHub `org:team`) selects the RustFS policy
+            # of that name; values with no such policy are ignored, and a token that
+            # matches none is refused. Client `rustfs-s3` is public (../dex/values.yaml),
+            # so console SSO is hidden: it would need a confidential client.
+            - {name: RUSTFS_IDENTITY_OPENID_ENABLE, value: "on"}
+            - {name: RUSTFS_IDENTITY_OPENID_CONFIG_URL, value: "https://dex.carlboettiger.info/.well-known/openid-configuration"}
+            - {name: RUSTFS_IDENTITY_OPENID_CLIENT_ID, value: rustfs-s3}
+            - {name: RUSTFS_IDENTITY_OPENID_SCOPES, value: "openid,profile,email,groups"}
+            - {name: RUSTFS_IDENTITY_OPENID_CLAIM_NAME, value: groups}
+            - {name: RUSTFS_IDENTITY_OPENID_HIDE_FROM_UI, value: "on"}
           volumeMounts:
             - {name: data, mountPath: /data}
           resources:
