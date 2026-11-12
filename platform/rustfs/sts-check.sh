@@ -56,6 +56,10 @@ check deny "list whole sts-test"                           "${A[@]}" list-object
 check deny "list private-cboettig"                         "${A[@]}" list-objects-v2 --bucket private-cboettig --max-items 1
 check deny "put to public-dem"                             "${A[@]}" put-object --bucket public-dem --key sts-check.txt --body "$T/f"
 check ok   "delete own object"                             "${A[@]}" delete-object --bucket sts-test --key "users/$U/check.txt"
+# Diagnostic: the same grant with the login written literally (policy statement on
+# sts-test/literal/<login>/*). OK here but denied above = ${jwt:...} not substituted.
+check ok   "put literal path  sts-test/literal/$U/check.txt" "${A[@]}" put-object --bucket sts-test --key "literal/$U/check.txt" --body "$T/f"
+check ok   "delete literal path object"                     "${A[@]}" delete-object --bucket sts-test --key "literal/$U/check.txt"
 # A tampered token must be refused.
 sed 's/\(.*\)\(.....\)$/\1AAAAA/' "$T/id" > "$T/bad"
 if sts "$T/bad" | grep -q '<AccessKeyId>'; then echo "FAIL tampered token accepted"; fail=$((fail+1)); else echo "PASS deny  tampered token refused"; pass=$((pass+1)); fi
