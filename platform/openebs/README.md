@@ -14,8 +14,13 @@ user between nodes, see [`../juicefs/`](../juicefs/).
   Postgres metadata DB and its backups, RustFS data, Prometheus and Grafana, and
   hash-archive (the one `openebs-zfs-ext4` user — LevelDB needs block semantics).
 
-**All cluster storage lives on cirrus.** Only cirrus runs a zfs-localpv node plugin, so
-a PVC on these classes pins its pod there.
+**Live cluster storage lives on cirrus.** The StorageClasses all name pool `tank`, so a
+PVC on them pins its pod there.
+
+> **thelio's HDD pool (`openebs-zpool`) is off-box backup only.** thelio runs the node
+> plugin, but **no StorageClass names its pool, and none should**: a class would let any
+> workload claim those drives. Its one volume is provisioned statically and pre-bound to
+> the backup's claim ([`../offbox-backup/`](../offbox-backup/)).
 
 > **nimbus has no storage role.** It joined as a compute-only, tainted worker
 > ([`../../cluster/nodes/nimbus/join/`](../../cluster/nodes/nimbus/join/)) and nothing

@@ -1,0 +1,197 @@
+# Off-box copy of the object store's primary data, on thelio's HDD pool.
+#
+# Daily `rclone sync` from the S3 store on cirrus (MinIO now; RustFS after the
+# migration: change SRC_ENDPOINT, keep the key) to a ZFS dataset on thelio.
+# Scope: every bucket EXCEPT the `public-*` buckets NRP's STAC catalog mirrors,
+# which are re-creatable from NRP. That leaves the data that lives only here.
+#
+# Safety:
+#   - Overwritten or deleted objects move to /backup/history/<run>/<bucket>/ and are
+#     kept HISTORY_DAYS, so a bad sync is recoverable.
+#   - Aborts before copying if the source lists far fewer buckets than the last
+#     good run (MinIO's hostPaths are `DirectoryOrCreate`; on a failed mount it
+#     serves an EMPTY store, which a plain sync would mirror).
+#   - Per-bucket --max-delete.
+#   - The source key is read-only (mint-minio-key.sh).
+#
+# Storage: thelio's HDD pool is reserved for this copy. There is deliberately NO
+# StorageClass for it (one would let any workload claim those drives). The volume
+# below is static: a ZFSVolume the node agent turns into dataset
+# `openebs-zpool/offbox-data`, and a PV pre-bound by claimRef to this one PVC.
+# To grow it: raise spec.capacity on the ZFSVolume (it is the dataset quota) and
+# the PV/PVC sizes to match.
+#
+# Apply:      bash platform/offbox-backup/mint-minio-key.sh   # namespace + Secret
+#             kubectl apply -f platform/offbox-backup/offbox-backup.yaml
+# Manual run: kubectl -n offbox-backup create job --from=cronjob/offbox-sync offbox-sync-manual-$(date -u +%Y%m%d%H%M)
+# Restore:    files are plain objects under /backup/buckets/<bucket>/; copy them
+#             back with `rclone copy` from a pod that mounts the PVC.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: offbox-backup
+---
+apiVersion: zfs.openebs.io/v1
+kind: ZFSVolume
+metadata:
+  name: offbox-data
+  namespace: openebs
+  labels: {kubernetes.io/nodename: thelio}
+  finalizers: [zfs.openebs.io/finalizer]
+spec:
+  capacity: "4398046511104"     # 4 TiB quota; the pool has ~9 TB
+  compression: lz4
+  dedup: "off"
+  fsType: zfs
+  ownerNodeID: thelio
+  poolName: openebs-zpool
+  quotaType: quota
+  recordsize: 1M                # whole objects, mostly large
+  volumeType: DATASET
+status:
+  state: Pending                # the node agent creates the dataset, then sets Ready
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: offbox-data
+spec:
+  capacity: {storage: 4Ti}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  volumeMode: Filesystem
+  claimRef: {namespace: offbox-backup, name: offbox-data}   # only this PVC can bind it
+  csi:
+    driver: zfs.csi.openebs.io
+    fsType: zfs
+    volumeHandle: offbox-data
+    volumeAttributes:
+      openebs.io/cas-type: localpv-zfs
+      openebs.io/poolname: openebs-zpool
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: openebs.io/nodeid, operator: In, values: [thelio]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: offbox-data
+  namespace: offbox-backup
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ""
+  volumeName: offbox-data
+  resources:
+    requests:
+      storage: 4Ti
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: offbox-sync-script
+  namespace: offbox-backup
+data:
+  sync.sh: |
+    #!/bin/sh
+    set -u
+    B=/backup
+    STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
+    mkdir -p "$B/buckets" "$B/history" "$B/state"
+    log() { echo "$(date -u +%H:%M:%S) $*"; }
+
+    # 1. Buckets to skip: the ones NRP's catalog mirrors. If the catalog is
+    #    unreachable, reuse the last good list; with no list at all, skip nothing
+    #    (over-copying costs disk, under-copying costs data).
+    if wget -qO /tmp/cat.json -T 60 "$CATALOG_URL" \
+       && grep -o '"href": *"[^"]*"' /tmp/cat.json | grep -o '/public-[a-z0-9-]*/' \
+          | tr -d / | sort -u > /tmp/skip.txt \
+       && [ "$(wc -l < /tmp/skip.txt)" -ge 40 ]; then
+      cp /tmp/skip.txt "$B/state/mirror-scope.txt"
+      log "scope: skipping $(wc -l < /tmp/skip.txt) NRP-mirrored buckets (catalog)"
+    elif [ -s "$B/state/mirror-scope.txt" ]; then
+      cp "$B/state/mirror-scope.txt" /tmp/skip.txt
+      log "WARNING: catalog unreachable; reusing the last mirror scope ($(wc -l < /tmp/skip.txt))"
+    else
+      : > /tmp/skip.txt
+      log "WARNING: no mirror scope at all; copying every bucket"
+    fi
+
+    # 2. Source buckets, with the emptied-store guard.
+    rclone lsf src: --dirs-only | tr -d / | sort > /tmp/src.txt || { log "ERROR: cannot list source"; exit 1; }
+    n=$(wc -l < /tmp/src.txt); last=$(cat "$B/state/source-bucket-count" 2>/dev/null || echo 0)
+    if [ "$n" -eq 0 ] || [ $((n * 2)) -lt "$last" ]; then
+      log "ERROR: source lists $n buckets, last good run saw $last. Refusing to sync."; exit 1
+    fi
+    grep -vxF -f /tmp/skip.txt /tmp/src.txt > /tmp/todo.txt
+    log "source: $n buckets; copying $(wc -l < /tmp/todo.txt)"
+
+    # 3. Sync each bucket; keep going past a failure, report it at the end.
+    fail=""
+    while read -r b; do
+      log "== $b"
+      rclone sync "src:$b" "$B/buckets/$b" \
+        --backup-dir "$B/history/$STAMP/$b" \
+        --max-delete "$MAX_DELETE" \
+        --fast-list --transfers 8 --checkers 16 --stats 10m --stats-one-line \
+        || fail="$fail $b"
+    done < /tmp/todo.txt
+
+    # 4. Expire old history (whole runs).
+    find "$B/history" -mindepth 1 -maxdepth 1 -type d -mtime +"$HISTORY_DAYS" -exec rm -rf {} +
+
+    if [ -n "$fail" ]; then log "FAILED:$fail"; exit 1; fi
+    echo "$n" > "$B/state/source-bucket-count"
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$B/state/last-success"
+    log "done; $(du -sh "$B/buckets" | cut -f1) in buckets/"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: offbox-sync
+  namespace: offbox-backup
+spec:
+  schedule: "30 10 * * *"         # daily 10:30 UTC (02:30/03:30 Pacific)
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid       # the first run takes hours; never overlap
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0             # a failed run waits for tomorrow, not a full retry
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: thelio
+          containers:
+            - name: sync
+              image: rclone/rclone:1.75.2
+              command: ["/bin/sh", "/scripts/sync.sh"]
+              env:
+                - {name: CATALOG_URL, value: "https://s3-west.nrp-nautilus.io/public-data/stac/catalog.json"}
+                - {name: HISTORY_DAYS, value: "90"}
+                - {name: MAX_DELETE, value: "5000"}
+                - {name: RCLONE_CONFIG_SRC_TYPE, value: s3}
+                - {name: RCLONE_CONFIG_SRC_PROVIDER, value: Minio}
+                - {name: RCLONE_CONFIG_SRC_ENDPOINT, value: "http://minio-svc.minio.svc:9000"}
+                - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: offbox-source, key: access-key-id}}
+                - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: offbox-source, key: secret-access-key}}
+              resources:
+                requests: {cpu: "1", memory: 1Gi}
+                limits: {memory: 4Gi}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+                - {name: scripts, mountPath: /scripts, readOnly: true}
+          volumes:
+            - name: backup
+              persistentVolumeClaim: {claimName: offbox-data}
+            - name: scripts
+              configMap: {name: offbox-sync-script}
