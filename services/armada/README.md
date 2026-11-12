@@ -260,6 +260,11 @@ Armada's default config requires three Kubernetes PriorityClasses:
   its pod, so models request the whole node (`services/vllm`, ~0.9Gi left) and
   the server rejects jobs under 1Gi (`minJobResources`). Jobs therefore land
   only on GB10s without a model.
+- A job can pick nodes with a `nodeSelector` on `kubernetes.io/hostname`,
+  `kubernetes.io/arch` (`amd64`, or `arm64` for the GB10s) or
+  `nvidia.com/gpu.product`. These are the executor's `trackedNodeLabels`; a
+  selector on any other label never matches, and the job stays queued. A job
+  with an amd64-only image must select `kubernetes.io/arch: amd64`.
 
 `value` and `preemptionPolicy` are immutable, so `install.sh` recreates any class
 that differs. Running pods keep the priority they started with.
