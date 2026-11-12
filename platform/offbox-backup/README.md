@@ -40,7 +40,8 @@ namespace's PVC, `Retain`). Don't add a class for it.
 
 | file | |
 |---|---|
-| `offbox-backup.yaml` | static volume, PVC, sync script, daily CronJob (10:30 UTC) |
+| `offbox-data-zfsvolume.yaml` | the dataset; `kubectl create` once, never apply (apply resets its state to Pending) |
+| `offbox-backup.yaml` | static PV and PVC, sync script, daily CronJob (10:30 UTC) |
 | `mint-minio-key.sh` | read-only `offbox-read` key on MinIO → Secret `offbox-source` |
 | `mint-juicefs-access.sh` | read-only `offbox-read` key on the pilot RustFS (`juicefs-homes` only) and Postgres role `offbox_dump` (`pg_read_all_data`) → Secret `offbox-juicefs` |
 
@@ -49,6 +50,7 @@ namespace's PVC, `Retain`). Don't add a class for it.
 ```bash
 bash platform/offbox-backup/mint-minio-key.sh
 bash platform/offbox-backup/mint-juicefs-access.sh
+kubectl create -f platform/offbox-backup/offbox-data-zfsvolume.yaml
 kubectl apply -f platform/offbox-backup/offbox-backup.yaml
 kubectl -n offbox-backup create job --from=cronjob/offbox-sync offbox-sync-first
 ```

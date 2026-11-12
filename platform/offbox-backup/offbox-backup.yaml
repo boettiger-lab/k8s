@@ -30,12 +30,13 @@
 #
 # Storage: thelio's HDD pool is reserved for this copy. There is deliberately NO
 # StorageClass for it (one would let any workload claim those drives). The volume
-# below is static: a ZFSVolume the node agent turns into dataset
-# `openebs-zpool/offbox-data`, and a PV pre-bound by claimRef to this one PVC.
-# To grow it: raise spec.capacity on the ZFSVolume (it is the dataset quota) and
-# the PV/PVC sizes to match.
+# below is static: a ZFSVolume (offbox-data-zfsvolume.yaml, created once) the node
+# agent turns into dataset `openebs-zpool/offbox-data`, and a PV pre-bound by
+# claimRef to this one PVC. To grow it: raise spec.capacity on the live ZFSVolume
+# (kubectl edit; it is the dataset quota) and the PV/PVC sizes to match.
 #
 # Apply:      bash platform/offbox-backup/mint-minio-key.sh   # namespace + Secret
+#             kubectl create -f platform/offbox-backup/offbox-data-zfsvolume.yaml   # once
 #             kubectl apply -f platform/offbox-backup/offbox-backup.yaml
 # Manual run: kubectl -n offbox-backup create job --from=cronjob/offbox-sync offbox-sync-manual-$(date -u +%Y%m%d%H%M)
 # Restore:    files are plain objects under /backup/buckets/<bucket>/; copy them
@@ -45,26 +46,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: offbox-backup
----
-apiVersion: zfs.openebs.io/v1
-kind: ZFSVolume
-metadata:
-  name: offbox-data
-  namespace: openebs
-  labels: {kubernetes.io/nodename: thelio}
-  finalizers: [zfs.openebs.io/finalizer]
-spec:
-  capacity: "4398046511104"     # 4 TiB quota; the pool has ~9 TB
-  compression: lz4
-  dedup: "off"
-  fsType: zfs
-  ownerNodeID: thelio
-  poolName: openebs-zpool
-  quotaType: quota
-  recordsize: 1M                # whole objects, mostly large
-  volumeType: DATASET
-status:
-  state: Pending                # the node agent creates the dataset, then sets Ready
 ---
 apiVersion: v1
 kind: PersistentVolume

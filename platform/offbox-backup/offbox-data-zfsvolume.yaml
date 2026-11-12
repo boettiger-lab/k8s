@@ -1,0 +1,27 @@
+# The dataset behind offbox-data: openebs-zpool/offbox-data on thelio.
+#
+# Create ONCE, with `kubectl create`, not apply. This CRD has no status
+# subresource, so every apply writes `state: Pending` back over the node agent's
+# `Ready` and makes it reprocess the volume. To change it later (e.g. raise the
+# quota), use `kubectl -n openebs edit zfsvolume offbox-data`.
+#
+#   kubectl create -f platform/offbox-backup/offbox-data-zfsvolume.yaml
+apiVersion: zfs.openebs.io/v1
+kind: ZFSVolume
+metadata:
+  name: offbox-data
+  namespace: openebs
+  labels: {kubernetes.io/nodename: thelio}
+  finalizers: [zfs.openebs.io/finalizer]
+spec:
+  capacity: "4398046511104"     # 4 TiB quota; the pool has ~9 TB
+  compression: lz4
+  dedup: "off"
+  fsType: zfs
+  ownerNodeID: thelio
+  poolName: openebs-zpool
+  quotaType: quota
+  recordsize: 1M                # whole objects, mostly large
+  volumeType: DATASET
+status:
+  state: Pending                # the node agent creates the dataset, then sets Ready
