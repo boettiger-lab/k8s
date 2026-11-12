@@ -40,6 +40,14 @@ applicationConfig:
     # and the server rejects jobs under 1Gi (armada-server.yaml).
     toleratedTaints:
       - dedicated
+    # Labels the executor reports to the scheduler; a job's nodeSelector can only
+    # match these (anything else leaves it queued as "does not fit"). Replaces the
+    # default list, so it repeats kubernetes.io/hostname. arch matters since the
+    # GB10s (arm64) joined the pool: an amd64-only image must select amd64.
+    trackedNodeLabels:
+      - kubernetes.io/hostname
+      - kubernetes.io/arch
+      - nvidia.com/gpu.product
   executorApiConnection:
     armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
     forceNoTls: true
