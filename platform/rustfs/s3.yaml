@@ -1,0 +1,123 @@
+# The lab's S3 store: RustFS on cirrus's `nvme` pool. Replaces MinIO and, later, the
+# pilot RustFS in cirrus.yaml (plan: cluster-ops object-store-migration.md).
+#
+# Runs ALONGSIDE MinIO and the pilot until the cutover. Names:
+#   s3.carlboettiger.info     S3 API (this file; DNS-only, no Cloudflare proxy)
+#   data. / minio.            moved here at the cutover: s3-cutover-ingress.yaml
+#   rustfs.rustfs.svc:9000    JuiceFS's endpoint; repointed here in plan step 5 by
+#                             changing the `rustfs` Service selector to app: rustfs-s3
+#
+# Prerequisites: pool `nvme` (cluster-ops scripts/create-nvme-pool.sh) and the
+# StorageClasses in ../openebs/storageclass.yaml. Root credentials (NOT in this file):
+#   kubectl -n rustfs create secret generic rustfs-s3-root \
+#     --from-literal=access-key=<AK> --from-literal=secret-key=<SK>
+#
+# Users, policies and service accounts come from MinIO's IAM export at the cutover
+# (`mc admin cluster iam import`), which keeps every access key and secret.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rustfs-s3-data
+  namespace: rustfs
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: openebs-nvme-bulk    # pool `nvme`, 1M records, Retain
+  resources:
+    requests:
+      storage: 12Ti      # a ZFS quota, not a reservation; MinIO is ~6 TB. Expandable.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs-s3
+  namespace: rustfs
+  labels: {app: rustfs-s3}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: rustfs-s3}
+  # Single replica on a node-local volume: never two pods on the same /data.
+  strategy: {type: Recreate}
+  template:
+    metadata:
+      labels: {app: rustfs-s3}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        # Skip the recursive chown on restart (see cirrus.yaml: ~20 min on 2.5M files).
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: rustfs
+          # Pinned. 1.0.4 passed the feature tests (cluster-ops object-store-migration.md).
+          image: rustfs/rustfs:1.0.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {containerPort: 9000, name: api}
+            - {containerPort: 9001, name: console}
+          env:
+            - {name: RUSTFS_ADDRESS, value: ":9000"}
+            - {name: RUSTFS_VOLUMES, value: /data}
+            - {name: RUSTFS_CONSOLE_ENABLE, value: "true"}
+            # RUSTFS_SERVER_DOMAINS must stay unset: it switches RustFS to
+            # virtual-host bucket parsing, which breaks path-style clients, and
+            # the `minio.` alias works only because RustFS signs against the
+            # Host the client used.
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: access-key}}
+            - name: RUSTFS_SECRET_KEY
+              valueFrom: {secretKeyRef: {name: rustfs-s3-root, key: secret-key}}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            # The pilot settles at ~3.4 GiB for 25 GB of JuiceFS chunks and OOMed
+            # at 4 GiB; this one carries ~6 TB and every S3 client. Start roomy,
+            # then size from ContainerMemoryNearLimit.
+            requests: {cpu: "1", memory: 6Gi}
+            limits: {cpu: "4", memory: 16Gi}
+          readinessProbe:
+            httpGet: {path: /health, port: 9000}
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: rustfs-s3-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-s3
+  namespace: rustfs
+  labels: {app: rustfs-s3}
+spec:
+  type: ClusterIP
+  selector: {app: rustfs-s3}
+  ports:
+    - {name: api, port: 9000, targetPort: 9000}
+    - {name: console, port: 9001, targetPort: 9001}
+---
+# s3.carlboettiger.info: DNS-only (not proxied), so no Cloudflare 100 MB upload cap
+# or 100 s timeout on large objects.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: s3
+  namespace: rustfs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [s3.carlboettiger.info]
+      secretName: s3-tls
+  rules:
+    - host: s3.carlboettiger.info
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: rustfs-s3, port: {name: api}}}

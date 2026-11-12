@@ -10,6 +10,9 @@ user between nodes, see [`../juicefs/`](../juicefs/).
 - **StorageClasses:** `openebs-zfs` (ZFS dataset, 128k recordsize) and
   `openebs-zfs-ext4` (ext4 on a zvol, 16k — for workloads that need real block
   semantics). Both use pool `tank`, lz4 compression, and allow volume expansion.
+- **`openebs-nvme`** (128k) and **`openebs-nvme-bulk`** (1M, `Retain`, for object
+  stores): cirrus pool `nvme`, the raidz2 NVMe pool. The general home for data that
+  matters once the pool exists.
 - **Consumers:** JupyterHub singleuser homes (`claim-*` PVCs in `jupyter`), the JuiceFS
   Postgres metadata DB and its backups, RustFS data, Prometheus and Grafana, and
   hash-archive (the one `openebs-zfs-ext4` user — LevelDB needs block semantics).

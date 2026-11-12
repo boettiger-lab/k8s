@@ -1,0 +1,54 @@
+# Applied AT THE CUTOVER ONLY (plan step 6), together with deleting MinIO's
+# `minio-ingress` and `data-ingress` in namespace `minio`. Before then these hosts
+# belong to MinIO, and two Ingresses claiming one host would split its traffic.
+#
+#   kubectl -n minio delete ingress minio-ingress data-ingress
+#   kubectl apply -f platform/rustfs/s3-cutover-ingress.yaml
+#
+# `minio.` is an ALIAS of `s3.` (same Service), not a redirect: SigV4 signs the Host
+# header and S3 clients don't follow redirects on signed requests. It keeps every
+# NRP job, app and published link working. Its proxy setting matches today's record
+# (DNS-only: it resolves straight to cirrus). Retire it when the access log goes quiet.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-alias
+  namespace: rustfs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [minio.carlboettiger.info]
+      secretName: minio-alias-tls
+  rules:
+    - host: minio.carlboettiger.info
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: rustfs-s3, port: {name: api}}}
+---
+# data.: the web console (same role as MinIO's console). Proxied, as today.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: data
+  namespace: rustfs
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [data.carlboettiger.info]
+      secretName: data-console-tls
+  rules:
+    - host: data.carlboettiger.info
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: rustfs-s3, port: {name: console}}}
