@@ -33,6 +33,13 @@ applicationConfig:
           action: Delete
           rules:
             - onConditions: ["Evicted"]
+  kubernetes:
+    # The executor reports a node with any other NoSchedule taint as
+    # unschedulable, and the scheduler then leaves it out of the pool whatever
+    # the job tolerates. Safe only because GB10 models request the whole node
+    # and the server rejects jobs under 1Gi (armada-server.yaml).
+    toleratedTaints:
+      - dedicated
   executorApiConnection:
     armadaUrl: armada-scheduler.armada.svc.cluster.local:50051
     forceNoTls: true

@@ -51,6 +51,11 @@ spec:
           operator: "Equal"
           value: "gb10"
           effect: "NoSchedule"
+      # A GB10 serving a model has ~0.9Gi unrequested (models request the whole
+      # node, services/vllm). Requiring 1Gi per job keeps every job off model
+      # nodes, so jobs reach only model-free GB10s.
+      minJobResources:
+        memory: "1Gi"
 
     eventsApiRedis:
       addrs:
