@@ -35,3 +35,38 @@ parameters:
 provisioner: zfs.csi.openebs.io
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
+---
+# cirrus pool `nvme`: raidz2 of WD SN850X NVMe (cluster-ops object-store-migration.md).
+# The general-purpose class for data that matters: homes, hot PVCs. Same shape as
+# `openebs-zfs`, different pool. Pool `nvme` exists only on cirrus, so these bind there.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-nvme
+allowVolumeExpansion: true
+parameters:
+  recordsize: "128k"
+  compression: "lz4"
+  dedup: "off"
+  fstype: "zfs"
+  poolname: "nvme"
+provisioner: zfs.csi.openebs.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+---
+# Same pool, 1M records and Retain: for object stores (RustFS), whose files are whole
+# objects, mostly large. Retain because a deleted PVC here would be the S3 store.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openebs-nvme-bulk
+allowVolumeExpansion: true
+parameters:
+  recordsize: "1M"
+  compression: "lz4"
+  dedup: "off"
+  fstype: "zfs"
+  poolname: "nvme"
+provisioner: zfs.csi.openebs.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate

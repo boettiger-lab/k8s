@@ -2,7 +2,19 @@
 
 Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS storage.
 
-> Everything here targets **cirrus** (`cirrus.yaml`, pool `tank`). The old nimbus
+> **Two instances during the MinIO → RustFS migration** (plan: cluster-ops
+> `object-store-migration.md`):
+>
+> | file | instance | pool | role |
+> |---|---|---|---|
+> | `cirrus.yaml` | `rustfs` (pilot) | `tank` | JuiceFS homes' chunk store at `rustfs.rustfs.svc:9000`; retired in plan step 5 |
+> | `s3.yaml` | `rustfs-s3` | `nvme` | the lab's S3 store at `s3.carlboettiger.info`; replaces MinIO |
+> | `s3-cutover-ingress.yaml` | `rustfs-s3` | | `minio.` (alias) and `data.` (console), applied only at the cutover |
+>
+> At step 5 the `rustfs` Service's selector moves to `app: rustfs-s3`, so JuiceFS's
+> endpoint never changes.
+>
+> The rest of this page describes the pilot (`cirrus.yaml`, pool `tank`). The old nimbus
 > deployment at `s3.nimbus.carlboettiger.info` was retired when nimbus joined the
 > cirrus cluster as a compute-only worker — see [`../../cluster/nodes/nimbus/join/`](../../cluster/nodes/nimbus/join/).
 > Its 1 Ti PVC held 276 KiB; nothing was migrated.
