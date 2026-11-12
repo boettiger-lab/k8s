@@ -81,10 +81,15 @@ alertmanager:
 #
 # `nodes` added 2026-09-29 for Gb10NoAllocatableGpu: two metrics, a few
 # series per node (one allocatable series per resource, one per taint).
+#
+# `cronjobs` added 2026-11-11 for BackupStale: two metrics, one series per
+# CronJob each.
 kube-state-metrics:
   enabled: true
-  collectors: [deployments, statefulsets, pods, nodes]
+  collectors: [deployments, statefulsets, pods, nodes, cronjobs]
   metricAllowlist:
+    - kube_cronjob_created
+    - kube_cronjob_status_last_successful_time
     - kube_node_status_allocatable
     - kube_node_spec_taint
     - kube_deployment_spec_replicas
@@ -389,6 +394,55 @@ serverFiles:
             annotations:
               summary: "{{ $labels.namespace }}/{{ $labels.pod }} stuck in {{ $labels.reason }}"
               description: "Container {{ $labels.container }} has been waiting with reason {{ $labels.reason }} for 15m."
+
+      - name: storage
+        rules:
+          # Every pool node-exporter sees: cirrus `tank`, thelio's off-box pool,
+          # and later cirrus `nvme`. state is online|degraded|faulted|offline|
+          # removed|unavail|suspended; anything but online is a lost disk or worse.
+          - alert: ZfsPoolNotOnline
+            expr: node_zfs_zpool_state{state!="online"} == 1
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $labels.node }}: ZFS pool {{ $labels.zpool }} is {{ $labels.state }}"
+              description: "Run `zpool status -x` on the node. A degraded mirror/raidz still serves data, with less redundancy until the disk is replaced."
+
+          # Free space of a pool, read from its root dataset's mount (avail of
+          # the root dataset == free in the pool). node-exporter has no pool-size
+          # metric, so this is a floor, not a percentage: ~1 TiB is 12-15% of
+          # tank or thelio's pool. ZFS slows badly and fragments past ~85-90%.
+          - alert: ZfsPoolLowFree
+            expr: node_filesystem_avail_bytes{fstype="zfs", mountpoint=~"/(tank|nvme|openebs-zpool)"} < 1099511627776
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }}: ZFS pool {{ $labels.device }} has under 1 TiB free"
+              description: "{{ $value | humanize1024 }}B free. Check `zfs list -o space` for the largest datasets."
+
+          # Daily backup CronJobs with no success in 36h: the off-box copy on
+          # thelio and the JuiceFS metadata dump. The second rule catches one
+          # that has never succeeded (no last-success series at all).
+          - alert: BackupStale
+            expr: |
+              time() - kube_cronjob_status_last_successful_time{namespace="offbox-backup"} > 36 * 3600
+                or
+              time() - kube_cronjob_status_last_successful_time{namespace="juicefs", cronjob="juicefs-pg-backup"} > 36 * 3600
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.cronjob }}: no successful run in 36h"
+              description: "Last success {{ $value | humanizeDuration }} ago. `kubectl -n {{ $labels.namespace }} get jobs` and read the newest one's log."
+
+          - alert: BackupNeverSucceeded
+            expr: |
+              (time() - kube_cronjob_created{namespace="offbox-backup"} > 48 * 3600)
+                unless on(namespace, cronjob) kube_cronjob_status_last_successful_time
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.cronjob }} has never completed successfully"
+              description: "Created over 48h ago with no successful run. Check its Jobs and the Secret it needs."
 
       - name: disks
         rules:
