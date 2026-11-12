@@ -8,7 +8,7 @@ spec:
 
   image:
     repository: gresearch/armada-event-ingester
-    tag: "latest"
+    tag: "0.22.16"
 
   applicationConfig:
     pulsar:
