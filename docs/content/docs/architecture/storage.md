@@ -12,7 +12,7 @@ layers, each for a different job.
 |---|---|---|---|
 | **ZFS LocalPV** | [OpenEBS ZFS-LocalPV](https://github.com/openebs/zfs-localpv) on a mirrored ZFS pool | databases, service state, older home directories | `openebs-zfs`, `openebs-zfs-ext4` |
 | **Shared home directories** | [JuiceFS](https://juicefs.com/): metadata in PostgreSQL, data in an in-cluster [RustFS](https://rustfs.com/) S3 store | JupyterHub homes, mountable read-write from any node | `juicefs-home`, `juicefs-sc` |
-| **Object storage** | MinIO on dedicated NVMe drives | user-facing S3 ([Object storage]({{< relref "/docs/using/object-storage" >}})) | — |
+| **Object storage** | [RustFS](https://rustfs.com/) on dedicated NVMe drives | user-facing S3 ([Object storage]({{< relref "/docs/using/object-storage" >}})) | — |
 | **Scratch** | K3s `local-path` | CI runner workspaces | `local-path` |
 
 ## Why shared homes
@@ -27,6 +27,7 @@ tolerate it.
 
 ## Backups
 
-The JuiceFS metadata database is backed up on a schedule. Details of the
-physical drives and the backup targets are kept in the lab's internal
-operations notes.
+Every night the object store and the shared home directories are copied to a
+separate disk pool on another machine, and the JuiceFS metadata database is
+dumped on its own schedule. Details of the physical drives are kept in the
+lab's internal operations notes.
