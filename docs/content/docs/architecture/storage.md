@@ -20,7 +20,7 @@ layers, each for a different job.
 ZFS LocalPV volumes are node-local. A notebook that uses one can only start on
 the node holding its volume. JuiceFS splits storage from compute: the data
 still sits on the storage node, but any node with the JuiceFS client can mount
-a home. This is what lets a notebook land on a GB10 or the notebook node with
+a home. This is what lets a notebook land on a GB10 or the general worker with
 the same home directory. `juicefs-home` is the default for new homes.
 `juicefs-sc` adds client-side write-back caching for workloads that can
 tolerate it.
