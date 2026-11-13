@@ -14,8 +14,12 @@ organization or team.
 
 ## API keys and storage credentials
 
-The LLM and speech APIs need an API key, and object storage needs S3
-credentials. Neither is issued automatically. Ask a cluster admin.
+**LLM and speech APIs:** your key is a JupyterHub API token. Inside a
+JupyterHub server it is already set as `JUPYTERHUB_API_TOKEN`; elsewhere, make
+one on the hub's token page. See [LLM and speech APIs]({{< relref "llm-api" >}}).
+
+**Object storage:** S3 credentials are not issued automatically yet. Ask a
+cluster admin.
 
 ## kubectl
 

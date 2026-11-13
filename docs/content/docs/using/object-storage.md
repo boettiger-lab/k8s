@@ -10,7 +10,8 @@ The cluster runs an S3-compatible object store.
 | | |
 |---|---|
 | S3 endpoint | `https://minio.carlboettiger.info` |
-| Public read access | `https://data.carlboettiger.info/<bucket>/<key>` for buckets that allow anonymous read |
+| Public read access | `https://minio.carlboettiger.info/<bucket>/<key>` for buckets that allow anonymous read |
+| Web console | `https://data.carlboettiger.info` (log in with your S3 credentials) |
 | Addressing | path-style (`endpoint/bucket/key`), not virtual-host style |
 | Credentials | from a cluster admin |
 
