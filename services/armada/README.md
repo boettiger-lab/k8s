@@ -1,8 +1,7 @@
 # Armada Batch Scheduler
 
-> **STATUS: NOT DEPLOYED (torn down 2026-07-11; recipe kept for redeploy).**
-> Redeploy work is tracked in k8s#55. Pulsar now runs as a single standalone
-> pod — see [Pulsar](#pulsar-standalone-mode) below for why.
+User-facing guide: [Batch jobs](../../docs/content/docs/using/batch-jobs.md) on
+the docs site. This README covers installing and operating it.
 
 [Armada](https://armadaproject.io/) is a CNCF sandbox project for high-throughput batch job scheduling across Kubernetes clusters. It provides fair-share queuing, gang scheduling, and a web UI (Lookout) for job monitoring.
 
@@ -47,7 +46,7 @@ The script installs dependencies in order, then applies all component CRs.
 | Lookout UI | private: `kubectl -n armada port-forward svc/armada-lookout 8080:8080`, then http://localhost:8080 (owners only) |
 | gRPC API | `armada-api.carlboettiger.info:443` |
 
-## Submitting Jobs
+## Setting up armadactl
 
 Install `armadactl`:
 ```bash
@@ -99,7 +98,7 @@ keyring.
 Key constraints discovered through testing:
 
 - **Namespace:** `armada-jobs` (jobs must specify this explicitly)
-- **Queues:** one per user, named after their GitHub login, created by an owner with `./add-user.sh <github-login>`. Only that user (and lab owners) can submit to, cancel in or watch it. Each queue may use at most half of the capacity Armada sees (untainted nodes, minus what models and notebooks hold; about 65 CPU, 38 GiB and 5 GPU slices on 2026-11-07; `armada-scheduler.yaml`). Jobs over the cap wait in the queue. `test` is an owners-only smoke-test queue.
+- **Queues:** one per user, named after their GitHub login, created by an owner with `./add-user.sh <github-login>`. Only that user (and lab owners) can submit to, cancel in or watch it. There is no per-queue cap; fair share decides which queue's job starts next (see [Backfill](#backfill-armada-fills-idle-hardware-and-gives-way-to-everything-else)). `test` is an owners-only smoke-test queue.
 - **Minimum resources:** `cpu: 1, memory: 1Gi` — smaller requests (e.g. cpu: 100m) are not scheduled
 - **No opportunistic priority class** — only `armada-default`, `armada-preemptible`, `armada-resilient`
 - **No pool annotation needed** — the default pool works without explicit annotation
@@ -137,9 +136,9 @@ Watch job events (streams until job completes):
 armadactl watch test my-first-jobs
 ```
 
-Or check job status with:
+Or ask the scheduler why one job is (not) running:
 ```bash
-armadactl get job-report -q test --jobset my-first-jobs
+armadactl get job-report <job-id>
 ```
 
 Lookout is not public: it has no per-user view, so it would show every user's job
@@ -147,8 +146,11 @@ specs, env vars included. Owners can port-forward to it (see Endpoints).
 
 ## Component Image Tags
 
-All components use the `latest` tag from `gresearch/` on Docker Hub (Armada does
-not publish semver-tagged images; SHA tags are available for pinning).
+Every Armada component, the executor included, is pinned to the same release
+tag (`0.22.16`). `:latest` follows each release, and a node can hold a stale
+cached `:latest`, which once crashlooped the executor. Upgrade all of them
+together. The operator and the Bitnami postgres/redis images are still on
+`:latest`.
 
 ## Known Workarounds
 

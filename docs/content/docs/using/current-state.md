@@ -1,6 +1,6 @@
 ---
 title: "Checking current state"
-weight: 7
+weight: 8
 ---
 
 # Checking current state

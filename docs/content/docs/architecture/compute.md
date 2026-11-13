@@ -15,11 +15,11 @@ touching workload manifests.
 |---|---|---|---|
 | **Control plane and storage** | amd64 workstation (64-core Threadripper), 2× Quadro RTX 8000 48 GB, NVMe and SSD storage | the K3s server, all persistent storage, ingress, most services, CI runners, speech-to-text, CPU and GPU notebooks | untainted |
 | **GB10 pool** | NVIDIA GB10 (Grace Blackwell) machines: arm64, ~120 GB unified CPU/GPU memory each | LLM serving first; GPU notebooks on any machine not serving a model | taint `dedicated=gb10:NoSchedule`; label `node-class=gb10` |
-| **Notebook node** | amd64 workstation, consumer GPU | JupyterHub user servers only | taint `hub.jupyter.org/dedicated=user:NoSchedule` |
+| **General worker** | amd64 workstation, consumer GPU | notebooks, batch jobs, any workload that doesn't need storage on its own node | untainted |
 
-Nothing schedules on a tainted node unless it tolerates the taint. JupyterHub
-user pods tolerate the notebook-node taint; LLM deployments and the GB10
-notebook option tolerate `dedicated=gb10`. DaemonSets that must run everywhere,
+Nothing schedules on a tainted node unless it tolerates the taint. LLM
+deployments, the GB10 notebook option and Armada batch jobs tolerate
+`dedicated=gb10`. DaemonSets that must run everywhere,
 such as GPU plugins, exporters and the storage client, list each taint
 explicitly.
 
@@ -28,6 +28,18 @@ and runs at a higher scheduling priority than notebooks; a GB10 notebook claims
 4. So notebooks use only machines serving no model, two to a machine, and
 starting a model on a machine stops the notebooks there. Every GB10 runs the
 shared-home storage client; none holds other cluster data.
+
+A model's GPU memory on a GB10 isn't counted against its pod, so each model
+requests its machine's whole memory. That keeps anything else from being
+placed on a machine that only looks empty.
+
+## Batch jobs
+
+[Armada]({{< relref "/docs/using/batch-jobs" >}}) fills whatever capacity is
+left on every node with queued batch jobs. Its jobs run at negative priority
+and never preempt: notebooks, services and models evict them, and evicted jobs
+go back in the queue. In practice batch jobs use the control-plane node, the
+general worker, and any GB10 not serving a model.
 
 ## GPUs
 

@@ -1,6 +1,6 @@
 ---
 title: "GitHub Actions runners"
-weight: 5
+weight: 6
 ---
 
 # GitHub Actions runners
