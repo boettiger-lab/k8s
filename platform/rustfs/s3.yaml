@@ -81,6 +81,15 @@ spec:
             - {name: RUSTFS_IDENTITY_OPENID_SCOPES, value: "openid,profile,email,groups"}
             - {name: RUSTFS_IDENTITY_OPENID_CLAIM_NAME, value: groups}
             - {name: RUSTFS_IDENTITY_OPENID_HIDE_FROM_UI, value: "on"}
+            # Metrics: RustFS has no /metrics endpoint; it pushes OTLP. Prometheus
+            # takes OTLP directly (web.enable-otlp-receiver, ../monitoring), so no
+            # collector. A per-signal endpoint is used verbatim. SERVICE_NAME
+            # becomes the `job` label the dashboard and alerts select on. Traces
+            # and OTLP logs stay off; logs keep going to files in /logs.
+            - {name: RUSTFS_OBS_METRIC_ENDPOINT, value: "http://prometheus-server.monitoring.svc/api/v1/otlp/v1/metrics"}
+            - {name: RUSTFS_OBS_SERVICE_NAME, value: rustfs-s3}
+            - {name: RUSTFS_OBS_TRACES_EXPORT_ENABLED, value: "false"}
+            - {name: RUSTFS_OBS_LOGS_EXPORT_ENABLED, value: "false"}
           volumeMounts:
             - {name: data, mountPath: /data}
           resources:

@@ -67,7 +67,7 @@ the chart's insecure default — this is a public ingress). Retrieve it:
 - **Datasource** (Prometheus, uid `prometheus`) is provisioned as code in
   `grafana-values.yaml`.
 - **Dashboards as code:** any ConfigMap in `monitoring` labelled
-  `grafana_dashboard: "1"` is auto-loaded by the sidecar. Three ship here, all
+  `grafana_dashboard: "1"` is auto-loaded by the sidecar. Five ship here, all
   **tuned to this cluster's metric labels so they show data** — the community
   dashboards 1860 (node) / 12239 (DCGM) assume different `job` labels and render
   No Data:
@@ -80,6 +80,13 @@ the chart's insecure default — this is a public ingress). Retrieve it:
     filesystem, physical-NIC network.
   - `grafana-dashboard-gpu.yaml` — **GPU (DCGM)**: per-GPU util, power, temp,
     framebuffer (aggregated `by (gpu, Hostname)` to collapse pod attribution).
+  - `grafana-dashboard-rustfs.yaml` — **Object store (rustfs-s3)**: stored
+    bytes/objects, requests and failures by class, mean latency, throughput,
+    top S3 calls, pod memory/CPU. RustFS has no `/metrics`; it **pushes** OTLP
+    to Prometheus's `/api/v1/otlp/v1/metrics` (`web.enable-otlp-receiver`), so
+    it is not a scrape target: alert `RustfsS3MetricsMissing` covers its going
+    quiet, `RustfsS3ServerErrors` its 5xx share. Pushed series skip scrape
+    relabelling (~5k series from 1.0.5, no per-bucket labels).
   - Default time range is `now-6h` (exporters are young; widen for long-term
     wear trending). Add more by dropping another labelled ConfigMap.
 

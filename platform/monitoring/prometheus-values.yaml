@@ -123,6 +123,16 @@ prometheus-pushgateway:
   enabled: false
 
 server:
+  # web.enable-otlp-receiver: rustfs-s3 PUSHES its metrics here over OTLP
+  # (POST /api/v1/otlp/v1/metrics) because RustFS serves no /metrics to scrape.
+  # Pushed series bypass scrape relabelling, so the cardinality guards below do
+  # not apply to them; RustFS 1.0.5 sends ~5k series with no per-bucket or
+  # per-object labels (measured on a scratch instance, 2026-11-12). The receiver
+  # is unauthenticated, like the rest of this in-cluster Prometheus. The list
+  # replaces the chart default, so web.enable-lifecycle is restated.
+  extraFlags:
+    - web.enable-lifecycle
+    - web.enable-otlp-receiver
   retention: "15d"
   # Second brake: never let the TSDB fill the volume. A full /data stops
   # compaction, which pins everything in the head — that is how RAM ran away.
@@ -476,6 +486,38 @@ serverFiles:
             annotations:
               summary: "pg-exporter cannot reach the JuiceFS metadata DB"
               description: "Every JuiceFS volume (all homes) depends on juicefs-pg. Check `kubectl -n juicefs get pods` and the DB log."
+
+      - name: object-store
+        rules:
+          # rustfs-s3 pushes its metrics (OTLP), so ScrapeTargetMissing cannot
+          # see it go quiet. target_info arrives with every push (every 30s); 10m
+          # without one means RustFS is down, wedged, or can't reach Prometheus.
+          # Workload alerts (DeploymentUnavailable etc.) still cover the pod.
+          - alert: RustfsS3MetricsMissing
+            expr: absent_over_time(target_info{job="rustfs-s3"}[10m])
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "rustfs-s3 has sent no metrics for 15m"
+              description: "Either RustFS is down or wedged, or its pushes to Prometheus fail. Check `kubectl -n rustfs get pods`, then `curl https://s3.carlboettiger.info/health`, then RustFS's log in /logs inside the pod."
+
+          # Server errors as a share of all requests. 4xx are excluded: anonymous
+          # 403/404s are normal traffic on public buckets. The second clause
+          # (>= ~12 errors in 10m) keeps a quiet hour's single 503 from paging.
+          # A bucket quota that the scanner has not measured yet 503s every write
+          # (the public-output incident, 2026-11-12) -- that is what this catches.
+          - alert: RustfsS3ServerErrors
+            expr: |
+              (
+                sum(rate(rustfs_http_server_failures_total{job="rustfs-s3", status_class="5xx"}[10m]))
+                  / sum(rate(rustfs_http_server_requests_total{job="rustfs-s3"}[10m])) > 0.05
+              )
+                and sum(rate(rustfs_http_server_failures_total{job="rustfs-s3", status_class="5xx"}[10m])) > 0.02
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "rustfs-s3: {{ $value | humanizePercentage }} of requests failing with 5xx"
+              description: "See the Object store dashboard in Grafana for which calls fail, and RustFS's log in /logs inside the pod. A bucket quota that the scanner hasn't measured yet 503s every write to that bucket."
 
       - name: disks
         rules:

@@ -12,6 +12,7 @@ weight: 5
 | dcgm-exporter | GPU utilization, memory, power, temperature, errors |
 | smartctl-exporter | drive health and wear |
 | vLLM `/metrics` | tokens, latency, cache use (scraped through pod annotations) |
+| RustFS (OTLP push) | S3 requests, errors, latency, throughput, stored bytes |
 | [Grafana](https://grafana-cirrus.carlboettiger.info) | dashboards, defined as code in `platform/monitoring/` |
 
 Alert routing is set per alert and is not part of the public configuration.
