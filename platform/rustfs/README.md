@@ -17,6 +17,9 @@ Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS stor
 > | `copy-bucket-settings.sh` | `rustfs-s3` | | anonymous policies, lifecycle, versioning, quota from MinIO; re-run at the cutover |
 > | `sts-check-setup.sh`, `sts-check.sh` | `rustfs-s3` | | Dex → STS check: GitHub device login, temporary keys, allow/deny tests |
 >
+> `rustfs-s3` pushes its metrics to Prometheus (OTLP; env in `s3.yaml`); dashboard and
+> alerts are in `../monitoring/` (`grafana-dashboard-rustfs.yaml`, group `object-store`).
+>
 > At step 5 the `rustfs` Service's selector moves to `app: rustfs-s3`, so JuiceFS's
 > endpoint never changes.
 >

@@ -28,7 +28,8 @@ kubectl apply -f smartctl-exporter.yaml
 kubectl apply -f grafana-dashboard-cluster.yaml \
               -f grafana-dashboard-smart.yaml \
               -f grafana-dashboard-node.yaml \
-              -f grafana-dashboard-gpu.yaml
+              -f grafana-dashboard-gpu.yaml \
+              -f grafana-dashboard-rustfs.yaml
 
 # Grafana admin credentials — created once, out of git, with a random password
 # (the chart's default is public/insecure and this is on a public ingress).
