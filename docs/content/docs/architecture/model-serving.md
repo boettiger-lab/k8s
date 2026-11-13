@@ -36,5 +36,10 @@ serves Whisper and Parakeet families side by side.
 
 ## Access
 
-Every model endpoint checks a shared bearer token. There is no gateway or
-per-user key: the endpoints are for lab use, and keys come from an admin.
+Each user's key is their own JupyterHub API token. Before a request reaches
+vLLM, Traefik passes its headers to a small auth service
+([`services/vllm/llm-auth/`](https://github.com/boettiger-lab/k8s/tree/main/services/vllm/llm-auth)).
+That service asks JupyterHub who owns the token, then hands the request back
+with vLLM's own key, so vLLM itself keeps a single key and there is no gateway in
+the request path. A revoked token, or a user removed from the hub, stops working
+within a minute. See [LLM and speech APIs]({{< relref "/docs/using/llm-api" >}}).
