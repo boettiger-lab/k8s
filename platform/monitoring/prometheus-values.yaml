@@ -353,8 +353,13 @@ serverFiles:
             # containers in this cluster set a memory limit at all. Filtering to
             # `> 0` makes the series absent rather than infinite, so those
             # containers simply are not evaluated.
+            #
+            # armada-jobs is excluded: batch jobs size their own limits, run
+            # close to them by design, and an OOMKill there is the job's own
+            # failure (Armada reports it; the submitter resubmits bigger). It
+            # was the only namespace this rule fired on.
             expr: |
-              container_memory_working_set_bytes{container!=""}
+              container_memory_working_set_bytes{container!="", namespace!="armada-jobs"}
                 / on(namespace, pod, container) (container_spec_memory_limit_bytes{container!=""} > 0) > 0.85
             for: 15m
             labels: { severity: warning }
