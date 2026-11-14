@@ -103,6 +103,12 @@
 # per-REQUEST length and does not size the pool, so lowering it to 131072 buys ~3.1x
 # concurrency for free. Raise/lower it to suit the traffic, and re-measure.
 #
+# --max-num-seqs 2 ON PURPOSE. Decode is cross-node TP2: a 2nd stream drops each request
+# to ~30 tok/s (aggregate 53 -> 60), and two long agentic sessions already fill ~60% of
+# the pool. A 3rd request therefore WAITS in vLLM's queue instead of slowing everyone.
+# --max-cudagraph-capture-size = max-num-seqs x (1 + num_speculative_tokens) = 12;
+# change them together.
+#
 # ACCEPTANCE IS WORKLOAD-DEPENDENT. Ours at k=5: 65.7% on code, 41.4% on prose. Do not
 # quote a single tok/s for this model without saying which workload it came from.
 # Detail, including everything that did NOT work, in cluster-ops tp2-benchmark.md.
@@ -348,9 +354,9 @@ spec:
           --kv-cache-dtype nvfp4_ds_mla \
           --block-size 256 \
           --max-model-len 350000 \
-          --max-num-seqs 12 \
+          --max-num-seqs 2 \
           --max-num-batched-tokens 8192 \
-          --max-cudagraph-capture-size 72 \
+          --max-cudagraph-capture-size 12 \
           --gpu-memory-utilization 0.78 \
           --enable-prefix-caching \
           --async-scheduling \
@@ -600,9 +606,9 @@ spec:
           --kv-cache-dtype nvfp4_ds_mla \
           --block-size 256 \
           --max-model-len 350000 \
-          --max-num-seqs 12 \
+          --max-num-seqs 2 \
           --max-num-batched-tokens 8192 \
-          --max-cudagraph-capture-size 72 \
+          --max-cudagraph-capture-size 12 \
           --gpu-memory-utilization 0.78 \
           --enable-prefix-caching \
           --async-scheduling \
