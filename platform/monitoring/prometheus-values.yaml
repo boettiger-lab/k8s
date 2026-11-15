@@ -58,6 +58,18 @@ alertmanager:
         # Only inhibits on the SAME node -- a target failing on a healthy node
         # is still real news and still alerts.
         equal: ['node']
+      # RustfsDown is the cause; the generic unavailable alert and the
+      # metrics-missing one are its consequences.
+      - source_matchers:
+          - alertname = "RustfsDown"
+        target_matchers:
+          - alertname = "DeploymentUnavailable"
+        equal: ['namespace', 'deployment']
+      - source_matchers:
+          - alertname = "RustfsDown"
+          - deployment = "rustfs-s3"
+        target_matchers:
+          - alertname = "RustfsS3MetricsMissing"
     receivers:
       - name: 'default'
         slack_configs:
@@ -494,6 +506,22 @@ serverFiles:
 
       - name: object-store
         rules:
+          # Direct, fast signal that S3 is gone. rustfs-s3's readinessProbe hits
+          # /health, so "no available replica" also covers a running but unhealthy
+          # RustFS. It is Recreate on one replica and turns Ready ~7s after start,
+          # so 3m skips a normal restart or upgrade but not a crash, an
+          # ImagePullBackOff or a missing volume. Also covers the pilot `rustfs`
+          # behind the JuiceFS homes (no readinessProbe, so only "not running").
+          # sum by drops KSM's own node label, which would put "on <KSM's node>"
+          # in the Slack title.
+          - alert: RustfsDown
+            expr: sum by (namespace, deployment) (kube_deployment_status_replicas_available{namespace="rustfs", deployment=~"rustfs|rustfs-s3"}) < 1
+            for: 3m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $labels.deployment }} has no available replica: S3 is down"
+              description: "Every S3 client fails (and, for the pilot `rustfs`, every JuiceFS home). Check `kubectl -n rustfs get pods`, `kubectl -n rustfs describe pod`, and `findmnt /nvme` on cirrus for the volume."
+
           # rustfs-s3 pushes its metrics (OTLP), so ScrapeTargetMissing cannot
           # see it go quiet. target_info arrives with every push (every 30s); 10m
           # without one means RustFS is down, wedged, or can't reach Prometheus.
