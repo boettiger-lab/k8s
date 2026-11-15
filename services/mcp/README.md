@@ -4,7 +4,7 @@ Model Context Protocol servers exposed to agents and notebooks.
 
 | Directory | Service | Host |
 |---|---|---|
-| this directory | `mcp-data-server`, GPU query engine (cudf/polars) over the public STAC catalogue, on **nimbus** | parked: `replicas: 0`, public ingress removed 2026-09-25 |
+| this directory | `geo-query` (was `mcp-data-server`), GPU query engine (cudf/polars) over the public STAC catalogue, on **nimbus** | parked: `replicas: 0`, public ingress removed 2026-09-25 |
 
 ## nimbus
 
