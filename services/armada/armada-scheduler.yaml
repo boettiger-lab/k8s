@@ -8,9 +8,10 @@ spec:
 
   # Upstream scheduler plus one patch to its submit check (scheduler-image/, boettiger-lab/k8s#188):
   # jobs that fit once non-Armada pods (GB10 models) finish stay queued instead of being rejected.
+  # The operator's CRD allows only [a-zA-Z0-9_.-] in tag, so the image cannot be pinned by digest here.
   image:
     repository: ghcr.io/boettiger-lab/armada-scheduler
-    tag: "0.22.16-nonarmada@sha256:183571aeb178b9b9d037bb750fe2e5b1bf8ff7aa21adf42afad3e6a7a5b88122"
+    tag: "0.22.16-nonarmada"
 
   applicationConfig:
     pulsar:
