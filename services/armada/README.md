@@ -262,6 +262,13 @@ Armada's default config requires three Kubernetes PriorityClasses:
   its pod, so models request the whole node (`services/vllm`, ~0.9Gi left) and
   the server rejects jobs under 1Gi (`minJobResources`). Jobs therefore land
   only on GB10s without a model.
+- Jobs wait for nodes that models are using. Armada's submit check rejects a job
+  at once if it fits on no node, and upstream counts pods it does not manage
+  (the GB10 models) as permanent capacity loss, so a job that selects
+  `kubernetes.io/arch: arm64` was rejected whenever both GB10s ran a model. The
+  scheduler image (`scheduler-image/`) patches the check to treat those
+  resources as available; the scheduling cycle still subtracts them, so the job
+  queues until a GB10 is free (#188).
 - A job can pick nodes with a `nodeSelector` on `kubernetes.io/hostname`,
   `kubernetes.io/arch` (`amd64`, or `arm64` for the GB10s) or
   `nvidia.com/gpu.product`. These are the executor's `trackedNodeLabels`; a

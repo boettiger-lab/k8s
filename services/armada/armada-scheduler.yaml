@@ -6,9 +6,11 @@ metadata:
 spec:
   replicas: 1
 
+  # Upstream scheduler plus one patch to its submit check (scheduler-image/, boettiger-lab/k8s#188):
+  # jobs that fit once non-Armada pods (GB10 models) finish stay queued instead of being rejected.
   image:
-    repository: gresearch/armada-scheduler
-    tag: "0.22.16"
+    repository: ghcr.io/boettiger-lab/armada-scheduler
+    tag: "0.22.16-nonarmada"
 
   applicationConfig:
     pulsar:
