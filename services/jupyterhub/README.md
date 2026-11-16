@@ -101,8 +101,18 @@ The `singleuser.networkPolicy` in `public-config.yaml` allows:
 
 ### User Environment
 
-User pods get no preset S3 (`AWS_*`, `MINIO_*`) or LLM (`OPENAI_*`) settings, and no
-default opencode / jupyter-ai provider. Users configure their own endpoints and keys.
+User pods get no preset S3 (`AWS_*`, `MINIO_*`) or LLM (`OPENAI_*`) settings, and
+nothing is written into homes.
+
+The one exception is the lab's own LLMs in opencode and Kilo. At every server start
+the `postStart` hook runs `lab-llm-config.py` (shipped via `singleuser.extraFiles`),
+which asks each `vllm-<machine>` endpoint for its current model using the user's hub
+token and writes one provider per serving endpoint to `/tmp/lab-llm/config.json`.
+`OPENCODE_CONFIG` and `KILO_CONFIG` point both tools at that file. Both merge its
+providers with the user's own config; the file sets no `model`, so the user's chosen
+model and their own providers are untouched. The key is `{env:JUPYTERHUB_API_TOKEN}`,
+so no secret is written to disk. A model swapped in later appears on the next server
+start. Endpoint list: `LAB_LLM_ENDPOINTS` (default `nimbus nimbus2 nimbus3`).
 
 #### CPU thread defaults (BLAS / OpenMP / PyTorch)
 

@@ -34,17 +34,23 @@ cull:
   enabled: false
 singleuser:
   allowPrivilegeEscalation: true
-  # Add the lab's `cirrus` Armada context to the user's ~/.armadactl.yaml at
-  # every start (the home volume hides the image's own copy). Only our images
-  # ship armada-config-merge; in any other image this is a no-op. The command
-  # always exits 0: a failing postStart hook would kill the server.
+  # At every start:
+  #  - list the lab's live LLMs as opencode/Kilo providers (lab-llm-config.py,
+  #    under extraFiles; it reads /v1/models, so it follows model swaps on the
+  #    next server start). Written to /tmp, never into the home.
+  #  - add the lab's `cirrus` Armada context to the user's ~/.armadactl.yaml
+  #    (the home volume hides the image's own copy). Only our images ship
+  #    armada-config-merge; in any other image this is a no-op.
+  # The command always exits 0: a failing postStart hook would kill the server.
   lifecycleHooks:
     postStart:
       exec:
         command:
           - sh
           - -c
-          - command -v armada-config-merge >/dev/null 2>&1 && armada-config-merge >/dev/null 2>&1; exit 0
+          - >-
+            command -v python3 >/dev/null 2>&1 && python3 /usr/local/share/lab-llm/lab-llm-config.py >/dev/null 2>&1;
+            command -v armada-config-merge >/dev/null 2>&1 && armada-config-merge >/dev/null 2>&1; exit 0
   image:
     pullPolicy: Always
   storage:
@@ -109,6 +115,71 @@ singleuser:
               matchLabels:
                 name: minio
   extraFiles:
+    # Generator for the opencode/Kilo provider config; run by postStart above.
+    lab-llm-config.py:
+      mountPath: /usr/local/share/lab-llm/lab-llm-config.py
+      stringData: |
+          """Write an opencode/Kilo provider config listing the lab's live LLMs.
+
+          Runs at server start (postStart). Asks each lab endpoint which model it is
+          serving right now, with the user's own hub token, and writes one provider per
+          serving endpoint. It sets no "model", so a user's own choice of model and
+          their own providers stay in force: OPENCODE_CONFIG / KILO_CONFIG merge
+          providers with the user's config but override any "model" set here.
+          Never raises: a failure writes an empty config.
+          """
+          import json, os, sys, urllib.request
+          from concurrent.futures import ThreadPoolExecutor
+
+          ENDPOINTS = os.environ.get("LAB_LLM_ENDPOINTS", "nimbus nimbus2 nimbus3").split()
+          OUT = os.environ.get("LAB_LLM_CONFIG", "/tmp/lab-llm/config.json")
+
+
+          def models(machine):
+              url = f"https://vllm-{machine}.carlboettiger.info/v1"
+              req = urllib.request.Request(
+                  url + "/models",
+                  headers={"Authorization": "Bearer " + os.environ["JUPYTERHUB_API_TOKEN"]},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=4) as r:
+                      return machine, url, json.load(r).get("data", [])
+              except Exception:
+                  return machine, url, []
+
+
+          def main():
+              providers = {}
+              if os.environ.get("JUPYTERHUB_API_TOKEN"):
+                  with ThreadPoolExecutor(len(ENDPOINTS)) as ex:
+                      for machine, url, data in ex.map(models, ENDPOINTS):
+                          if not data:
+                              continue
+                          entries = {}
+                          for m in data:
+                              ctx = int(m.get("max_model_len") or 32768)
+                              entries[m["id"]] = {
+                                  "name": f"{m['id']} ({machine})",
+                                  "limit": {"context": ctx, "output": min(32768, ctx // 4)},
+                              }
+                          providers["lab-" + machine] = {
+                              "name": f"Lab GPU: {machine}",
+                              "npm": "@ai-sdk/openai-compatible",
+                              "options": {"baseURL": url, "apiKey": "{env:JUPYTERHUB_API_TOKEN}"},
+                              "models": entries,
+                          }
+              os.makedirs(os.path.dirname(OUT), exist_ok=True)
+              tmp = OUT + ".tmp"
+              with open(tmp, "w") as f:
+                  json.dump({"$schema": "https://opencode.ai/config.json", "provider": providers}, f, indent=2)
+              os.replace(tmp, OUT)
+
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except Exception as e:
+                  print(f"lab-llm-config: {e}", file=sys.stderr)
     jupyter_server_config.json:
         mountPath: /usr/local/etc/jupyter/jupyter_server_config.json
         data:
@@ -296,6 +367,11 @@ hub:
     KubeSpawner:
       environment:
         SHELL: /usr/bin/bash
+        # Lab LLM providers, generated at start (see lifecycleHooks). Both tools
+        # merge these providers with the user's own config; the file sets no
+        # model, so the user's chosen model stays in force. Missing file = no-op.
+        OPENCODE_CONFIG: /tmp/lab-llm/config.json
+        KILO_CONFIG: /tmp/lab-llm/config.json
         GH_SCOPED_CREDS_CLIENT_ID: "Iv1.8d384d9612c2ecc3"
         GH_SCOPED_CREDS_APP_URL: "https://github.com/apps/jupyterhub-gh-creds"
         # CPU math-library thread defaults. BLAS/OpenMP/PyTorch otherwise spawn one
