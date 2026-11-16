@@ -49,6 +49,17 @@ reply = client.chat.completions.create(
 
 Use the model id that `/v1/models` returns; don't hard-code one.
 
+### opencode and Kilo on the hub
+
+On JupyterHub, opencode and Kilo already list whichever lab models are serving when
+your server starts, as providers named `lab-<machine>` (for example
+`lab-nimbus2/<model-id>`). Pick one with `/models` in opencode or the model picker in
+Kilo. Your own providers and your default model are left as they are. A model that
+comes online later shows up after you restart your server.
+
+Elsewhere, add an OpenAI-compatible provider with the endpoint above as the base URL,
+your token as the key, and the model id from `/v1/models`.
+
 ## Speech-to-text
 
 `https://whisper-cirrus.carlboettiger.info/v1` serves OpenAI's audio
