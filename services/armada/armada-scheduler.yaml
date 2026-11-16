@@ -10,7 +10,7 @@ spec:
   # jobs that fit once non-Armada pods (GB10 models) finish stay queued instead of being rejected.
   image:
     repository: ghcr.io/boettiger-lab/armada-scheduler
-    tag: "0.22.16-nonarmada"
+    tag: "0.22.16-nonarmada@sha256:183571aeb178b9b9d037bb750fe2e5b1bf8ff7aa21adf42afad3e6a7a5b88122"
 
   applicationConfig:
     pulsar:

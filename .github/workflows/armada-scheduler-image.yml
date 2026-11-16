@@ -6,6 +6,7 @@ name: Armada Scheduler Image
 on:
   workflow_dispatch: null
   push:
+    branches: [main]
     paths:
       - 'services/armada/scheduler-image/**'
       - '.github/workflows/armada-scheduler-image.yml'
