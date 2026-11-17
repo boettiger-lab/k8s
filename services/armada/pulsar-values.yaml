@@ -13,6 +13,19 @@ standalone:
     fsGroupChangePolicy: OnRootMismatch
   podMonitor:
     enabled: false
+  # A CPU limit is what sizes Pulsar's thread pools. Broker, BookKeeper-client,
+  # HTTP and embedded-ZooKeeper pools default to 1-2x Runtime.availableProcessors(),
+  # and with no limit the JVM (25, container-aware) sees all 128 cirrus cores:
+  # ~1,260 threads for a broker that peaks at 0.03 CPU and 1.75 GiB (7 days to
+  # 2026-11-17). Limit 2 -> pools sized for 2 cores. Memory: PULSAR_MEM is
+  # -Xmx512m + 512m direct; the limit leaves room for metaspace and page cache.
+  resources:
+    requests:
+      cpu: 0.5
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 3Gi
   volumes:
     data:
       size: 10Gi

@@ -1,0 +1,17 @@
+# Default CPU limit/request for any container in `armada` that sets none (today
+# the two migration Jobs; Pulsar now sets its own in pulsar-values.yaml).
+# Without a limit a container sees all 128 cirrus cores and thread pools size to
+# that (Pulsar ran ~1,260 threads). defaultRequest must be set or Kubernetes
+# copies the limit into the request. Applied by install.sh.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-cpu
+  namespace: armada
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+      defaultRequest:
+        cpu: 100m

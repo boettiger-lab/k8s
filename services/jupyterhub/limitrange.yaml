@@ -1,0 +1,29 @@
+# Default CPU limit/request for any container in `jupyter` that sets none --
+# today that is every notebook server, the hub, the proxy and binderhub.
+#
+# Why (2026-11-17): with no CPU limit a container sees all 128 cirrus cores, and
+# runtimes size their thread pools from that (DuckDB starts one worker per core;
+# DuckDB 1.4-1.5 also pins worker i to CPU i on hosts with >64 cores). Stacked
+# pinned DuckDB threads on one core contributed to a kernel RCU stall on cirrus
+# (cluster-ops cirrus-host-maintenance.md). A cgroup CPU limit is what DuckDB,
+# the JVM and most thread pools read to size themselves.
+#
+# 64, not lower: big notebook profiles go to 120G, and 64 keeps DuckDB 2.0 at 63
+# workers, under its 64-worker auto-pinning threshold. defaultRequest MUST be
+# set: without it Kubernetes copies the default limit into the request, and
+# every notebook would request 64 CPUs and stop scheduling.
+#
+# Applies to pods created after it exists: running notebooks pick it up at their
+# next start. Applied by up.sh.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-cpu
+  namespace: jupyter
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "64"
+      defaultRequest:
+        cpu: 100m
