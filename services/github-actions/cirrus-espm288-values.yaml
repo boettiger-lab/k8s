@@ -109,3 +109,20 @@ template:
       - name: pod-templates
         configMap:
           name: espm-hook-template
+
+# The listener is a thin long-poll to GitHub; it is not core infrastructure, so
+# prefer thelio and fall back to cirrus when thelio is away. Runner pods stay
+# pinned to cirrus (template.spec.nodeSelector below explains why).
+listenerTemplate:
+  spec:
+    containers:
+      - name: listener
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: [thelio]

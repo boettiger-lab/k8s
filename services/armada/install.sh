@@ -148,7 +148,9 @@ YAML
 # ---------------------------------------------------------------------------
 echo "==> Installing Armada Operator..."
 helm upgrade -i armada-operator gresearch/armada-operator \
+  --version 0.7.0 \
   --namespace "$NAMESPACE" \
+  --set-string 'controllerManager.nodeSelector.kubernetes\.io/hostname=cirrus' \
   --wait --timeout 5m
 
 # ---------------------------------------------------------------------------

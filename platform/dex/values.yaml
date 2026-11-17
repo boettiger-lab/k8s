@@ -116,3 +116,7 @@ resources:
     memory: 32Mi
   limits:
     memory: 128Mi
+
+# Core infrastructure stays on cirrus; see services/README.md "Node placement".
+nodeSelector:
+  kubernetes.io/hostname: cirrus
