@@ -5,6 +5,10 @@ metadata:
   namespace: armada
 spec:
   replicas: 1
+  # Core infrastructure stays on cirrus (the control-plane node); thelio and the
+  # GB10s are for compute. See services/README.md "Node placement".
+  nodeSelector:
+    kubernetes.io/hostname: cirrus
 
   image:
     repository: gresearch/armada-scheduler-ingester

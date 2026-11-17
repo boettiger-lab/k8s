@@ -21,6 +21,9 @@ spec:
       labels:
         app: llm-auth
     spec:
+      # Core infrastructure stays on cirrus; see services/README.md "Node placement".
+      nodeSelector:
+        kubernetes.io/hostname: cirrus
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

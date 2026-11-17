@@ -53,3 +53,7 @@ applicationConfig:
     forceNoTls: true
 # install.sh owns the PriorityClasses (kubectl apply); helm cannot adopt them.
 priorityClasses: []
+
+# Core infrastructure stays on cirrus; see services/README.md "Node placement".
+nodeSelector:
+  kubernetes.io/hostname: cirrus

@@ -22,3 +22,13 @@ the live cluster.
 Before deploying anything that needs a GPU, an arm64 image, or node-local storage, read
 [compute architecture](https://boettiger-lab.github.io/k8s/docs/architecture/compute/) —
 the nodes are not interchangeable.
+
+## Node placement
+
+| Nodes | Run | Why |
+|---|---|---|
+| **cirrus** (control plane) | Core infrastructure: dex, llm-auth, the Armada control plane (server, scheduler, ingesters, lookout, executor, operator, Postgres, Redis, Pulsar) | It holds the API server and the node-local ZFS volumes these depend on. A worker reboot or drain must not take logins, LLM auth or the job queue with it. |
+| **thelio** | Compute and light helpers: notebooks, Armada jobs, ARC listeners (preferred, falling back to cirrus) | A general worker. ARC *runner* pods stay on cirrus, because their `_work` volumes are node-local there. |
+| **GB10s** (nimbus, nimbus2–4) | LLMs first, then notebooks and Armada jobs | The `dedicated` taint keeps everything else off. |
+
+Core services are pinned with `nodeSelector: kubernetes.io/hostname: cirrus` in their own manifests or values. A new core service should do the same.
