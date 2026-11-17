@@ -28,7 +28,7 @@ the nodes are not interchangeable.
 | Nodes | Run | Why |
 |---|---|---|
 | **cirrus** (control plane) | Core infrastructure: dex, llm-auth, the Armada control plane (server, scheduler, ingesters, lookout, executor, operator, Postgres, Redis, Pulsar) | It holds the API server and the node-local ZFS volumes these depend on. A worker reboot or drain must not take logins, LLM auth or the job queue with it. |
-| **thelio** | Compute and light helpers: notebooks, Armada jobs, ARC listeners and class CI runners (preferred, falling back to cirrus) | A general worker. CI runners are interruptible like Armada (`ci-backfill`, -800): notebooks, services and models evict them. efi runners reserve 32Gi each, so a second concurrent forecast job spills to cirrus. |
+| **thelio** | Compute and light helpers: notebooks, Armada jobs, ARC listeners and class CI runners (preferred, falling back to cirrus) | A general worker. CI runners are interruptible like Armada (`ci-backfill`, -800): notebooks, services and models evict them. efi runs one runner, reserving 32Gi for its job. |
 | **GB10s** (nimbus, nimbus2–4) | LLMs first, then notebooks and Armada jobs | The `dedicated` taint keeps everything else off. |
 
 Core services are pinned with `nodeSelector: kubernetes.io/hostname: cirrus` in their own manifests or values. A new core service should do the same.

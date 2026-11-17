@@ -1,12 +1,14 @@
 githubConfigUrl: "https://github.com/eco4cast"
 githubConfigSecret: github-runner-token
-# 2, not 1: this scale set serves BOTH eco4cast/usgsrc4cast-ci and
-# eco4cast/neon4cast-ci, after the redundant arc-runner-eco4cast set was
-# consolidated into it. Those two repos both fire a job at 23:00 UTC
-# (usgsrc4cast drivers_stage1 and neon4cast drivers_stage3), which used to run
-# concurrently on two separate scale sets. maxRunners: 2 keeps that concurrency
-# identical — do not drop it back to 1 or the 23:00 jobs will serialize.
-maxRunners: 2
+# One runner. This set serves eco4cast/usgsrc4cast-ci and eco4cast/neon4cast-ci.
+# It was 2 so their 23:00 UTC jobs (usgsrc4cast drivers_stage1, neon4cast
+# drivers_stage3) could run side by side, but usgsrc4cast's drivers workflows
+# have not run since 2026-10-08. The remaining self-hosted jobs barely overlap:
+# at most a short `bundling` run waits behind drivers_stage3 (~30 min).
+# With one runner, its 32Gi reservation always fits on thelio. If usgsrc4cast
+# drivers return, the 23:00 pair serializes (about +30 min); set 2 to run them
+# in parallel (the second then spills to cirrus).
+maxRunners: 1
 runnerGroup: "default"
 
 # containerMode: kubernetes — job containers run as sibling PODS, created by
@@ -70,8 +72,8 @@ template:
     # amd64 only (cirrus or thelio); the GB10s' `dedicated` taint keeps runners
     # off them anyway. Prefer thelio: it is usually idle, while cirrus carries
     # the control plane. The runner reserves its job's memory (resources below),
-    # so the scheduler fits one forecast job on thelio and sends a second
-    # concurrent one (the 23:00 UTC pair) to cirrus.
+    # so the scheduler only places it where the job will fit; with maxRunners 2
+    # a second concurrent job would spill to cirrus.
     # The job pod follows the runner: it mounts the same local-path _work PVC,
     # whose PV is bound to the runner's node.
     nodeSelector:
