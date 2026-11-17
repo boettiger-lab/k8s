@@ -8,7 +8,7 @@ See [official docs](https://docs.github.com/en/actions/hosting-your-own-runners/
 | `cirrus-espm157-values.yaml` | `arc-runner-espm157` | `cirrus-espm-hook-template.yaml` |
 | `cirrus-espm288-values.yaml` | `arc-runner-espm288` | `cirrus-espm-hook-template.yaml` |
 
-**Interruptible.** Runner and job pods use PriorityClass `ci-backfill` (`ci-backfill.yaml`, -800, never preempts), like Armada jobs. A notebook, service or model that needs the space evicts them, and the GitHub job fails; re-run it. The class runners prefer thelio and the efi runners prefer cirrus. Both fall back to the other node.
+**Interruptible.** Runner and job pods use PriorityClass `ci-backfill` (`ci-backfill.yaml`, -800, never preempts), like Armada jobs. A notebook, service or model that needs the space evicts them, and the GitHub job fails; re-run it. All three prefer thelio and fall back to cirrus. Each efi runner reserves 32Gi for its job, so two concurrent forecast jobs split one per node.
 
 All three use `containerMode: kubernetes`: a workflow's `container:` runs as its own
 **sibling pod**, created by actions/runner-container-hooks, not by a Docker daemon.
