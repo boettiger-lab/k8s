@@ -8,7 +8,7 @@ metadata:
   labels:
     k8s-app: vllm-nimbus
 spec:
-  replicas: 1
+  replicas: 0   # nimbus serves nemotron-lightning (2026-11-17)
   # Recreate: nimbus is one GB10 time-sliced into 8 nvidia.com/gpu replicas
   # (see reference docs). A GPU-requesting pod can't surge-replace; tear down first.
   strategy:
