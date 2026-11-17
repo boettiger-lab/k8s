@@ -1,0 +1,21 @@
+# CI runners are interruptible, like Armada jobs.
+#
+# -800 puts runner and job pods below every pod without a class (notebooks and
+# services, priority 0) and far below models (llm-serving, 100000), so
+# kube-scheduler evicts them to place those. It sits above Armada (-900..-1100)
+# only to order the pending queue: a waiting CI job is scheduled before a
+# waiting batch job when capacity frees. preemptionPolicy Never: CI waits for
+# free capacity and never evicts anything itself, Armada included.
+#
+# An evicted CI job fails on GitHub (no automatic retry); re-run it.
+# value and preemptionPolicy are immutable: delete and re-create to change them.
+#
+# Apply: kubectl apply -f ci-backfill.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-backfill
+value: -800
+globalDefault: false
+preemptionPolicy: Never
+description: "GitHub Actions runners: evicted by notebooks, services and models"

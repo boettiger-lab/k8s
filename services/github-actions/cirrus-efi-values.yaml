@@ -32,7 +32,7 @@ containerMode:
     # emptyDir is impossible because the job is a sibling pod).
     #
     # The requirement was never RWX -- it is "two pods on one node must both
-    # mount it", and both are pinned to cirrus below. local-path is a hostPath
+    # mount it", and the job pod follows the runner's PV to its node. local-path is a hostPath
     # bind mount, so it satisfies that without a metadata service.
     accessModes: ["ReadWriteOnce"]
     storageClassName: "local-path"
@@ -62,14 +62,27 @@ template:
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
-    # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
-    # but has unresolved disk health issues, and ARC's _work volumes are the
-    # heaviest storage churn in the cluster -- a runner landing there is exactly
-    # what must not happen. A cordon alone is not enough: it stops NEW pods but
-    # says nothing about intent, and it gets lifted. This makes the placement
-    # explicit and survives an uncordon.
+    # Interruptible, like Armada: ci-backfill (-800, preemptionPolicy Never)
+    # ranks below notebooks, services and models, so the scheduler evicts a
+    # runner to place them. An evicted job fails on GitHub; re-run it.
+    # (ci-backfill.yaml.)
+    priorityClassName: ci-backfill
+    # amd64 only (cirrus or thelio); the GB10s' `dedicated` taint keeps runners
+    # off them anyway. Prefer cirrus: the 23:00 UTC forecast jobs may use up to
+    # 45Gi each but request 2Gi, and thelio has 61Gi.
+    # The job pod follows the runner: it mounts the same local-path _work PVC,
+    # whose PV is bound to the runner's node.
     nodeSelector:
-      kubernetes.io/hostname: cirrus
+      kubernetes.io/arch: amd64
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: [cirrus]
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
@@ -108,7 +121,7 @@ template:
 
 # The listener is a thin long-poll to GitHub; it is not core infrastructure, so
 # prefer thelio and fall back to cirrus when thelio is away. Runner pods stay
-# pinned to cirrus (template.spec.nodeSelector below explains why).
+# placed by template.spec below (interruptible; see the priorityClassName note).
 listenerTemplate:
   spec:
     containers:

@@ -34,12 +34,9 @@ data:
     metadata:
       name: efi-cirrus-job-pod
     spec:
-      # Pin job pods to cirrus as well. The runner pod's nodeSelector does NOT
-      # propagate: under containerMode kubernetes each `container:` job runs as
-      # a SIBLING pod created by the hooks, scheduled independently. Without
-      # this, a job pod can land on thelio even when its runner did not.
-      nodeSelector:
-        kubernetes.io/hostname: cirrus
+      # Interruptible, like the runner (ci-backfill.yaml). No node pin: the job
+      # pod mounts the runner's local-path _work PVC, so it follows the runner.
+      priorityClassName: ci-backfill
       # The kube-mode ServiceAccount the chart generates holds
       # secrets: [get, list, create, delete] in arc-runners — the namespace that
       # also holds github-runner-token (the PAT). Workflow steps execute in THIS
