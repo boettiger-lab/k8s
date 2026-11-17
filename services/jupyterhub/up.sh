@@ -9,6 +9,9 @@ set -euo pipefail
 helm repo add jupyterhub https://hub.jupyter.org/helm-chart/
 helm repo update
 
+# Default CPU limit for containers that set none (see the file).
+kubectl apply -f limitrange.yaml
+
 helm upgrade --cleanup-on-fail \
   --install juypterhelm jupyterhub/jupyterhub \
   --namespace jupyter \

@@ -96,6 +96,9 @@ alertmanager:
 #
 # `cronjobs` added 2026-11-11 for BackupStale: two metrics, one series per
 # CronJob each.
+#
+# `kube_node_status_condition` added 2026-11-17 so NodeDown reads the node's
+# Ready condition instead of the kubelet scrape: ~18 series per node.
 kube-state-metrics:
   enabled: true
   collectors: [deployments, statefulsets, pods, nodes, cronjobs]
@@ -104,6 +107,7 @@ kube-state-metrics:
     - kube_cronjob_status_last_successful_time
     - kube_node_status_allocatable
     - kube_node_spec_taint
+    - kube_node_status_condition
     - kube_deployment_spec_replicas
     - kube_deployment_status_replicas_available
     - kube_statefulset_replicas
@@ -271,13 +275,31 @@ serverFiles:
           # the original disappearance). Nothing reported any of them, and its
           # downtime is not contained: delvol Jobs pinned to a dead node strand
           # forever and accumulate into a storage-layer outage.
+          # The node's own Ready condition, not the kubelet scrape: on 2026-11-17
+          # cirrus stayed Ready (healthz OK) while its kubelet /metrics hung on a
+          # kernel stall, and the scrape-based NodeDown fired for a live node.
           - alert: NodeDown
-            expr: up{job="kubernetes-nodes"} == 0
+            expr: kube_node_status_condition{condition="Ready",status="true"} == 0
             for: 10m
             labels: { severity: critical }
             annotations:
-              summary: "Node {{ $labels.node }} has been unreachable for 10m"
-              description: "Prometheus cannot scrape {{ $labels.node }}. If it is also not answering ICMP, the box is wedged rather than the kubelet."
+              summary: "Node {{ $labels.node }} has not been Ready for 10m"
+              description: "The node controller marks {{ $labels.node }} NotReady: its kubelet stopped posting status. If it is also not answering ICMP, the box is wedged rather than the kubelet."
+
+          # Ready, but the kubelet cannot answer /metrics. Seen 2026-11-17 on
+          # cirrus: a kernel RCU stall left cgroup reads, runc, iptables and sudo
+          # blocked while running pods kept serving. Look for tasks in D-state
+          # (`ps -eo stat,comm | grep '^D'`) and their /proc/<pid>/stack, and
+          # see cirrus-host-maintenance.md in cluster-ops.
+          - alert: KubeletUnresponsive
+            expr: |
+              up{job="kubernetes-nodes"} == 0
+              and on (node) kube_node_status_condition{condition="Ready",status="true"} == 1
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $labels.node }} is Ready but its kubelet metrics have not answered for 10m"
+              description: "The node is up but the kubelet cannot gather container stats. Usually a host-level stall (cgroup lock, RCU, hung mount): check D-state tasks before restarting anything."
 
           # thelio only. Since sp5100_tco was armed (2026-09-23) a lockup
           # self-resets in ~60 s, so a fall is now a ~90 s blip instead of the

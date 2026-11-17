@@ -83,6 +83,8 @@ helm upgrade -i armada-redis bitnami/redis \
 # ---------------------------------------------------------------------------
 # 5. Apache Pulsar (single-pod standalone mode, see pulsar-values.yaml)
 # ---------------------------------------------------------------------------
+kubectl apply -f limitrange.yaml   # default CPU limit for containers that set none
+
 echo "==> Installing Pulsar..."
 helm upgrade -i armada-pulsar apache/pulsar \
   --version 4.8.0 \
