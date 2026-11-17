@@ -23,8 +23,8 @@ containerMode:
     #
     # RWX was never actually required. ReadWriteOnce means one NODE, not one
     # pod -- several pods on the same node share an RWO volume fine -- and both
-    # the runner pod and the job pod are pinned to cirrus by the nodeSelector
-    # below, so they are always co-located. The chart's own example for
+    # the job pod mounts the runner's PV, whose node affinity puts it on the
+    # runner's node, so they are always co-located. The chart's own example for
     # containerMode kubernetes uses ReadWriteOnce with a local provisioner.
     #
     # WHY IT MATTERS: _work is per-runner and runners are single-use, so every
@@ -60,14 +60,26 @@ template:
     securityContext:
       fsGroup: 1000
       fsGroupChangePolicy: OnRootMismatch
-    # Pin every runner pod to cirrus. thelio rejoined the cluster on 2026-08-24
-    # but has unresolved disk health issues, and ARC's _work volumes are the
-    # heaviest storage churn in the cluster -- a runner landing there is exactly
-    # what must not happen. A cordon alone is not enough: it stops NEW pods but
-    # says nothing about intent, and it gets lifted. This makes the placement
-    # explicit and survives an uncordon.
+    # Interruptible, like Armada: ci-backfill (-800, preemptionPolicy Never)
+    # ranks below notebooks, services and models, so the scheduler evicts a
+    # runner to place them. An evicted job fails on GitHub; re-run it.
+    # (ci-backfill.yaml.)
+    priorityClassName: ci-backfill
+    # amd64 only (cirrus or thelio); the GB10s' `dedicated` taint keeps runners
+    # off them anyway. Prefer thelio (compute node); spill to cirrus.
+    # The job pod follows the runner: it mounts the same local-path _work PVC,
+    # whose PV is bound to the runner's node.
     nodeSelector:
-      kubernetes.io/hostname: cirrus
+      kubernetes.io/arch: amd64
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: [thelio]
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
@@ -112,7 +124,7 @@ template:
 
 # The listener is a thin long-poll to GitHub; it is not core infrastructure, so
 # prefer thelio and fall back to cirrus when thelio is away. Runner pods stay
-# pinned to cirrus (template.spec.nodeSelector below explains why).
+# placed by template.spec below (interruptible; see the priorityClassName note).
 listenerTemplate:
   spec:
     containers:
