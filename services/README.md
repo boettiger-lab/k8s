@@ -32,3 +32,5 @@ the nodes are not interchangeable.
 | **GB10s** (nimbus, nimbus2–4) | LLMs first, then notebooks and Armada jobs | The `dedicated` taint keeps everything else off. |
 
 Core services are pinned with `nodeSelector: kubernetes.io/hostname: cirrus` in their own manifests or values. A new core service should do the same.
+
+**Gap:** armada-operator 0.7.0 drops `nodeSelector` for the scheduler, scheduler ingester, lookout and lookout ingester. Their CRs carry it, and the operator reverts a direct Deployment patch. Server, event ingester, executor and operator are pinned. Upstream `main` honours it for lookout only (checked 2026-11-17). Until an operator release covers the rest, these four can drift to thelio on a reschedule.
