@@ -1,0 +1,57 @@
+# Containers on Ubuntu 26.04 nodes cannot signal their own processes.
+#
+# 26.04 ships kernel.apparmor_restrict_unprivileged_unconfined=1
+# (/usr/lib/sysctl.d/10-apparmor.conf). With it, containerd's profile change
+# becomes a STACKED label, `cri-containerd.apparmor.d//&unconfined`, and the
+# default profile's `signal peer=cri-containerd.apparmor.d` rules no longer
+# match it. Every signal between container processes is denied: the
+# device-plugin config sidecar's SIGHUP (crash-loop), Go's SIGURG preemption
+# (JuiceFS CSI), Postgres, and job control in notebook shells.
+# containerd/containerd#14485 (fix proposed in #14487), k3s-io/k3s#13625.
+#
+# Setting it to 0 matches every other node in the cluster (the 24.04 GB10s run
+# with 0, Pop cirrus shows no stacking), so this changes nothing outside 26.04.
+# The value persists in /etc/sysctl.d, which systemd-sysctl applies at boot
+# before k3s starts. Containers started BEFORE the first apply keep the stacked
+# label until they restart. Delete this once containerd ships the profile fix.
+#
+# Apply: kubectl apply -f cluster/nodes/apparmor-unconfined.yaml
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-apparmor-unconfined
+  namespace: kube-system
+  labels:
+    app: node-apparmor-unconfined
+spec:
+  selector:
+    matchLabels:
+      app: node-apparmor-unconfined
+  template:
+    metadata:
+      labels:
+        app: node-apparmor-unconfined
+    spec:
+      hostPID: true
+      # Run on all nodes, including cordoned/tainted ones.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: sysctl
+          image: alpine:3.20
+          command: ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--", "sh", "-c"]
+          args:
+            - |
+              f=/proc/sys/kernel/apparmor_restrict_unprivileged_unconfined
+              if [ -e "$f" ]; then
+                printf 'kernel.apparmor_restrict_unprivileged_unconfined=0\n' > /etc/sysctl.d/99-apparmor-unconfined-k8s.conf
+                echo 0 > "$f"
+              fi
+              echo "node $(hostname): apparmor_restrict_unprivileged_unconfined=$(cat $f 2>/dev/null || echo absent)"
+              sleep infinity
+          securityContext:
+            privileged: true
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
