@@ -4,9 +4,10 @@
 #
 # Endpoint: https://vllm-nimbus.carlboettiger.info  (model id `qwen3.6-35b-a3b`)
 #
-# Fastest reported single-GB10 agent-capable config as of 2026-10: ~100-110 tok/s
-# single-stream at 32K context with MTP k=3 (NVIDIA forum thread 376484). We measured
-# ~106 tok/s on this checkpoint in July on NGC vLLM 26.05 + Marlin MoE (commit 9fa7fc8).
+# Measured on vLLM v0.33.0, one GB10, this config (2026-11-16): ~117 tok/s single-stream
+# decode, ~80 tok/s after a 110K-token prompt, 2.95 tokens/step; glen `numeric` 43/46 at
+# 29 s per cell. MTP k=3 beats k=2/4/5. July, on NGC vLLM 26.05 + Marlin MoE: ~106
+# (commit 9fa7fc8). Screen and traps: cluster-ops tp2-benchmark.md, single-GB10 screen.
 #
 # Tool parser is qwen3_coder, not qwen3_xml: vLLM #43713 (qwen3_xml emits invalid JSON
 # for several <function=...> blocks in one <tool_call>) is still open.
@@ -41,7 +42,7 @@ spec:
       runtimeClassName: nvidia
       containers:
       - name: vllm
-        image: vllm/vllm-openai:v0.32.0
+        image: vllm/vllm-openai:v0.33.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
