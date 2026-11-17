@@ -1,0 +1,125 @@
+# Nemotron-3.5-Lightning-30B-A3B NVFP4 + DSpark k=3 on nimbus, 1M context.
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info  (model id `nemotron-3.5-lightning`)
+#
+# Served for investigation (2026-11-17), not as a recommended model. Measured on this
+# recipe, vLLM v0.33.0, one GB10 (2026-11-16): ~121 tok/s single-stream decode, ~100 after
+# a 115K-token prompt (prefill ~5,200 tok/s); glen `numeric` 25/46 (54%) at 54 s/cell,
+# the same at temperature 1.0. Its misses trace partly to our metadata (cwhr13 vs cwhr,
+# w1/w2 weights) and one grader extraction bug; see cluster-ops tp2-benchmark.md
+# (scoreboard).
+#
+# Only one model may carry `vllm-endpoint: nimbus` at a time: the qwen36, qwen38 and
+# qwen38-flashnext manifests are at replicas 0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron-lightning
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-lightning
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-lightning
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-lightning
+        vllm-endpoint: nimbus
+    spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.33.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: MAX_JOBS
+          value: "4"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command silently truncates the rest of it.
+          ARGS=(
+            --served-model-name nemotron-3.5-lightning
+            --host 0.0.0.0 --port 8000
+            # Hybrid Mamba/MoE: KV for 1M tokens is small (measured 49 GiB KV pool =
+            # 5.3M tokens at 0.60), so the full native context fits.
+            --max-model-len 1048576
+            --gpu-memory-utilization 0.60
+            --max-num-seqs 1
+            --max-num-batched-tokens 16384
+            --enable-prefix-caching
+            --enable-chunked-prefill
+            # NVIDIA's DGX Spark recipe (model card): Marlin MoE, fp8 KV, FlashInfer
+            # Mamba backend with aligned cache, DSpark speculative decoding k=3.
+            --moe-backend marlin
+            --kv-cache-dtype fp8
+            --mamba-backend flashinfer
+            --mamba-cache-mode align
+            --speculative-config '{"model":"nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DSpark","num_speculative_tokens":3}'
+            --enable-auto-tool-choice
+            --tool-call-parser qwen3_coder
+            --reasoning-parser nemotron_v3
+            # Same output ceiling as the rest of the fleet (open-llm-proxy#150).
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4 "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only: 0.60 x 121.7 GiB ~= 73 GiB.
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 12
+            memory: 108Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 160
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

@@ -19,7 +19,7 @@ metadata:
   labels:
     k8s-app: vllm-nimbus-qwen36
 spec:
-  replicas: 1
+  replicas: 0   # nimbus serves nemotron-lightning (2026-11-17)
   strategy:
     type: Recreate
   selector:

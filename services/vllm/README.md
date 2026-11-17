@@ -4,7 +4,7 @@ Each GPU node serves one model at a time, at a fixed URL:
 
 | Endpoint | Node | Currently | Hardware |
 |---|---|---|---|
-| <https://vllm-nimbus.carlboettiger.info> | nimbus | `qwen` / `qwen3.8` — Qwen3.8-Flash-Next NVFP4 | DGX Spark GB10 |
+| <https://vllm-nimbus.carlboettiger.info> | nimbus | `nemotron-3.5-lightning` — Nemotron-3.5-Lightning NVFP4, DSpark k=3, 1M ctx (investigation) | DGX Spark GB10 |
 | <https://vllm-nimbus2.carlboettiger.info> | nimbus2 + nimbus4 | `deepseek-v4-flash` — DeepSeek-V4-Flash-0731, DSpark k=5, TP2 | 2× Dell Pro Max GB10 |
 | <https://vllm-nimbus3.carlboettiger.info> | nimbus3 | *nothing* — `laguna` and `qwen38-27b` are at 0 | Dell Pro Max GB10 |
 | <https://whisper-cirrus.carlboettiger.info> | cirrus | **speech-to-text**, several models | 2× Quadro RTX 8000 (48 GB each) |
@@ -47,7 +47,8 @@ If the hub is down, tokens seen in the last minute keep working and others get a
 | `endpoints.yaml` | The Services, Ingresses and Traefik `ServersTransport` — the *stable* half |
 | `stt-cirrus.yaml` | **Current cirrus workload**: the speaches speech-to-text server (parakeet + whisper) |
 | `qwen3-8-cirrus.yaml`, `gemma4-cirrus.yaml` (google/gemma-4-E2B-it) | LLM Deployments on cirrus, both scaled to 0 since cirrus became an ASR node |
-| `qwen38-flashnext-nimbus.yaml` | **Current** nimbus model: Qwen3.8-Flash-Next NVFP4, PLE table mmapped from NVMe (at 0 2026-10-29 to 2026-11-04 for the TensorFold pair) |
+| `nemotron-lightning-nimbus.yaml` | **Current** nimbus model: Nemotron-3.5-Lightning NVFP4, DSpark k=3, 1M context |
+| `qwen38-flashnext-nimbus.yaml` | Qwen3.8-Flash-Next NVFP4 (at 0), PLE table mmapped from NVMe (at 0 2026-10-29 to 2026-11-04 for the TensorFold pair) |
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
 | `nemotron35-super-nimbus2.yaml` | nimbus2 single-GB10 model, **scaled to 0** 2026-10-28 for the DeepSeek pair: Nemotron 3.5 Super NVFP4 on one GB10, NVIDIA's Spark recipe with draft length 3 and 1M context. Measurements in the manifest header |
 | `deepseek-v4-flash-gb10pair.yaml` | **Current** nimbus2+nimbus4 TP2 pair, owns the `vllm-nimbus2` Service/Ingress: DeepSeek-V4-Flash-0731 (was -DSpark until 2026-10-28), TP2 head + worker. Start order matters — see the manifest header |
