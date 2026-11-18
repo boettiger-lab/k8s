@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy bucket settings MinIO -> rustfs-s3: anonymous policy, lifecycle rules,
-# versioning (quotas are reported, not copied; see below). Creates any missing bucket. The bulk copy (bulk-copy.yaml)
-# moves objects only; this moves the rest. Re-runnable: run it now and again at
+# versioning (quotas are reported, not copied; see below). Creates any missing bucket. The bulk copy (bulk-copy.yaml,
+# removed after the cutover) moved objects only; this moves the rest. Re-runnable: run it now and again at
 # the cutover to pick up buckets and changes made since.
 #
 # Reads with MinIO's root inside the MinIO pod; writes with rustfs-s3's root from a
