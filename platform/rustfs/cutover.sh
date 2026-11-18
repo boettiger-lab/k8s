@@ -104,6 +104,7 @@ kubectl -n minio exec deploy/minio-deployment -- sh -c '
   set -e; export MC_CONFIG_DIR=$(mktemp -d); W=$(mktemp -d); trap "rm -rf $MC_CONFIG_DIR $W" EXIT
   mc alias set l http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
   mc -q admin cluster iam export l -o "$W/iam.zip" >/dev/null; cat "$W/iam.zip"' \
+| python3 -I platform/rustfs/iam-export-filter.py "$B/svcaccts.expected" \
 | kubectl -n rustfs exec -i "$POD" -- sh -c '
   set -e; export MC_CONFIG_DIR=/tmp/mc; trap "rm -f /tmp/iam.zip" EXIT
   cat > /tmp/iam.zip
@@ -113,6 +114,13 @@ m=$(kubectl -n minio exec deploy/minio-deployment -- sh -c 'export MC_CONFIG_DIR
 r=$(kubectl -n rustfs exec "$POD" -- sh -c 'export MC_CONFIG_DIR=/tmp/mc; mc admin user list d' | wc -l)
 echo "users: MinIO $m, rustfs-s3 $r"
 [ "$r" -ge "$m" ] || die "rustfs-s3 has fewer users than MinIO. MinIO is still running; investigate, then re-run or roll back: bash $0 --rollback $B"
+# RustFS reports success while skipping service accounts it cannot parse; count them.
+se=$(cat "$B/svcaccts.expected")
+sr=$(kubectl -n rustfs exec "$POD" -- sh -c 'export MC_CONFIG_DIR=/tmp/mc
+  for u in $(mc admin user list --json d | while read -r l; do x=${l#*\"accessKey\":\"}; echo "${x%%\"*}"; done) root; do
+    mc admin user svcacct list --json d "$u" 2>/dev/null; done' | grep -c '"accessKey"' || true)
+echo "service accounts: expected $se, rustfs-s3 $sr"
+[ "$sr" -ge "$se" ] || die "rustfs-s3 has fewer service accounts than expected. MinIO is still running; investigate, then re-run or roll back: bash $0 --rollback $B"
 
 say "5. Bucket settings (anonymous policies, lifecycle, versioning)"
 bash platform/rustfs/copy-bucket-settings.sh
