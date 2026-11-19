@@ -8,7 +8,26 @@
 # `minio.` is an ALIAS of `s3.` (same Service), not a redirect: SigV4 signs the Host
 # header and S3 clients don't follow redirects on signed requests. It keeps every
 # NRP job, app and published link working. Its proxy setting matches today's record
-# (DNS-only: it resolves straight to cirrus). Retire it when the access log goes quiet.
+# (DNS-only: it resolves straight to cirrus).
+#
+# The alias has its own Service (same pods as rustfs-s3) only so that Traefik
+# counts its traffic separately. The access log keeps 4xx/5xx only, so quiet
+# successful clients show up only in this metric:
+#   sum by (code) (increase(traefik_service_requests_total{service="rustfs-minio-alias-api@kubernetes"}[7d]))
+# Retire the alias when that stays at zero.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-alias
+  namespace: rustfs
+spec:
+  selector:
+    app: rustfs-s3
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -29,7 +48,7 @@ spec:
         paths:
           - path: /
             pathType: Prefix
-            backend: {service: {name: rustfs-s3, port: {name: api}}}
+            backend: {service: {name: minio-alias, port: {name: api}}}
 ---
 # data.: the web console (same role as MinIO's console). Proxied, as today.
 # RustFS serves its console under /rustfs/console/ and answers 403 at /, so the bare
