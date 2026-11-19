@@ -57,13 +57,13 @@ spec:
         - name: ALLOW_CPU_FALLBACK
           value: "true"
         - name: STAC_CATALOG_URL
-          value: https://minio.carlboettiger.info/public-data/stac/catalog.json
+          value: https://s3.carlboettiger.info/public-data/stac/catalog.json
         - name: S3_ENDPOINT_URL
-          value: https://minio.carlboettiger.info
+          value: https://s3.carlboettiger.info
         - name: S3_DEFAULT_ENDPOINT
-          value: minio.carlboettiger.info
+          value: s3.carlboettiger.info
         # Start and serve /healthz even if the STAC catalogue is unreachable,
-        # so a MinIO blip does not turn into a CrashLoopBackOff here.
+        # so an object-store blip does not turn into a CrashLoopBackOff here.
         - name: STAC_ALLOW_DEGRADED_START
           value: "true"
         readinessProbe:

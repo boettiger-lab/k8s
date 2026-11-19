@@ -37,8 +37,8 @@ curl 'https://titiler.carlboettiger.info/cog/WebMercatorQuad/tilejson.json?url=<
 ```
 
 Note that TiTiler fetches the COG from whatever URL the *client* supplies, so a
-COG on the in-cluster MinIO is still fetched over its public
-`minio.carlboettiger.info` address (hairpinning out through Traefik and back).
+COG on the in-cluster object store is still fetched over its public
+`s3.carlboettiger.info` address (hairpinning out through Traefik and back).
 
 ## Consumers
 

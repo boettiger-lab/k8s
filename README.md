@@ -37,7 +37,7 @@ themselves.
 | Directory | Provides | URL |
 |-----------|----------|-----|
 | [`jupyterhub/`](services/jupyterhub/) | Multi-user notebooks (CPU + GPU profiles), BinderHub | [jupyterhub.cirrus](https://jupyterhub.cirrus.carlboettiger.info) |
-| [`minio/`](services/minio/) | S3-compatible object storage for research data | [minio](https://minio.carlboettiger.info), [data](https://data.carlboettiger.info) |
+| [`minio/`](services/minio/) | S3-compatible object storage for research data (now served by RustFS, see `platform/rustfs/`) | [s3](https://s3.carlboettiger.info), [data](https://data.carlboettiger.info) |
 | [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [vllm-nimbus3](https://vllm-nimbus3.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [`laya/`](services/laya/) | Laya decision-model server for ESPM 157, on cirrus's shared GPUs | [laya](https://laya.carlboettiger.info) |
 | [`kev/`](services/kev/) | Kev decision-model server, an open-weight alternative to laya on the same protocol | [kev](https://kev.carlboettiger.info) |
