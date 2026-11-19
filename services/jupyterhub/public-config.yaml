@@ -10,7 +10,7 @@
 #
 # NOTE: The singleuser.networkPolicy configuration below replaces the functionality
 # of enable-external-access.sh and allows hairpin connections for JupyterHub pods
-# to access external services like minio.carlboettiger.info and other cluster services.
+# to access external services like s3.carlboettiger.info and other cluster services.
 #
 # Reference existing docker-registry secret for private images
 imagePullSecrets:
@@ -105,7 +105,7 @@ singleuser:
       # Allow internet access (excluding private ranges) - enables 'hairpin' connections
       nonPrivateIPs: true
     egress:
-      # Specific access to your external IP (minio.carlboettiger.info at 128.32.85.8)
+      # Specific access to your external IP (s3.carlboettiger.info at 128.32.85.8)
       - to:
           - ipBlock:
               cidr: 128.32.85.8/32

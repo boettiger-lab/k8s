@@ -94,7 +94,7 @@ kubectl apply -n jupyter -f cirrus-redirect.yaml
 JupyterHub is configured with network policies that enable user pods to access external services including MinIO and other cluster services via hairpin connections.
 
 The `singleuser.networkPolicy` in `public-config.yaml` allows:
-- Access to `minio.carlboettiger.info` (external domain) via hairpin connections.
+- Access to `s3.carlboettiger.info` (external domain) via hairpin connections.
 - Connect to MinIO services in the `minio` namespace.
 - Access other private IP ranges for cluster services.
 - Maintain DNS resolution capabilities.
