@@ -96,13 +96,23 @@ data:
         "display_name": "Qwen3.8-27B AWQ INT4",
         "description": "Dense, MTP speculative decoding; scaled to 0 since cirrus became an ASR node"
       },
-      "glm-5.3-flash": {
+      "glm-5.3-flash@nimbus": {
         "display_name": "GLM-5.3-Flash FP4 · MTP k=5 · b12x image · TP2",
-        "description": "NVIDIA's FP4-Local checkpoint and Spark recipe (eugr/spark-vllm-b12x), tensor-parallel across nimbus + nimbus3"
+        "description": "NVIDIA's FP4-Local checkpoint and Spark recipe (eugr/spark-vllm-b12x), tensor-parallel across nimbus + nimbus3",
+        "power_hosts": [
+          "nimbus",
+          "nimbus3"
+        ],
+        "gpu_count": 2
       },
-      "mimo-v2.6-flash": {
+      "mimo-v2.6-flash@nimbus": {
         "display_name": "MiMo-V2.6-Flash · MTP k=3 · vLLM 0.34 · TP2",
-        "description": "Xiaomi's MOPD release (mxfp4/FP8), tensor-parallel across nimbus + nimbus3"
+        "description": "Xiaomi's MOPD release (mxfp4/FP8), tensor-parallel across nimbus + nimbus3",
+        "power_hosts": [
+          "nimbus",
+          "nimbus3"
+        ],
+        "gpu_count": 2
       },
       "q36-mtp-stock": {
         "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=3 · vLLM 0.33"
@@ -162,7 +172,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-11-21-display-names"
+        checksum/config: "2026-11-21-pair-hosts"
     spec:
       securityContext:
         runAsNonRoot: true
