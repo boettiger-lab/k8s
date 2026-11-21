@@ -149,6 +149,15 @@ server:
   extraFlags:
     - web.enable-lifecycle
     - web.enable-otlp-receiver
+  # The vllm-auth scrape job's bearer token: a copy of vllm/vllm-api-key, made out of
+  # band (Secrets do not cross namespaces):
+  #   kubectl -n vllm get secret vllm-api-key -o jsonpath='{.data.api-key}' | base64 -d |
+  #     kubectl -n monitoring create secret generic vllm-metrics-key --from-file=api-key=/dev/stdin
+  extraSecretMounts:
+    - name: vllm-metrics-key
+      mountPath: /etc/prometheus/secrets/vllm
+      secretName: vllm-metrics-key
+      readOnly: true
   retention: "15d"
   # Second brake: never let the TSDB fill the volume. A full /data stops
   # compaction, which pins everything in the head — that is how RAM ran away.
@@ -222,6 +231,39 @@ scrapeConfigs:
       # values — and both are redundant with namespace/pod/container.
       - action: labeldrop
         regex: (id|name)
+
+  # vLLM builds that put /metrics behind the API key (eugr/spark-vllm-b12x nightlies:
+  # their auth middleware allowlists only /health, /ping, /load, /version; stock vLLM
+  # guards only /v1...). kubernetes-service-endpoints scrapes them anonymously and gets
+  # 401, so the carbon dashboard never sees the model. Pods opt in with the label
+  # metrics-auth=bearer and are scraped here with the shared key. Opt in ONLY pods that
+  # need it: a pod whose /metrics is open would be scraped twice (here and through its
+  # Service) and the dashboard would double its tokens. A pod job, so the key goes to
+  # the opted-in pods and nowhere else. The label can be added to a running pod
+  # (`kubectl label pod`) without a restart.
+  vllm-auth:
+    enabled: true
+    job_name: vllm-auth
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/vllm/api-key
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [vllm]
+    relabel_configs:
+      - action: keep
+        source_labels: [__meta_kubernetes_pod_label_metrics_auth, __meta_kubernetes_pod_container_port_name]
+        regex: bearer;http
+      - action: replace
+        source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
 
   # TensorFold (services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml) serves
   # vLLM-shaped metrics as tensorfold:* with no model_name, so the carbon
