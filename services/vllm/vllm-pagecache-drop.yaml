@@ -1,0 +1,62 @@
+# Drop the page cache behind vLLM's safetensors reads, one shard at a time.
+#
+# WHY: vLLM's default (lazy, mmap) loader leaves every shard it read in the page cache and
+# only fadvises it away after the WHOLE load. In TP2 each rank touches every shard, so on a
+# GB10 (page cache and CUDA share one LPDDR pool) a 166 GiB checkpoint asks for ~83 GiB of
+# parameters PLUS up to 166 GiB of cache on each node. MiMo-V2.6-Flash's first watched
+# start (2026-11-20) hit 519,570 pages/min of direct reclaim at 9 GiB free, ~10% into the
+# weights, and the watcher aborted it. Same failure class as TensorFold's (#139).
+#
+# HOW: sitecustomize.py (on PYTHONPATH) replaces safetensors.safe_open with a wrapper that
+# posix_fadvise(DONTNEED)s the file when it is closed, before vllm imports it. Delegates
+# everything else, so non-`with` callers work too. Logs "[pagecache-drop] active" once
+# per process. Covers the default and "eager"/"torchao" paths; NOT fastsafetensors,
+# runai or custom load formats (e.g. --load-format b12x).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-pagecache-drop
+  namespace: vllm
+data:
+  sitecustomize.py: |
+    import os
+    import sys
+
+    try:
+        import safetensors
+        _orig = safetensors.safe_open
+
+        def _drop(path):
+            try:
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                finally:
+                    os.close(fd)
+            except (OSError, TypeError):
+                pass
+
+        class safe_open:
+            def __init__(self, filename, *args, **kwargs):
+                self._path = os.fspath(filename)
+                self._f = _orig(filename, *args, **kwargs)
+
+            def __enter__(self):
+                self._f.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                r = self._f.__exit__(*exc)
+                _drop(self._path)
+                return r
+
+            def __getattr__(self, name):
+                return getattr(self._f, name)
+
+            def __del__(self):
+                _drop(self._path)
+
+        safetensors.safe_open = safe_open
+        print(f"[pagecache-drop] active pid={os.getpid()}", file=sys.stderr, flush=True)
+    except Exception as e:  # never break interpreter start-up
+        print(f"[pagecache-drop] NOT active: {e!r}", file=sys.stderr, flush=True)

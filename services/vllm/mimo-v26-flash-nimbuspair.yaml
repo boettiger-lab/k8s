@@ -105,6 +105,10 @@ spec:
             --max-num-seqs 1
             --max-num-batched-tokens 8192
             --kv-cache-memory-bytes 8G
+            # vLLM still checks CUDA free >= util x 121.69 GiB at startup (default 0.92 = 112 GiB
+            # failed; 0.78 failed with 94.85 "free" -- CUDA reports less than MemFree after a
+            # cache drop). With an absolute KV cap this flag is only that check.
+            --gpu-memory-utilization 0.70
             --kv-cache-dtype fp8
             --moe-backend marlin
             --no-async-scheduling
@@ -211,6 +215,10 @@ spec:
             --max-num-seqs 1
             --max-num-batched-tokens 8192
             --kv-cache-memory-bytes 8G
+            # vLLM still checks CUDA free >= util x 121.69 GiB at startup (default 0.92 = 112 GiB
+            # failed; 0.78 failed with 94.85 "free" -- CUDA reports less than MemFree after a
+            # cache drop). With an absolute KV cap this flag is only that check.
+            --gpu-memory-utilization 0.70
             --kv-cache-dtype fp8
             --moe-backend marlin
             --no-async-scheduling
