@@ -38,6 +38,9 @@ context >= 200K, glen `numeric` decides quality. Look up, with URLs:
   before choosing that path.
 - GB10/Spark recipes (record which one you replicate in the manifest header):
   - NVIDIA model cards ("DGX Spark" sections) and the NVIDIA DGX Spark dev forum
+  - `github.com/NVIDIA/local-ai-inference-recipes`: NVIDIA's own Spark recipes
+  - `github.com/eugr/spark-vllm-docker`: community vLLM images and launch scripts for Spark
+  - `recipes.vllm.ai/<org>/<model>`: vLLM's per-model flags (tool/reasoning parsers, MTP)
   - `github.com/Anemll/dspark-vllm-gx10`: the DeepSeek pair recipe (image, `mp` backend)
   - `github.com/blazux/qwen3.8-Flash-DGX`: Flash-Next PLE-mmap image
   - `github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark`
