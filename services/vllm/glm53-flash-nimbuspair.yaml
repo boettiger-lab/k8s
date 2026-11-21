@@ -1,0 +1,279 @@
+# GLM-5.3-Flash (Z.ai, 320B-A18B, hybrid linear + DSA attention) as nvidia/GLM-5.3-Flash-FP4-Local
+# (165.3 GiB), TP2 across nimbus (rank 0, API) + nimbus3 (rank 1, headless).
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `glm-5.3-flash`)
+#
+# TRIAL (2026-11-20), GLM contender 1: NVIDIA's own 2x Spark recipe
+# (NVIDIA/local-ai-inference-recipes models/z-ai/glm-5.3-flash/dgx-spark-2gpu/.../fp4-local,
+# validated 2026-10-15, 33.9 tok/s single-stream decode on SPEED-Bench coding, inputs <= 8K)
+# on the exact image it was measured with: eugr/spark-vllm-b12x:nightly-20261015, pinned by
+# the digest in its performance.yaml. B12X attention/MoE/linear backends, MTP k=5.
+# Other contenders compared: stock v0.34.0 + nvidia/GLM-5.3-Flash-NVFP4 + MTP 3 (vllm#62956,
+# ~28 tok/s at 2K; 190 GiB, ~95 GiB/rank -- tighter); incoai DFlash2 k=5-7 community images
+# (35-69 tok/s, 27-41 after 114K; drafter is CC BY-NC-ND).
+#
+# MEMORY: ~83 GiB weights per rank. KV capped absolutely (--kv-cache-memory-bytes 8G, as in
+# eugr's recipe, which also bounds the A16 prep with per_process_memory_fraction:0.8) for the
+# first, watched start (cluster-ops scripts/gb10-load-watcher.py). First boot may spend a
+# long time compiling/tuning -- not a hang.
+#
+# START ORDER: worker first, then head (see deepseek-v4-flash-gb10pair.yaml):
+#   kubectl -n vllm scale deploy/glm53-flash-worker --replicas=1   # wait for Running
+#   kubectl -n vllm scale deploy/glm53-flash-head   --replicas=1
+#
+# Only the head carries `vllm-endpoint: nimbus`; every other nimbus model must be at 0.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glm53-flash-worker
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-glm53
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: glm53-flash-worker
+  template:
+    metadata:
+      labels:
+        app: glm53-flash-worker
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: docker.io/eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: CUTE_DSL_ARCH, value: "sm_121a"}
+        - {name: SAFETENSORS_FAST_GPU, value: "1"}
+        - {name: VLLM_ENABLE_ROCE_ALLREDUCE, value: "1"}
+        - {name: VLLM_ROCE_ALLREDUCE_MAX_SIZE, value: "2MB"}
+        - {name: NCCL_BUFFSIZE, value: "1048576"}
+        - {name: NCCL_MAX_CTAS, value: "8"}
+        - {name: VLLM_WORKER_MULTIPROC_METHOD, value: "spawn"}
+        - {name: VLLM_SSM_CONV_STATE_LAYOUT, value: "DS"}
+        - {name: VLLM_USE_AOT_COMPILE, value: "1"}
+        - {name: VLLM_USE_MEGA_AOT_ARTIFACT, value: "1"}
+        - {name: VLLM_USE_V2_MODEL_RUNNER, value: "1"}
+        - {name: VLLM_ENABLE_PCIE_ALLREDUCE, value: "0"}
+        - {name: B12X_POLICY_MODE, value: "auto"}
+        - {name: VLLM_B12X_MOE_FP4_FORCE_A16, value: "1"}
+        - {name: B12X_W4A16_A4_PREFILL, value: "1"}
+        - {name: PYTORCH_ALLOC_CONF, value: "per_process_memory_fraction:0.8"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.13"}
+        - {name: NODE_RANK, value: "1"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--nvidia--GLM-5.3-Flash-FP4-Local
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Compile/tuning caches on the node disk so restarts reuse them.
+          for d in vllm flashinfer b12x; do mkdir -p /hf/glm53-cache/$d /root/.cache; ln -sfn /hf/glm53-cache/$d /root/.cache/$d; done
+          mkdir -p /hf/glm53-cache/triton; ln -sfn /hf/glm53-cache/triton /root/.triton
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name glm-5.3-flash
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --pipeline-parallel-size 1 --decode-context-parallel-size 1
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 4096
+            --kv-cache-memory-bytes 8G
+            --mamba-cache-mode align
+            --enable-prefix-caching --enable-chunked-prefill
+            --dtype bfloat16 --kv-cache-dtype fp8
+            --quantization modelopt_mixed
+            --attention-backend B12X --block-size 256
+            --moe-backend b12x --linear-backend b12x
+            --no-enable-flashinfer-autotune
+            --load-format b12x
+            --speculative-config '{"method":"mtp","num_speculative_tokens":5,"moe_backend":"humming","attention_backend":"B12X"}'
+            --reasoning-parser glm45 --tool-call-parser glm47 --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+            --headless
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glm53-flash-head
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-glm53
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: glm53-flash-head
+  template:
+    metadata:
+      labels:
+        app: glm53-flash-head
+        vllm-endpoint: nimbus
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: docker.io/eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: CUTE_DSL_ARCH, value: "sm_121a"}
+        - {name: SAFETENSORS_FAST_GPU, value: "1"}
+        - {name: VLLM_ENABLE_ROCE_ALLREDUCE, value: "1"}
+        - {name: VLLM_ROCE_ALLREDUCE_MAX_SIZE, value: "2MB"}
+        - {name: NCCL_BUFFSIZE, value: "1048576"}
+        - {name: NCCL_MAX_CTAS, value: "8"}
+        - {name: VLLM_WORKER_MULTIPROC_METHOD, value: "spawn"}
+        - {name: VLLM_SSM_CONV_STATE_LAYOUT, value: "DS"}
+        - {name: VLLM_USE_AOT_COMPILE, value: "1"}
+        - {name: VLLM_USE_MEGA_AOT_ARTIFACT, value: "1"}
+        - {name: VLLM_USE_V2_MODEL_RUNNER, value: "1"}
+        - {name: VLLM_ENABLE_PCIE_ALLREDUCE, value: "0"}
+        - {name: B12X_POLICY_MODE, value: "auto"}
+        - {name: VLLM_B12X_MOE_FP4_FORCE_A16, value: "1"}
+        - {name: B12X_W4A16_A4_PREFILL, value: "1"}
+        - {name: PYTORCH_ALLOC_CONF, value: "per_process_memory_fraction:0.8"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.12"}
+        - {name: NODE_RANK, value: "0"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--nvidia--GLM-5.3-Flash-FP4-Local
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Compile/tuning caches on the node disk so restarts reuse them.
+          for d in vllm flashinfer b12x; do mkdir -p /hf/glm53-cache/$d /root/.cache; ln -sfn /hf/glm53-cache/$d /root/.cache/$d; done
+          mkdir -p /hf/glm53-cache/triton; ln -sfn /hf/glm53-cache/triton /root/.triton
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name glm-5.3-flash
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --pipeline-parallel-size 1 --decode-context-parallel-size 1
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 4096
+            --kv-cache-memory-bytes 8G
+            --mamba-cache-mode align
+            --enable-prefix-caching --enable-chunked-prefill
+            --dtype bfloat16 --kv-cache-dtype fp8
+            --quantization modelopt_mixed
+            --attention-backend B12X --block-size 256
+            --moe-backend b12x --linear-backend b12x
+            --no-enable-flashinfer-autotune
+            --load-format b12x
+            --speculative-config '{"method":"mtp","num_speculative_tokens":5,"moe_backend":"humming","attention_backend":"B12X"}'
+            --reasoning-parser glm45 --tool-call-parser glm47 --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+        readinessProbe:
+          httpGet: {path: /health, port: 8000}
+          initialDelaySeconds: 300
+          periodSeconds: 15
+          failureThreshold: 400
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}

@@ -1,0 +1,241 @@
+# MiMo-V2.6-Flash-MOPD (Xiaomi, 309B-A15B, official mxfp4/FP8 release, 165.6 GiB) served
+# TP2 across nimbus (rank 0, API) + nimbus3 (rank 1, headless), on STOCK vllm-openai:v0.34.0.
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `mimo-v2.6-flash`)
+#
+# TRIAL (2026-11-20), contender 1 of the GLM/MiMo comparison: stock v0.34.0 with DFlash k=7
+# (the drafter shipped in the checkpoint's dflash/ folder). Reported configs compared:
+# tonyd2wild/MiMo-V2.6-Flash-2x-DGX-Spark (RL ckpt, DFlash 7, ~53 tok/s, needed 4 patches
+# that are ALL upstream by v0.34.0: #57508/#59053, #57784, #58128), myllmbox (MOPD, MTP 3,
+# 49 tok/s, 40 after 256K), sparkring forum (MOPD, 27 tok/s at 131K). Next contender: MTP k=3.
+#
+# Kept from the reports: VLLM_USE_DEEP_GEMM=0 (DeepGEMM silently corrupts fp8 GEMMs on SM12x,
+# DeepGEMM#417), --moe-backend marlin, --no-async-scheduling (garbled output, vllm#46669),
+# fp8 KV. NOT kept: tonyd's repetition_penalty 1.05 -- per-model sampling lives in
+# open-llm-proxy, not here.
+#
+# MEMORY: ~83 GiB of weights per rank (DeepSeek-0731 is ~79 on nimbus2+4). KV is capped
+# absolutely with --kv-cache-memory-bytes (bypasses the profiler; see dgx-spark-memory.md)
+# at 8 GiB for the first, watched start (cluster-ops scripts/gb10-load-watcher.py). Raise it
+# only after measuring free memory after warm-up on BOTH nodes.
+#
+# START ORDER: worker first, then head (see deepseek-v4-flash-gb10pair.yaml):
+#   kubectl -n vllm scale deploy/mimo-v26-worker --replicas=1   # wait for Running
+#   kubectl -n vllm scale deploy/mimo-v26-head   --replicas=1
+#
+# Only the head carries `vllm-endpoint: nimbus`; every other nimbus model must be at 0.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimo-v26-worker
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-mimo
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mimo-v26-worker
+  template:
+    metadata:
+      labels:
+        app: mimo-v26-worker
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.34.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: PYTORCH_CUDA_ALLOC_CONF, value: "expandable_segments:True"}
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.13"}
+        - {name: NODE_RANK, value: "1"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name mimo-v2.6-flash
+            --trust-remote-code
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --distributed-executor-backend mp
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 8192
+            --kv-cache-memory-bytes 8G
+            --kv-cache-dtype fp8
+            --moe-backend marlin
+            --no-async-scheduling
+            --enable-prefix-caching --enable-chunked-prefill
+            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+            --headless
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimo-v26-head
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-mimo
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mimo-v26-head
+  template:
+    metadata:
+      labels:
+        app: mimo-v26-head
+        vllm-endpoint: nimbus
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.34.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: PYTORCH_CUDA_ALLOC_CONF, value: "expandable_segments:True"}
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.12"}
+        - {name: NODE_RANK, value: "0"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name mimo-v2.6-flash
+            --trust-remote-code
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --distributed-executor-backend mp
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 8192
+            --kv-cache-memory-bytes 8G
+            --kv-cache-dtype fp8
+            --moe-backend marlin
+            --no-async-scheduling
+            --enable-prefix-caching --enable-chunked-prefill
+            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+        readinessProbe:
+          httpGet: {path: /health, port: 8000}
+          initialDelaySeconds: 300
+          periodSeconds: 15
+          failureThreshold: 400
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
