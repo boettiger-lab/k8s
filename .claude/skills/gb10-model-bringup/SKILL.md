@@ -46,6 +46,11 @@ context >= 200K, glen `numeric` decides quality. Look up, with URLs:
   - `github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark`
   - drafters: `z-lab/*-DFlash`, `nvidia/*-DSpark`
   - r/LocalLLaMA threads for real Spark tok/s
+- Compare, don't adopt: no single source (favourite repos included) is the recipe. Build a
+  small table of the reported configs (checkpoint, image, backend flags, spec-decode
+  method/k, measured tok/s and how it was measured) and note where they disagree. Then
+  test the plausible contenders ourselves; our own numbers and glen decide. Past wins came
+  from our own experiments (e.g. draft length vs KV pool, MTP vs DFlash after 110K).
 - Earlier lab results: the `ops/tp2-benchmark.md` scoreboard and the `services/vllm/*.yaml`
   headers. Fetch the web in parallel subagents; say "not found" rather than guess.
 
