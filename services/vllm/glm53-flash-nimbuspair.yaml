@@ -171,6 +171,9 @@ spec:
       labels:
         app: glm53-flash-head
         vllm-endpoint: nimbus
+        # This image puts /metrics behind the API key; Prometheus's vllm-auth job scrapes
+        # pods with this label using the key (platform/monitoring/prometheus-values.yaml).
+        metrics-auth: bearer
     spec:
       priorityClassName: llm-serving
       nodeSelector:
