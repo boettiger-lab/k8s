@@ -3,8 +3,12 @@
 #
 # Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `mimo-v2.6-flash`)
 #
-# TRIAL (2026-11-20), contender 1 of the GLM/MiMo comparison: stock v0.34.0 with DFlash k=7
-# (the drafter shipped in the checkpoint's dflash/ folder). Reported configs compared:
+# TRIAL (2026-11-21): contender 2 of the GLM/MiMo comparison, stock v0.34.0 with the built-in
+# MTP k=3 (myllmbox's choice; no separate drafter weights or drafter KV). Contender 1 was
+# DFlash k=7 (drafter in the checkpoint's dflash/ folder): {"method":"dflash","model":
+# "$SNAP/dflash","num_speculative_tokens":7}; it never got past the weight load (LOAD below).
+# CUDA graphs: FULL_DECODE_ONLY up to 128 tokens (Plaaasma's dual-Spark recipe) to save memory.
+# Reported configs compared:
 # tonyd2wild/MiMo-V2.6-Flash-2x-DGX-Spark (RL ckpt, DFlash 7, ~53 tok/s, needed 4 patches
 # that are ALL upstream by v0.34.0: #57508/#59053, #57784, #58128), myllmbox (MOPD, MTP 3,
 # 49 tok/s, 40 after 256K), sparkring forum (MOPD, 27 tok/s at 131K). Next contender: MTP k=3.
@@ -25,6 +29,11 @@
 # nimbus). Both ranks now run with vllm-pagecache-drop.yaml (drops each shard's cache when
 # it is closed). Startup baseline after a cache drop: ~86 GiB MemFree on nimbus, ~92 on
 # nimbus3, ~25 GiB below the dropped-cache figure before any weight is read.
+# 2026-11-21 retry with that patch (v1) aborted on nimbus3 swap-out at 20% of the shards:
+# free 101 -> 18 GiB when params were allocated, then -> 5 GiB as shards stayed cached.
+# v1 did nothing (the shards were still mmap'd when it dropped them); v2 of the patch,
+# measured to hold ~1 shard, is what runs now. Published dual-Spark configs spend the same
+# ~96 GiB/rank on weights + runtime (myllmbox: ~5 GB free after warm-up with 16G KV).
 #
 # START ORDER: worker first, then head (see deepseek-v4-flash-gb10pair.yaml):
 #   kubectl -n vllm scale deploy/mimo-v26-worker --replicas=1   # wait for Running
@@ -121,7 +130,8 @@ spec:
             --moe-backend marlin
             --no-async-scheduling
             --enable-prefix-caching --enable-chunked-prefill
-            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+            --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","max_cudagraph_capture_size":128}'
             --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
             --override-generation-config '{"max_new_tokens": 32768}'
             --enable-log-requests --max-log-len 2000
@@ -179,6 +189,9 @@ spec:
       - name: vllm
         image: vllm/vllm-openai:v0.34.0
         imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
         env:
         - name: VLLM_API_KEY
           valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
@@ -234,7 +247,8 @@ spec:
             --moe-backend marlin
             --no-async-scheduling
             --enable-prefix-caching --enable-chunked-prefill
-            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+            --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","max_cudagraph_capture_size":128}'
             --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
             --override-generation-config '{"max_new_tokens": 32768}'
             --enable-log-requests --max-log-len 2000

@@ -187,6 +187,9 @@ spec:
       - name: vllm
         image: docker.io/eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
         imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
         env:
         - name: VLLM_API_KEY
           valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}

@@ -7,11 +7,17 @@
 # start (2026-11-20) hit 519,570 pages/min of direct reclaim at 9 GiB free, ~10% into the
 # weights, and the watcher aborted it. Same failure class as TensorFold's (#139).
 #
-# HOW: sitecustomize.py (on PYTHONPATH) replaces safetensors.safe_open with a wrapper that
-# posix_fadvise(DONTNEED)s the file when it is closed, before vllm imports it. Delegates
-# everything else, so non-`with` callers work too. Logs "[pagecache-drop] active" once
-# per process. Covers the default and "eager"/"torchao" paths; NOT fastsafetensors,
-# runai or custom load formats (e.g. --load-format b12x).
+# HOW: sitecustomize.py (on PYTHONPATH) replaces safetensors.safe_open with a wrapper,
+# before vllm imports it. DONTNEED cannot evict pages that are still mmap'd, and the Rust
+# handle (or tensors it handed out) keeps a shard mapped past __exit__. So the wrapper
+# releases its handle on exit and drops then, and on every later open it re-drops all
+# earlier shards (their mappings are gone by then). Logs "[pagecache-drop v2] active" once
+# per process. Covers the default and "eager"/"torchao" paths; NOT fastsafetensors, runai
+# or custom load formats (--load-format b12x reads with O_DIRECT and needs nothing).
+#
+# MEASURED (CPU-only loader run over 8 MiMo shards in the v0.34.0 image, mincore per
+# shard, 2026-11-21): v1 (drop on __exit__ only) kept 100% of every shard resident, same
+# as no patch; v2 keeps ~1 shard (1.2 GiB), ~2 if the previous shard's tensors are held.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,13 +25,18 @@ metadata:
   namespace: vllm
 data:
   sitecustomize.py: |
+    # Drop each safetensors shard's page cache once the loader is done with it.
+    # DONTNEED cannot evict pages still mmap'd, and the Rust handle (or tensors it
+    # handed out) keeps the shard mapped past __exit__. So: release our handle on
+    # exit, drop then, and on every later open re-drop all earlier shards (by then
+    # their mappings are gone). Cheap: one fadvise per earlier shard per open.
+    import gc
     import os
     import sys
-
     try:
         import safetensors
         _orig = safetensors.safe_open
-
+        _seen = []
         def _drop(path):
             try:
                 fd = os.open(path, os.O_RDONLY)
@@ -35,28 +46,30 @@ data:
                     os.close(fd)
             except (OSError, TypeError):
                 pass
-
         class safe_open:
             def __init__(self, filename, *args, **kwargs):
                 self._path = os.fspath(filename)
+                for p in _seen:
+                    if p != self._path:
+                        _drop(p)
+                if self._path not in _seen:
+                    _seen.append(self._path)
                 self._f = _orig(filename, *args, **kwargs)
-
             def __enter__(self):
                 self._f.__enter__()
                 return self
-
             def __exit__(self, *exc):
                 r = self._f.__exit__(*exc)
+                self._f = None
+                gc.collect(0)
                 _drop(self._path)
                 return r
-
             def __getattr__(self, name):
-                return getattr(self._f, name)
-
-            def __del__(self):
-                _drop(self._path)
-
+                f = self.__dict__.get("_f")
+                if f is None:
+                    raise AttributeError(name)
+                return getattr(f, name)
         safetensors.safe_open = safe_open
-        print(f"[pagecache-drop] active pid={os.getpid()}", file=sys.stderr, flush=True)
-    except Exception as e:  # never break interpreter start-up
-        print(f"[pagecache-drop] NOT active: {e!r}", file=sys.stderr, flush=True)
+        print(f"[pagecache-drop v2] active pid={os.getpid()}", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[pagecache-drop v2] NOT active: {e!r}", file=sys.stderr, flush=True)
