@@ -30,6 +30,10 @@
 #                so the node's later single-GPU models are not charged for an
 #                idle worker while the pair keeps its history (nimbus2: the
 #                DeepSeek pair drew nimbus4 too; Nemotron does not).
+#                Display names follow `<model> <quant> · <spec decode> · <image>`, and
+#                a production deployment uses the same name as the screen run of the
+#                same recipe. Screen variants (ops scripts/gb10-speedtest) serve under
+#                test tags, so each needs an entry here or its card shows the tag.
 #
 # Both are read once at start: edit, then bump checksum/config below (or
 # `kubectl -n monitoring rollout restart deployment/carbon-api`).
@@ -56,26 +60,33 @@ data:
   models.json: |
     {
       "nemotron-3.5-super@nimbus2": {
-        "display_name": "Nemotron 3.5 Super NVFP4",
+        "display_name": "Nemotron 3.5 Super NVFP4 · LiLiCorr k=3 · vLLM 0.32",
         "description": "120B-A12B hybrid Mamba MoE on one GB10, LiLiCorr speculative decoding (k=3), 1M context"
       },
       "deepseek-v4-flash@nimbus2": {
         "display_name": "DeepSeek-V4-Flash (DSpark, then 0731)",
-        "power_hosts": ["nimbus2", "nimbus4"],
+        "power_hosts": [
+          "nimbus2",
+          "nimbus4"
+        ],
         "gpu_count": 2,
         "description": "FP8 weights, NVFP4 KV cache, DSpark speculative decoding (k=5), tensor-parallel across two GB10s; checkpoint -DSpark until 2026-10-28, -0731 since. One card: both serve as deepseek-v4-flash"
       },
       "qwen3.6-35b-a3b@nimbus": {
-        "display_name": "Qwen3.6-35B-A3B NVFP4",
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=3 · vLLM 0.33",
         "description": "35B-A3B MoE, MTP speculative decoding (k=3)"
       },
       "qwen3.8-27b@nimbus3": {
-        "display_name": "Qwen3.8-27B NVFP4",
+        "display_name": "Qwen3.8-27B NVFP4 · DFlash2 k=7 · vLLM 0.32",
         "description": "Dense, DFlash2 speculative decoding (k=7)"
       },
       "qwen@nimbus": {
-        "display_name": "Qwen3.8-Flash-Next NVFP4",
+        "display_name": "Qwen3.8-Flash-Next NVFP4 · MTP k=2 · PLE-mmap image",
         "description": "MoE, PLE table mmapped from NVMe, MTP speculative decoding"
+      },
+      "nemotron-3.5-lightning": {
+        "display_name": "Nemotron-3.5-Lightning NVFP4 · DSpark k=3 · vLLM 0.33",
+        "description": "30B-A3B hybrid Mamba MoE, NVIDIA's DGX Spark recipe, 1M context"
       },
       "laguna": {
         "display_name": "Laguna S 2.1 NVFP4",
@@ -84,6 +95,54 @@ data:
       "qwen3-8": {
         "display_name": "Qwen3.8-27B AWQ INT4",
         "description": "Dense, MTP speculative decoding; scaled to 0 since cirrus became an ASR node"
+      },
+      "glm-5.3-flash": {
+        "display_name": "GLM-5.3-Flash FP4 · MTP k=5 · b12x image · TP2",
+        "description": "NVIDIA's FP4-Local checkpoint and Spark recipe (eugr/spark-vllm-b12x), tensor-parallel across nimbus + nimbus3"
+      },
+      "mimo-v2.6-flash": {
+        "display_name": "MiMo-V2.6-Flash · MTP k=3 · vLLM 0.34 · TP2",
+        "description": "Xiaomi's MOPD release (mxfp4/FP8), tensor-parallel across nimbus + nimbus3"
+      },
+      "q36-mtp-stock": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=3 · vLLM 0.33"
+      },
+      "q36-mtp2-stock": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=2 · vLLM 0.33"
+      },
+      "q36-mtp4-stock": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=4 · vLLM 0.33"
+      },
+      "q36-mtp5-stock": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=5 · vLLM 0.33"
+      },
+      "q36-dflash-stock": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · DFlash k=10 · vLLM 0.33"
+      },
+      "q36-m3-nvrecipe": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=3 · NVIDIA recipe flags · vLLM 0.33",
+        "description": "marlin MoE, async scheduling, 8192 batched tokens"
+      },
+      "q36-m3-v034": {
+        "display_name": "Qwen3.6-35B-A3B NVFP4 · MTP k=3 · vLLM 0.34"
+      },
+      "g4-dflash-stock": {
+        "display_name": "Gemma-4-26B-A4B NVFP4 · DFlash k=10 · vLLM 0.33"
+      },
+      "dist-mtp-fp8": {
+        "display_name": "Qwen3.8-35B-A3B-Distill FP8 (quantized on load) · MTP k=3 · vLLM 0.33"
+      },
+      "dist-nvfp4-mtp": {
+        "display_name": "Qwen3.8-35B-A3B-Distill NVFP4 (community) · MTP k=3 · vLLM 0.33"
+      },
+      "q38-27b-mtp-stock": {
+        "display_name": "Qwen3.8-27B NVFP4 · MTP k=3 · vLLM 0.32"
+      },
+      "q38-27b-dflash2-stock": {
+        "display_name": "Qwen3.8-27B NVFP4 · DFlash2 k=16 · vLLM 0.32"
+      },
+      "nem-lightning-dspark": {
+        "display_name": "Nemotron-3.5-Lightning NVFP4 · DSpark k=3 · vLLM 0.33"
       }
     }
 ---
@@ -103,7 +162,7 @@ spec:
         app: carbon-api
       annotations:
         # Roll the pod when the config changes -- it is read once at start.
-        checksum/config: "2026-11-16-nimbus3"
+        checksum/config: "2026-11-21-display-names"
     spec:
       securityContext:
         runAsNonRoot: true
