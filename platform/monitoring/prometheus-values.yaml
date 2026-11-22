@@ -568,6 +568,37 @@ serverFiles:
               summary: "pg-exporter cannot reach the JuiceFS metadata DB"
               description: "Every JuiceFS volume (all homes) depends on juicefs-pg. Check `kubectl -n juicefs get pods` and the DB log."
 
+          # JupyterHub homes on JuiceFS, from JuiceFS's directory-quota counters
+          # (home-quota-exporter in ../juicefs/home-quota-exporter.yaml). A full
+          # home fails every write with "disk quota exceeded" -- notebooks stop
+          # saving -- and the user rarely knows why. Quotas cost nothing until
+          # used, so the fix is usually just to expand the PVC (juicefs-home
+          # allows expansion): kubectl -n jupyter patch pvc <pvc> -p
+          # '{"spec":{"resources":{"requests":{"storage":"<size>"}}}}'
+          - alert: JupyterHomeNearQuota
+            expr: jupyter_home_used_bytes / jupyter_home_quota_bytes > 0.9
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "Jupyter home {{ $labels.pvc }} is {{ $value | humanizePercentage }} full"
+              description: "Expand the PVC or ask the user to clean up before writes start failing."
+
+          - alert: JupyterHomeFull
+            expr: jupyter_home_used_bytes / jupyter_home_quota_bytes > 0.98
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "Jupyter home {{ $labels.pvc }} is full ({{ $value | humanizePercentage }})"
+              description: "Writes to this home are failing or about to. Expand the PVC: `kubectl -n jupyter patch pvc {{ $labels.pvc }}` with a larger spec.resources.requests.storage."
+
+          - alert: JupyterHomeMetricsMissing
+            expr: absent(jupyter_home_quota_bytes)
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "No Jupyter home usage metrics for 30m"
+              description: "home-quota-exporter (namespace juicefs) is down or cannot read monitoring.jupyter_home_quota. Check its log; re-run platform/juicefs/home-quota-view.sh if the view or grant is missing."
+
       - name: object-store
         rules:
           # Direct, fast signal that S3 is gone. rustfs-s3's readinessProbe hits
