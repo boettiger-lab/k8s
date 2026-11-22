@@ -1,0 +1,120 @@
+# Per-home usage of the JupyterHub homes on JuiceFS, for Prometheus.
+#
+# Reads view monitoring.jupyter_home_quota (home-quota-view.sh): JuiceFS's own
+# directory-quota counters, exact bytes and inodes per home, maintained by the
+# filesystem on every write. Nothing walks a directory tree, and homes are
+# reported whether or not their server is running. The kubelet's
+# kubelet_volume_stats_* does not cover these volumes: the JuiceFS CSI driver
+# reports no volume stats.
+#
+# Metrics (label pvc = claim-<user>[--<server>]):
+#   jupyter_home_used_bytes, jupyter_home_quota_bytes, jupyter_home_used_inodes
+# Feeds the JupyterHome* alerts in ../monitoring/prometheus-values.yaml and
+# ../monitoring/grafana-dashboard-homes.yaml.
+#
+# Connects as `juicefs_exporter` (Secret juicefs/pg-exporter, shared with
+# pg-exporter.yaml); the role's connection limit is 3 and each exporter holds
+# one. Scraped through the Service's prometheus.io annotations
+# (kubernetes-service-endpoints job).
+#
+# Apply: bash platform/juicefs/home-quota-view.sh
+#        kubectl apply -f platform/juicefs/home-quota-exporter.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: home-quota-exporter
+  namespace: juicefs
+data:
+  sql_exporter.yml: |
+    global:
+      scrape_timeout: 10s
+      scrape_timeout_offset: 500ms
+      # The counters change only as fast as people write files; one query a
+      # minute is plenty however often Prometheus scrapes.
+      min_interval: 60s
+      max_connections: 1
+      max_idle_connections: 1
+    target:
+      # Overridden by env SQLEXPORTER_TARGET_DSN (built from the Secret below).
+      data_source_name: postgres://unused
+      collectors: [jupyter_homes]
+    collectors:
+      - collector_name: jupyter_homes
+        metrics:
+          - metric_name: jupyter_home_used_bytes
+            type: gauge
+            help: Bytes used in a JupyterHub home on JuiceFS (directory quota counter).
+            key_labels: [pvc]
+            values: [used_bytes]
+            query_ref: homes
+          - metric_name: jupyter_home_quota_bytes
+            type: gauge
+            help: Quota of a JupyterHub home on JuiceFS (the PVC size).
+            key_labels: [pvc]
+            values: [quota_bytes]
+            query_ref: homes
+          - metric_name: jupyter_home_used_inodes
+            type: gauge
+            help: Files and directories in a JupyterHub home on JuiceFS.
+            key_labels: [pvc]
+            values: [used_inodes]
+            query_ref: homes
+        queries:
+          - query_name: homes
+            query: SELECT pvc, quota_bytes, used_bytes, used_inodes FROM monitoring.jupyter_home_quota
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home-quota-exporter
+  namespace: juicefs
+  labels: {app: home-quota-exporter}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: home-quota-exporter}
+  template:
+    metadata:
+      labels: {app: home-quota-exporter}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cirrus      # beside the DB
+      securityContext: {runAsNonRoot: true, runAsUser: 65534}
+      containers:
+        - name: exporter
+          image: burningalchemist/sql_exporter:0.24.13
+          args: ["-config.file=/etc/sql_exporter/sql_exporter.yml"]
+          env:
+            - name: PGPASS
+              valueFrom: {secretKeyRef: {name: pg-exporter, key: password}}
+            # The password is hex (mint-pg-exporter-role.sh), so it needs no URL escaping.
+            - name: SQLEXPORTER_TARGET_DSN
+              value: postgres://juicefs_exporter:$(PGPASS)@juicefs-pg.juicefs.svc:5432/juicefs?sslmode=disable
+          ports:
+            - {name: metrics, containerPort: 9399}
+          readinessProbe:
+            httpGet: {path: /metrics, port: 9399}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 10m, memory: 24Mi}
+            limits: {memory: 96Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/sql_exporter, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: home-quota-exporter}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-quota-exporter
+  namespace: juicefs
+  labels: {app: home-quota-exporter}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9399"
+spec:
+  selector: {app: home-quota-exporter}
+  ports:
+    - {name: metrics, port: 9399, targetPort: 9399}
