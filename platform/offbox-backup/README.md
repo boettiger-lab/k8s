@@ -25,9 +25,8 @@ can't overlap.
   `history/<run>/` for 90 days.
 - **Guards:** the run aborts if the source lists under half the buckets of the last
   good run (an emptied store must not be mirrored), plus a per-bucket `--max-delete`.
-- **Source:** MinIO today, through the in-cluster Service. At the RustFS cutover,
-  change `RCLONE_CONFIG_SRC_ENDPOINT` (and `PROVIDER`); the `offbox-read` key is
-  carried over by the IAM import.
+- **Source:** `rustfs-s3` through its in-cluster Service. The `offbox-read` key was
+  minted on MinIO and carried over by the IAM import at the 2026-11-18 cutover.
 
 ## thelio's drives are for this only
 
@@ -42,7 +41,7 @@ namespace's PVC, `Retain`). Don't add a class for it.
 |---|---|
 | `offbox-data-zfsvolume.yaml` | the dataset; `kubectl create` once, never apply (apply resets its state to Pending) |
 | `offbox-backup.yaml` | static PV and PVC, sync script, daily CronJob (10:30 UTC) |
-| `mint-minio-key.sh` | read-only `offbox-read` key on MinIO → Secret `offbox-source` |
+| `mint-minio-key.sh` | read-only `offbox-read` key → Secret `offbox-source`. **MinIO-only: it execs into the MinIO pod, so it no longer runs.** The key lives on rustfs-s3 now; rotating it needs a RustFS version of this script |
 | `mint-juicefs-access.sh` | read-only `offbox-read` key on the pilot RustFS (`juicefs-homes` only) and Postgres role `offbox_dump` (`pg_read_all_data`) → Secret `offbox-juicefs` |
 
 ## Set up

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # MinIO -> rustfs-s3 cutover (cluster-ops object-store-migration.md, "Cutover").
+# HISTORY ONLY: done 2026-11-18; MinIO and the minio-svc alias are gone, so neither
+# the cutover nor --rollback can run again.
 # Run by the owner, in an announced midweek window (not Saturday).
 #
 #   bash platform/rustfs/cutover.sh               # the cutover

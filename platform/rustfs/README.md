@@ -11,8 +11,7 @@ Deploy RustFS (S3-compatible object storage) on Kubernetes with OpenEBS ZFS stor
 > | `s3.yaml` | `rustfs-s3` | `nvme` | the lab's S3 store at `s3.carlboettiger.info`; replaces MinIO |
 > | `s3-cutover-ingress.yaml` | `rustfs-s3` | | `minio.` (alias) and `data.` (console), applied only at the cutover |
 > | `s3-cutover-certs.yaml` | `rustfs-s3` | | certificates for `minio.` and `data.`, issued before the cutover |
-> | `s3-cutover-minio-svc.yaml` | `rustfs-s3` | | `minio-svc` becomes an alias of `rustfs-s3` at the cutover |
-> | `cutover.sh` | `rustfs-s3` | | the cutover (done 2026-11-18); kept for `--rollback <dir>` until MinIO's rollback window closes |
+> | `cutover.sh` | `rustfs-s3` | | the cutover (done 2026-11-18). History only: the rollback window closed when MinIO was removed, and `minio-svc` is gone |
 > | `copy-bucket-settings.sh` | `rustfs-s3` | | anonymous policies, lifecycle, versioning, quota from MinIO; re-run at the cutover |
 > | `sts-check-setup.sh`, `sts-check.sh` | `rustfs-s3` | | Dex → STS check: GitHub device login, temporary keys, allow/deny tests |
 >

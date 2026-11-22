@@ -91,11 +91,11 @@ kubectl apply -n jupyter -f cirrus-redirect.yaml
 
 ### Network Policy
 
-JupyterHub is configured with network policies that enable user pods to access external services including MinIO and other cluster services via hairpin connections.
+JupyterHub is configured with network policies that enable user pods to access the lab's S3 store (rustfs-s3) and other cluster services via hairpin connections.
 
 The `singleuser.networkPolicy` in `public-config.yaml` allows:
 - Access to `s3.carlboettiger.info` (external domain) via hairpin connections.
-- Connect to MinIO services in the `minio` namespace.
+- Connect to the `rustfs-s3` pods in the `rustfs` namespace.
 - Access other private IP ranges for cluster services.
 - Maintain DNS resolution capabilities.
 
