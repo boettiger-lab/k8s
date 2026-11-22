@@ -99,9 +99,12 @@ alertmanager:
 #
 # `kube_node_status_condition` added 2026-11-17 so NodeDown reads the node's
 # Ready condition instead of the kubelet scrape: ~18 series per node.
+#
+# `persistentvolumes` added 2026-11-22 for JuiceFsVolumeStuckReleased: two
+# metrics, six series per PV (five phases + info), ~30 PVs today.
 kube-state-metrics:
   enabled: true
-  collectors: [deployments, statefulsets, pods, nodes, cronjobs]
+  collectors: [deployments, statefulsets, pods, nodes, cronjobs, persistentvolumes]
   metricAllowlist:
     - kube_cronjob_created
     - kube_cronjob_status_last_successful_time
@@ -113,6 +116,8 @@ kube-state-metrics:
     - kube_statefulset_replicas
     - kube_statefulset_status_replicas_ready
     - kube_pod_container_status_waiting_reason
+    - kube_persistentvolume_status_phase
+    - kube_persistentvolume_info
   resources:
     requests: { cpu: 10m, memory: 64Mi }
     limits: { memory: 256Mi }
@@ -598,6 +603,24 @@ serverFiles:
             annotations:
               summary: "No Jupyter home usage metrics for 30m"
               description: "home-quota-exporter (namespace juicefs) is down or cannot read monitoring.jupyter_home_quota. Check its log; re-run platform/juicefs/home-quota-view.sh if the view or grant is missing."
+
+          # A JuiceFS PV is Released once its PVC is deleted; a delvol Job then
+          # removes its data and the PV disappears within a minute. The CSI
+          # controller gives up after 15 failed attempts and never retries, so
+          # the PV and its data stay forever with no Job and no other signal.
+          # Usual causes: the Job is pinned to a node with no free memory (a
+          # GB10 running a model) or a node that is down. Scoped to JuiceFS
+          # classes: zfs PVs retained on purpose (Retain) also sit Released.
+          - alert: JuiceFsVolumeStuckReleased
+            expr: |
+              (kube_persistentvolume_status_phase{phase="Released"} == 1)
+                * on(persistentvolume) group_left(storageclass)
+                kube_persistentvolume_info{storageclass=~"juicefs-.*"}
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "JuiceFS PV {{ $labels.persistentvolume }} stuck Released for 1h"
+              description: "Its delvol Job has not finished, so the data is still in JuiceFS. Check `kubectl -n kube-system get pods | grep delvol` (Pending = pinned node lacks memory or is down). If no Job exists the controller gave up: `kubectl -n kube-system rollout restart statefulset juicefs-csi-controller` retries it."
 
       - name: object-store
         rules:
