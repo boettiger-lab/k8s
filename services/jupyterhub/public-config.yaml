@@ -422,6 +422,47 @@ hub:
       import os
       c.GitHubOAuthenticator.client_id = os.environ.get('GITHUB_CLIENT_ID')
       c.GitHubOAuthenticator.client_secret = os.environ.get('GITHUB_CLIENT_SECRET')
+    # Delete a named server's PVC when the named server is deleted.
+    #
+    # KubeSpawner.delete_forever (delete_pvc defaults True) refuses to delete
+    # a named server's PVC unless pvc_name_template contains the literal
+    # '{servername}', assuming otherwise that the named server shares the
+    # default server's home. Our template, claim-{escaped_user_server}, is
+    # per-server but never matches that substring check, so every deleted
+    # named server left its PVC behind ("Not deleting shared pvc for named
+    # server ..." in the hub log). This widens the check to all per-server
+    # template fields and otherwise defers to upstream. A template with no
+    # per-server field (truly shared home) is still never deleted.
+    delete-named-server-pvc: |
+      from functools import partial
+      from jupyterhub.utils import exponential_backoff
+      from kubespawner import KubeSpawner
+
+      _PER_SERVER_FIELDS = (
+          "{servername}", "{unescaped_servername}", "{user_server}",
+          "{safe_servername}", "{safe_user_server}",
+          "{escaped_servername}", "{escaped_user_server}",
+      )
+      _upstream_delete_forever = KubeSpawner.delete_forever
+
+      async def _delete_forever(self):
+          tmpl = self.pvc_name_template
+          if (
+              self.name
+              and self.delete_pvc
+              and "{servername}" not in tmpl
+              and any(f in tmpl for f in _PER_SERVER_FIELDS)
+          ):
+              self.log.info(f"Deleting pvc {self.pvc_name} for named server {self.user.name}/{self.name}")
+              await exponential_backoff(
+                  partial(self._make_delete_pvc_request, self.pvc_name, self.k8s_api_request_timeout),
+                  f"Could not delete pvc {self.pvc_name}",
+                  timeout=self.k8s_api_request_retry_timeout,
+              )
+              return
+          return await _upstream_delete_forever(self)
+
+      KubeSpawner.delete_forever = _delete_forever
     # (removed) 10-juicefs-named-servers
     #
     # This hook routed NAMED servers to juicefs-sc as a pilot, back when the
