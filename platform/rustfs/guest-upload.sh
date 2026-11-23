@@ -3,7 +3,7 @@
 # or plain S3. One bucket per partner; the user can list and write that bucket and
 # nothing else: no reads, no deletes, no other buckets.
 #
-#   bash platform/rustfs/guest-upload.sh add NAME [QUOTA]   # default quota 2T
+#   bash platform/rustfs/guest-upload.sh add NAME            # no quota (see below)
 #   bash platform/rustfs/guest-upload.sh remove NAME        # user + policy; bucket kept
 #
 # Creates bucket incoming-NAME, user guest-NAME, policy guest-upload-NAME. The
@@ -11,9 +11,9 @@
 # and written only to ~/tmp/guest-NAME-ftps.txt (mode 600) for you to pass on.
 # Runs rc in a throwaway pod with the root key from Secret rustfs/rustfs-s3-root.
 set -euo pipefail
-CMD=${1:-}; NAME=${2:-}; QUOTA=${3:-2T}
+CMD=${1:-}; NAME=${2:-}
 [[ "$CMD" =~ ^(add|remove)$ && "$NAME" =~ ^[a-z0-9][a-z0-9-]{1,40}$ ]] \
-  || { echo "usage: $0 add|remove NAME [QUOTA]   (NAME: lowercase letters, digits, -)"; exit 1; }
+  || { echo "usage: $0 add|remove NAME   (NAME: lowercase letters, digits, -)"; exit 1; }
 BUCKET=incoming-$NAME USER=guest-$NAME POLICY=guest-upload-$NAME
 
 rc_pod() {   # stdin = shell script run inside the rc pod, alias `s` = root
@@ -99,7 +99,9 @@ EOF
 # with the new password. Success is judged by the final listing, not exit codes.
 RESULT=$(rc_pod <<EOF || true
 rc bucket list s 2>/dev/null | grep -q " $BUCKET/" || rc bucket create s/$BUCKET
-rc bucket quota set s/$BUCKET $QUOTA
+# NO quota: RustFS 1.0.5 refuses multipart writes to a hard-quota bucket until its
+# scanner has measured usage ("SlowDown ... unreadable"; FTPS STOR 450 on >16 MiB).
+rc bucket quota clear s/$BUCKET >/dev/null 2>&1
 cat > /tmp/p.json <<'JSON'
 $POLICY_JSON
 JSON
