@@ -71,3 +71,19 @@ kubectl get ingress -n rustfs
 
 From outside the cluster, reach the S3 API with
 `kubectl port-forward -n rustfs service/rustfs 9000:9000`.
+
+## Partner uploads (FTPS)
+
+For outside partners who can only use an FTP client. rustfs-s3 runs RustFS's built-in
+FTPS front end (`s3.yaml`, TLS required, same IAM as S3); it is reachable from the
+internet only while `ftps-public.yaml` is applied.
+
+```bash
+bash platform/rustfs/guest-upload.sh add NAME [QUOTA]   # bucket incoming-NAME, user guest-NAME
+kubectl apply -f platform/rustfs/ftps-public.yaml        # open port 21 + passive 40000-40019
+# ... partner uploads with ~/tmp/guest-NAME-ftps.txt ...
+bash platform/rustfs/guest-upload.sh remove NAME         # bucket and data kept
+kubectl delete -f platform/rustfs/ftps-public.yaml       # close
+```
+
+No resume: an interrupted file restarts from zero, so many medium files beat one huge one.
