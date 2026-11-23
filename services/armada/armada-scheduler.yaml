@@ -15,7 +15,7 @@ spec:
   # The operator's CRD allows only [a-zA-Z0-9_.-] in tag, so the image cannot be pinned by digest here.
   image:
     repository: ghcr.io/boettiger-lab/armada-scheduler
-    tag: "0.22.16-nonarmada"
+    tag: "0.22.16-nonarmada.2"
 
   applicationConfig:
     pulsar:
