@@ -58,6 +58,7 @@ spec:
           ports:
             - {containerPort: 9000, name: api}
             - {containerPort: 9001, name: console}
+            - {containerPort: 8022, name: ftps}
           env:
             - {name: RUSTFS_ADDRESS, value: ":9000"}
             - {name: RUSTFS_VOLUMES, value: /data}
@@ -96,8 +97,24 @@ spec:
             - {name: RUSTFS_OBS_SERVICE_NAME, value: rustfs-s3}
             - {name: RUSTFS_OBS_TRACES_EXPORT_ENABLED, value: "false"}
             - {name: RUSTFS_OBS_LOGS_EXPORT_ENABLED, value: "false"}
+            # FTPS front end for partners who can only use an FTP client (FileZilla,
+            # WinSCP, Cyberduck: "FTP over explicit TLS"). Same IAM as S3; uploads
+            # become multipart objects. RustFS 1.0.5 always requires TLS on control
+            # and data channels once a cert dir is set, so plain FTP is refused.
+            # Reachable from the cluster only, until ftps-public.yaml is applied.
+            # The passive range and external IP must match ftps-public.yaml.
+            - {name: RUSTFS_FTPS_ENABLE, value: "true"}
+            - {name: RUSTFS_FTPS_ADDRESS, value: "0.0.0.0:8022"}
+            - {name: RUSTFS_FTPS_CERTS_DIR, value: /etc/rustfs/ftps}
+            - {name: RUSTFS_FTPS_PASSIVE_PORTS, value: "40000-40019"}
+            - {name: RUSTFS_FTPS_EXTERNAL_IP, value: "128.32.85.8"}   # cirrus, = s3.carlboettiger.info
+            # Pick up cert-manager renewals of s3-tls without a restart. FTPS is the
+            # only TLS listener here (the S3 API is plain HTTP behind Traefik).
+            - {name: RUSTFS_TLS_RELOAD_ENABLE, value: "true"}
+            - {name: RUSTFS_TLS_RELOAD_INTERVAL, value: "300"}
           volumeMounts:
             - {name: data, mountPath: /data}
+            - {name: ftps-cert, mountPath: /etc/rustfs/ftps, readOnly: true}
           resources:
             # The pilot settles at ~3.4 GiB for 25 GB of JuiceFS chunks and OOMed
             # at 4 GiB; this one carries ~6 TB and every S3 client. Start roomy,
@@ -110,6 +127,16 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: rustfs-s3-data}
+        # The s3. Ingress certificate (cert-manager), under the file names RustFS
+        # loads. Clients connect to s3.carlboettiger.info so the name matches.
+        # No subPath, so renewals reach the mounted files (and the reload above).
+        - name: ftps-cert
+          secret:
+            secretName: s3-tls
+            defaultMode: 0440
+            items:
+              - {key: tls.crt, path: rustfs_cert.pem}
+              - {key: tls.key, path: rustfs_key.pem}
 ---
 apiVersion: v1
 kind: Service
