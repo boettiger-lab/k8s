@@ -10,19 +10,27 @@ name: hash-archive Image CI
 # Upstream (btrask/hash-archive) is a third-party repo we do not control, so
 # there is a weekly schedule to pick up upstream changes and rebuild against
 # current base-image security updates — but HASH_ARCHIVE_REF pins what is built.
+#
+# Pull requests that touch the image build it for both arches WITHOUT pushing,
+# so Dockerfile changes are tested before they can reach :latest.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: 'Upstream git ref to build (branch, tag or commit SHA)'
         required: false
-        default: 'master'
+        default: '5133e6a6ed35b3977a733835646f20370cff2de3'
   schedule:
     - cron: '0 0 * * 0'
   push:
     # main only: the merge job tags :latest, so a branch push would ship an
     # unreviewed image.
     branches: [main]
+    paths:
+      - 'services/hash-archive/Dockerfile'
+      - 'services/hash-archive/patches/**'
+      - '.github/workflows/hash-archive-image.yml'
+  pull_request:
     paths:
       - 'services/hash-archive/Dockerfile'
       - 'services/hash-archive/patches/**'
@@ -34,6 +42,11 @@ env:
   # Host header does not match, so this must equal the public hostname served
   # by services/hash-archive/ingress.yaml.
   HOSTNAME_CONFIG: hash-archive.carlboettiger.info
+  # Upstream commit to build unless a manual dispatch names another ref.
+  # Keep in step with the HASH_ARCHIVE_REF default in the Dockerfile.
+  HASH_ARCHIVE_REF: 5133e6a6ed35b3977a733835646f20370cff2de3
+  # Only real runs on main publish; PR runs just build.
+  PUSH: ${{ github.event_name != 'pull_request' }}
 
 jobs:
   build:
@@ -61,6 +74,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to GitHub Container Registry
+        if: env.PUSH == 'true'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -73,15 +87,17 @@ jobs:
           context: services/hash-archive/
           platforms: ${{ matrix.platform }}
           build-args: |
-            HASH_ARCHIVE_REF=${{ github.event.inputs.ref || 'master' }}
+            HASH_ARCHIVE_REF=${{ github.event.inputs.ref || env.HASH_ARCHIVE_REF }}
             HOSTNAME_CONFIG=${{ env.HOSTNAME_CONFIG }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUSH }}
       - name: Export digest
+        if: env.PUSH == 'true'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload digest
+        if: env.PUSH == 'true'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: digests-${{ env.PLATFORM_PAIR }}
@@ -90,7 +106,7 @@ jobs:
           retention-days: 1
 
   merge:
-    if: github.repository == 'boettiger-lab/k8s'
+    if: github.repository == 'boettiger-lab/k8s' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: build
     permissions:

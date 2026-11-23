@@ -42,8 +42,9 @@ FROM ${BUILD_BASE} AS builder
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Upstream is unversioned and low-traffic; pin so builds are reproducible.
+# This is upstream master as of 2026-11-23 (last upstream commit 2021-10-31).
 # Override to track master:  --build-arg HASH_ARCHIVE_REF=master
-ARG HASH_ARCHIVE_REF=master
+ARG HASH_ARCHIVE_REF=5133e6a6ed35b3977a733835646f20370cff2de3
 
 # The hostname compiled into config.h. hash-archive answers 403 to any request
 # whose Host header does not match this, so it must equal the public name.
@@ -109,7 +110,11 @@ RUN find . -name Makefile -exec sed -i 's/-Werror//g' {} + \
 
 ENV CFLAGS="-Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-cast-function-type -Wno-implicit-fallthrough"
 
-RUN ./configure && make -j"$(nproc)"
+# Serial make (#230). Under -j the vendored LevelDB (deps/libkvstore) races its
+# own output-directory rule and fails with
+#   Fatal error: can't create out-shared/db/db_bench.o: No such file or directory
+# which broke every CI build from 2026-09-07 on. -j1 costs a few minutes.
+RUN ./configure && make -j1
 
 # Sanity-check that we actually produced a binary before shipping a broken image.
 RUN test -x build/hash-archive && ldd build/hash-archive
