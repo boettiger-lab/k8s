@@ -19,11 +19,15 @@ name: Image CVE scan
 # and third-party images (vLLM, rustfs, ...) are the run-time half of #221.
 #
 # Filter: CRITICAL/HIGH with a fix available. The rocker and CUDA bases carry
-# dozens of unfixable CVEs; listing them buries the actionable ones.
+# dozens of unfixable CVEs; listing them buries the actionable ones. Packages
+# that never apply in a container (kernel headers) are dropped by
+# .github/trivy/ignore.rego.
 #
 # Supply chain: trivy-action and its setup-trivy were hijacked in March 2026
 # (tags force-pushed to a credential stealer). Actions are pinned by commit
-# SHA and the Trivy binary by version; bump both deliberately.
+# SHA and the Trivy binary by version; bump both deliberately. The Actions
+# cache is off (`cache: false`) so a poisoned cache entry cannot feed this job
+# a tampered vulnerability DB; the DB download costs ~30 s per run.
 
 on:
   workflow_dispatch: null
@@ -31,6 +35,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/image-scan.yml'
+      - '.github/trivy/**'
   schedule:
     - cron: '0 6 * * 3'   # Wednesday; the image rebuilds run Sunday 00:00
   workflow_run:
@@ -77,6 +82,13 @@ jobs:
       TRIVY_IMAGE_SRC: remote
       TRIVY_PLATFORM: ${{ matrix.platform }}
     steps:
+      # Only for .github/trivy/ignore.rego.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_LEG == 'true'
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/trivy
+
       - name: Name this scan
         if: env.RUN_LEG == 'true'
         run: |
@@ -88,10 +100,12 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.76.2
+          cache: 'false'
           image-ref: ${{ matrix.image }}
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          ignore-policy: .github/trivy/ignore.rego
           # Without this the SARIF output ignores `severity` and lists everything.
           limit-severities-for-sarif: true
           format: sarif
@@ -113,10 +127,12 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           skip-setup-trivy: true
+          cache: 'false'
           image-ref: ${{ matrix.image }}
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          ignore-policy: .github/trivy/ignore.rego
           format: table
           output: trivy.txt
           timeout: 30m
