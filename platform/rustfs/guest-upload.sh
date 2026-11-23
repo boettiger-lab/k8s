@@ -17,8 +17,11 @@ CMD=${1:-}; NAME=${2:-}; QUOTA=${3:-2T}
 BUCKET=incoming-$NAME USER=guest-$NAME POLICY=guest-upload-$NAME
 
 rc_pod() {   # stdin = shell script run inside the rc pod, alias `s` = root
-  kubectl -n rustfs run "rc-guest-$$" --rm -i --restart=Never --quiet --image=rustfs/rc:latest \
-    --overrides='{"spec":{"containers":[{"name":"rc","image":"rustfs/rc:latest","stdin":true,
+  # kubectl run -i attaches to the container NAMED AFTER THE POD; any other
+  # container name and it never attaches ("timed out waiting for the condition").
+  local n="rc-guest-$$"
+  kubectl -n rustfs run "$n" --rm -i --restart=Never --quiet --image=rustfs/rc:latest \
+    --overrides='{"spec":{"containers":[{"name":"'"$n"'","image":"rustfs/rc:latest","stdin":true,"stdinOnce":true,
       "command":["sh","-c","rc alias set s http://rustfs-s3.rustfs.svc:9000 \"$AK\" \"$SK\" >/dev/null && sh -s"],
       "env":[{"name":"AK","valueFrom":{"secretKeyRef":{"name":"rustfs-s3-root","key":"access-key"}}},
              {"name":"SK","valueFrom":{"secretKeyRef":{"name":"rustfs-s3-root","key":"secret-key"}}}]}]}}'
