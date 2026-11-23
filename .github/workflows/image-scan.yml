@@ -1,0 +1,152 @@
+name: Image CVE scan
+
+# Scans the images this repo builds AND deploys with Trivy, and uploads the
+# results to GitHub code scanning (Security tab -> Code scanning, one category
+# per image/arch). Report-only: nothing here fails a build or blocks a deploy.
+# Tracking issue: #221.
+#
+# Why a separate workflow instead of a step in each build workflow:
+# - New CVEs are published against images that have NOT changed, so a scan
+#   only at build time goes stale. The weekly schedule re-scans the published
+#   tags against the current vulnerability DB; workflow_run scans each new
+#   build as soon as it is pushed.
+# - The build jobs are disk-tight (k8s-gpu needs free-disk-space). Trivy pulls
+#   the published image from ghcr here, on its own runner.
+#
+# Scope: images built in this repo that are running on the cluster (checked
+# 2026-11-22). vllm-qwen38-flash-dgx is built here but not deployed, so it is
+# not scanned. Images built elsewhere (nimbus-carbon-api, hexplanner-bench-gpu)
+# and third-party images (vLLM, rustfs, ...) are the run-time half of #221.
+#
+# Filter: CRITICAL/HIGH with a fix available. The rocker and CUDA bases carry
+# dozens of unfixable CVEs; listing them buries the actionable ones. Packages
+# that never apply in a container (kernel headers) are dropped by
+# .github/trivy/ignore.rego.
+#
+# Supply chain: trivy-action and its setup-trivy were hijacked in March 2026
+# (tags force-pushed to a credential stealer). Actions are pinned by commit
+# SHA and the Trivy binary by version; bump both deliberately. The Actions
+# cache is off (`cache: false`) so a poisoned cache entry cannot feed this job
+# a tampered vulnerability DB; the DB download costs ~30 s per run.
+
+on:
+  workflow_dispatch: null
+  # Changes to this file get a full test run on their PR.
+  pull_request:
+    paths:
+      - '.github/workflows/image-scan.yml'
+      - '.github/trivy/**'
+  schedule:
+    - cron: '0 6 * * 3'   # Wednesday; the image rebuilds run Sunday 00:00
+  workflow_run:
+    workflows:
+      - Docker Image CI
+      - GPU Image
+      - hash-archive Image CI
+      - Armada Scheduler Image
+    types: [completed]
+
+permissions:
+  contents: read
+  security-events: write   # upload SARIF to code scanning
+
+concurrency:
+  group: image-scan-${{ github.event.workflow_run.name || 'all' }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    if: >-
+      github.repository == 'boettiger-lab/k8s' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: 'ghcr.io/boettiger-lab/k8s:latest',                            platform: linux/amd64, workflow: Docker Image CI }
+          - { image: 'ghcr.io/boettiger-lab/k8s:latest',                            platform: linux/arm64, workflow: Docker Image CI }
+          - { image: 'ghcr.io/boettiger-lab/k8s-gpu:latest',                        platform: linux/amd64, workflow: GPU Image }
+          - { image: 'ghcr.io/boettiger-lab/k8s-gpu:latest',                        platform: linux/arm64, workflow: GPU Image }
+          - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/amd64, workflow: hash-archive Image CI }
+          - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/arm64, workflow: hash-archive Image CI }
+          - { image: 'ghcr.io/boettiger-lab/armada-scheduler:0.22.16-nonarmada.2',  platform: linux/amd64, workflow: Armada Scheduler Image }
+    env:
+      # On workflow_run, only the matrix legs for the image that was just built
+      # do any work; the rest skip their steps and finish in seconds.
+      RUN_LEG: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.name == matrix.workflow }}
+      # Pull straight from the registry (no Docker daemon), and pick the arch
+      # out of the multi-arch manifest.
+      TRIVY_IMAGE_SRC: remote
+      TRIVY_PLATFORM: ${{ matrix.platform }}
+    steps:
+      # Only for .github/trivy/ignore.rego.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_LEG == 'true'
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/trivy
+
+      - name: Name this scan
+        if: env.RUN_LEG == 'true'
+        run: |
+          name="${{ matrix.image }}"; name="${name##*/}"; name="${name%%:*}"
+          echo "CATEGORY=trivy-${name}-${TRIVY_PLATFORM##*/}" >> "$GITHUB_ENV"
+
+      - name: Scan (SARIF)
+        if: env.RUN_LEG == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          cache: 'false'
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          ignore-policy: .github/trivy/ignore.rego
+          # Without this the SARIF output ignores `severity` and lists everything.
+          limit-severities-for-sarif: true
+          format: sarif
+          output: trivy.sarif
+          timeout: 30m
+          exit-code: '0'
+
+      - name: Upload to code scanning
+        if: env.RUN_LEG == 'true'
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: trivy.sarif
+          category: ${{ env.CATEGORY }}
+
+      # Same scan as a table in the run summary. Reuses the installed binary
+      # and the layer cache from the step above, so it does not re-download.
+      - name: Scan (summary table)
+        if: env.RUN_LEG == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          skip-setup-trivy: true
+          cache: 'false'
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          ignore-policy: .github/trivy/ignore.rego
+          format: table
+          output: trivy.txt
+          timeout: 30m
+          exit-code: '0'
+
+      - name: Write summary
+        if: env.RUN_LEG == 'true'
+        run: |
+          {
+            echo "### ${{ matrix.image }} (${TRIVY_PLATFORM})"
+            echo ''
+            echo 'CRITICAL/HIGH with a fix available:'
+            echo ''
+            echo '```'
+            cat trivy.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
