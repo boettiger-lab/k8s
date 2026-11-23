@@ -1,0 +1,18 @@
+# Keeps the SHA-pinned GitHub Actions current (#225). Dependabot updates the
+# SHA and the `# vX.Y.Z` comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Don't propose a release until it is a week old. Hijacked tags (trivy-action,
+    # 2026-03-19) were caught and removed within a day; a cooldown keeps them out.
+    cooldown:
+      default-days: 7
+    # One PR a week for all actions, not one per action.
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
