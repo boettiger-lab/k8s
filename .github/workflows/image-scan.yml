@@ -72,7 +72,7 @@ jobs:
           - { image: 'ghcr.io/boettiger-lab/k8s-gpu:latest',                        platform: linux/arm64, workflow: GPU Image }
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/amd64, workflow: hash-archive Image CI }
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/arm64, workflow: hash-archive Image CI }
-          - { image: 'ghcr.io/boettiger-lab/armada-scheduler:0.22.16-nonarmada',    platform: linux/amd64, workflow: Armada Scheduler Image }
+          - { image: 'ghcr.io/boettiger-lab/armada-scheduler:0.22.16-nonarmada.2',  platform: linux/amd64, workflow: Armada Scheduler Image }
     env:
       # On workflow_run, only the matrix legs for the image that was just built
       # do any work; the rest skip their steps and finish in seconds.
