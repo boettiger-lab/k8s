@@ -79,7 +79,7 @@ FTPS front end (`s3.yaml`, TLS required, same IAM as S3); it is reachable from t
 internet only while `ftps-public.yaml` is applied.
 
 ```bash
-bash platform/rustfs/guest-upload.sh add NAME [QUOTA]   # bucket incoming-NAME, user guest-NAME
+bash platform/rustfs/guest-upload.sh add NAME           # bucket incoming-NAME, user guest-NAME
 kubectl apply -f platform/rustfs/ftps-public.yaml        # open port 21 + passive 40000-40019
 # ... partner uploads with ~/tmp/guest-NAME-ftps.txt ...
 bash platform/rustfs/guest-upload.sh remove NAME         # bucket and data kept

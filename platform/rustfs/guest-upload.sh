@@ -3,7 +3,7 @@
 # or plain S3. One bucket per partner; the user can list and write that bucket and
 # nothing else: no reads, no deletes, no other buckets.
 #
-#   bash platform/rustfs/guest-upload.sh add NAME [QUOTA]   # default quota 2T
+#   bash platform/rustfs/guest-upload.sh add NAME            # no quota (see below)
 #   bash platform/rustfs/guest-upload.sh remove NAME        # user + policy; bucket kept
 #
 # Creates bucket incoming-NAME, user guest-NAME, policy guest-upload-NAME. The
@@ -11,14 +11,17 @@
 # and written only to ~/tmp/guest-NAME-ftps.txt (mode 600) for you to pass on.
 # Runs rc in a throwaway pod with the root key from Secret rustfs/rustfs-s3-root.
 set -euo pipefail
-CMD=${1:-}; NAME=${2:-}; QUOTA=${3:-2T}
+CMD=${1:-}; NAME=${2:-}
 [[ "$CMD" =~ ^(add|remove)$ && "$NAME" =~ ^[a-z0-9][a-z0-9-]{1,40}$ ]] \
-  || { echo "usage: $0 add|remove NAME [QUOTA]   (NAME: lowercase letters, digits, -)"; exit 1; }
+  || { echo "usage: $0 add|remove NAME   (NAME: lowercase letters, digits, -)"; exit 1; }
 BUCKET=incoming-$NAME USER=guest-$NAME POLICY=guest-upload-$NAME
 
 rc_pod() {   # stdin = shell script run inside the rc pod, alias `s` = root
-  kubectl -n rustfs run "rc-guest-$$" --rm -i --restart=Never --quiet --image=rustfs/rc:latest \
-    --overrides='{"spec":{"containers":[{"name":"rc","image":"rustfs/rc:latest","stdin":true,
+  # kubectl run -i attaches to the container NAMED AFTER THE POD; any other
+  # container name and it never attaches ("timed out waiting for the condition").
+  local n="rc-guest-$$"
+  kubectl -n rustfs run "$n" --rm -i --restart=Never --quiet --image=rustfs/rc:latest \
+    --overrides='{"spec":{"containers":[{"name":"'"$n"'","image":"rustfs/rc:latest","stdin":true,"stdinOnce":true,
       "command":["sh","-c","rc alias set s http://rustfs-s3.rustfs.svc:9000 \"$AK\" \"$SK\" >/dev/null && sh -s"],
       "env":[{"name":"AK","valueFrom":{"secretKeyRef":{"name":"rustfs-s3-root","key":"access-key"}}},
              {"name":"SK","valueFrom":{"secretKeyRef":{"name":"rustfs-s3-root","key":"secret-key"}}}]}]}}'
@@ -47,35 +50,69 @@ POLICY_JSON=$(cat <<EOF
   "Resource":["arn:aws:s3:::$BUCKET/*"]}]}
 EOF
 )
-rc_pod <<EOF
-set -e
-rc bucket create s/$BUCKET --ignore-existing
-rc bucket quota set s/$BUCKET $QUOTA
+# Write the partner's instructions FIRST, so the password survives any later failure.
+umask 077; mkdir -p ~/tmp
+cat > "$OUT" <<EOF
+Sending us your data over secure FTP
+
+We have set up a secure FTP upload for you. It works with any standard FTP
+program that supports encryption (FileZilla, WinSCP, Cyberduck). The connection
+is encrypted ("FTP over TLS"); plain unencrypted FTP will not connect, so the
+FTP built into Windows Explorer cannot be used.
+
+Your connection details
+  Host:          s3.carlboettiger.info
+  Port:          21
+  Protocol:      FTP
+  Encryption:    Require explicit FTP over TLS
+  Username:      $USER
+  Password:      $PASS
+  Upload folder: /$BUCKET
+
+FileZilla
+  1. File > Site Manager > New site.
+  2. General tab: enter Host and Port; Protocol "FTP - File Transfer Protocol";
+     Encryption "Require explicit FTP over TLS"; Logon Type "Normal";
+     then the Username and Password.
+  3. Advanced tab: Default remote directory = /$BUCKET
+  4. Connect. If asked to trust the certificate, check it is issued to
+     s3.carlboettiger.info and accept.
+  5. Drag files from the left pane (your computer) to the right pane (our server).
+
+WinSCP: New Site, File protocol "FTP", Encryption "TLS/SSL Explicit encryption",
+then the same host, port, username and password; open the upload folder after
+connecting.
+
+Tips for large transfers
+  - An interrupted file restarts from the beginning, so many medium-sized files
+    are more reliable than one very large file.
+  - Maximum size of a single file is about 150 GB.
+  - If a file fails, upload it again; it replaces the partial attempt.
+  - You can upload into the folder but cannot delete or download from it.
+  - If you cannot connect from a work network, your IT team may need to allow
+    outgoing connections to s3.carlboettiger.info on port 21 and ports 40000-40019.
+
+Please email us when the upload is finished so we can close the connection.
+EOF
+
+# Re-runnable: an existing bucket or policy is kept, an existing user is recreated
+# with the new password. Success is judged by the final listing, not exit codes.
+RESULT=$(rc_pod <<EOF || true
+rc bucket list s 2>/dev/null | grep -q " $BUCKET/" || rc bucket create s/$BUCKET
+# NO quota: RustFS 1.0.5 refuses multipart writes to a hard-quota bucket until its
+# scanner has measured usage ("SlowDown ... unreadable"; FTPS STOR 450 on >16 MiB).
+rc bucket quota clear s/$BUCKET >/dev/null 2>&1
 cat > /tmp/p.json <<'JSON'
 $POLICY_JSON
 JSON
-rc admin policy create s $POLICY /tmp/p.json
+rc admin policy create s $POLICY /tmp/p.json 2>&1 | tail -1
+rc admin user rm s $USER >/dev/null 2>&1
 rc admin user add s $USER '$PASS' >/dev/null
 rc admin policy attach s $POLICY --user $USER
-echo "== created"; rc admin user info s $USER
+rc admin user ls s 2>&1 | grep -F "$USER (policies: $POLICY" && echo USER-OK
 EOF
-
-umask 077; mkdir -p ~/tmp
-cat > "$OUT" <<EOF
-Upload server (FTP over TLS)
-
-  Host:      s3.carlboettiger.info
-  Port:      21
-  Protocol:  FTP - File Transfer Protocol
-  Encryption: Require explicit FTP over TLS
-  Username:  $USER
-  Password:  $PASS
-  Folder:    /$BUCKET   (upload into this folder)
-
-FileZilla: File > Site Manager > New site, enter the values above, Logon Type "Normal",
-and on the Advanced tab set "Default remote directory" to /$BUCKET.
-Unencrypted FTP is refused. Uploads you finish cannot be changed or deleted from
-your side; if one fails, upload that file again.
-EOF
-echo "Credentials for the partner: $OUT"
+)
+echo "$RESULT"
+grep -q USER-OK <<<"$RESULT" || { rm -f "$OUT"; echo "FAILED: $USER not set up (see above)"; exit 1; }
+echo "Ready to send to the partner: $OUT"
 echo "Open the ports if not already open: kubectl apply -f platform/rustfs/ftps-public.yaml"
