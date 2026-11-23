@@ -37,6 +37,8 @@ name: vLLM Flash-Next Image (arm64)
 on:
   workflow_dispatch: null
   push:
+    # main only: a branch push must not publish an image.
+    branches: [main]
     paths:
       - '.github/workflows/vllm-flashnext-image.yml'
 
