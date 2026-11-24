@@ -40,7 +40,11 @@ context >= 200K, glen `numeric` decides quality. Look up, with URLs:
   - NVIDIA model cards ("DGX Spark" sections) and the NVIDIA DGX Spark dev forum
   - `github.com/NVIDIA/local-ai-inference-recipes`: NVIDIA's own Spark recipes
   - `github.com/eugr/spark-vllm-docker`: community vLLM images and launch scripts for Spark
-  - `recipes.vllm.ai/<org>/<model>`: vLLM's per-model flags (tool/reasoning parsers, MTP)
+  - `recipes.vllm.ai/<org>/<model>`: vLLM's per-model flags (tool/reasoning parsers, MTP).
+    Some models include a GB10 view (`?hardware=dgx_spark_gb10`) with Spark-specific limits
+    such as a context cap. The page also states the minimum vLLM version and image (often
+    `nightly` before a release). Compare that with the image you run, and re-check it when
+    you revisit a model.
   - `github.com/Anemll/dspark-vllm-gx10`: the DeepSeek pair recipe (image, `mp` backend)
   - `github.com/blazux/qwen3.8-Flash-DGX`: Flash-Next PLE-mmap image
   - `github.com/0rand/DeepSeek-V4.1-Flash-1017-EXL3-TensorFold-2x-DGX-Spark`
