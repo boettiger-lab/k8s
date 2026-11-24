@@ -51,8 +51,14 @@ singleuser:
           - >-
             command -v python3 >/dev/null 2>&1 && python3 /usr/local/share/lab-llm/lab-llm-config.py >/dev/null 2>&1;
             command -v armada-config-merge >/dev/null 2>&1 && armada-config-merge >/dev/null 2>&1; exit 0
+  # IfNotPresent is safe because every listed image is pinned by digest
+  # (./bump-images.sh). A pin change goes out via `helm upgrade`, whose hook
+  # pre-puller pulls the new images onto cirrus and thelio BEFORE the hub
+  # switches, so nobody spawns into a cold ~10 GB pull (k8s#220). The GB10s are
+  # not pre-pulled on purpose (tainted for models): a GB10 notebook's first
+  # spawn after a bump pulls cold. Custom images override this back to Always.
   image:
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   storage:
     type: dynamic
     extraLabels: {}
@@ -208,17 +214,20 @@ singleuser:
             validation_message: "Must be a publicly available docker image, of form <image-name>:<tag>"
             kubespawner_override:
               image: "{value}"
+              # Users type floating tags (`foo:latest`) here and expect the
+              # current build, so keep Always for custom images.
+              image_pull_policy: Always
           choices:
             01-cpu:
               display_name: Default CPU environment
               description: General purpose python/R environment 
               kubespawner_override:
-                image:  "ghcr.io/boettiger-lab/k8s:latest"
+                image:  "ghcr.io/boettiger-lab/k8s:latest@sha256:1e24a1f44c04efd916215b84f36f5eb30fd3783c2862173e440e5a8e9f28aece"
             02-gpu:
               display_name: RL GPU
               description: CUDA GPU environment, with RL
               kubespawner_override:
-                image: "ghcr.io/boettiger-lab/k8s-gpu:latest"
+                image: "ghcr.io/boettiger-lab/k8s-gpu:latest@sha256:6c306b48cc734dd77332997e85683732bbd3e55878c601014c12dd0733ef0246"
                 # Request a real, memory-capped GPU slice (MPS on cirrus).
                 # Without this the pod sees all GPUs unmanaged via the nvidia
                 # runtime, with no VRAM accounting/limit.
@@ -228,7 +237,7 @@ singleuser:
               display_name: GPU Spatial
               description: Rapids-AI GPU Spatial environment
               kubespawner_override:
-                image: "ghcr.io/rocker-org/ml-spatial:latest"
+                image: "ghcr.io/rocker-org/ml-spatial:latest@sha256:8d81ccb177d44b8f1c55ecd1db35ab3672101aaf9d3de435d18e1a77f652a937"
                 extra_resource_limits:
                   nvidia.com/gpu: "1"
         # GPU placement, applied AFTER `image`, so it overrides the slice count the

@@ -156,3 +156,23 @@ Every GB10 model claims all 8 slices at priority `llm-serving`
 ([`../vllm/priorityclass.yaml`](../vllm/priorityclass.yaml)), so a notebook never
 lands beside a model, and starting a model on a node evicts its notebooks. The lab
 images are multi-arch; a custom image must be too to use that choice.
+
+## Notebook images
+
+The profile list pins each image as `repo:TAG@sha256:DIGEST` with
+`pullPolicy: IfNotPresent`. CI publishes `:latest` plus an immutable dated tag
+(`YYYYMMDD-rN`) for `k8s` and `k8s-gpu`; third-party `ml-spatial` only has
+`latest`, so its pin is the digest.
+
+To roll out new builds:
+
+```sh
+./bump-images.sh   # newest dated tag (or latest) + digest for each image
+./up.sh            # hook pre-puller pulls them onto cirrus and thelio first
+```
+
+`helm upgrade` blocks until the hook pre-puller has the new images on every
+node it covers, so users never spawn into a cold pull. The GB10s are tainted for
+models and not pre-pulled; a GB10 notebook's first spawn after a bump pulls
+cold. Custom images (the "Specify an existing docker image" choice) keep
+`pullPolicy: Always`.

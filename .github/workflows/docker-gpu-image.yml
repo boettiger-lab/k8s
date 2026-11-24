@@ -4,8 +4,9 @@ on:
   schedule:
     - cron: '0 0 * * 0'
   push:
-    # main only: the merge job tags :latest, and the hub pulls :latest with
-    # pullPolicy Always, so a branch push would ship unreviewed images.
+    # main only: the merge job tags :latest and a dated tag, and the hub is
+    # pinned to dated tags (services/jupyterhub/bump-images.sh), so a branch
+    # push must not publish either.
     branches: [main]
     # Trigger on the files the GPU Dockerfile actually consumes. The previous
     # list referenced spatial-env.yml / jupyter-ai.yml / install.r (which don't
@@ -112,10 +113,17 @@ jobs:
           registry: ghcr.io
           username: ${{github.actor}}
           password: ${{secrets.GITHUB_TOKEN}}
+      # Also tag YYYYMMDD-r<run number>: immutable (run numbers never repeat),
+      # sortable, and what JupyterHub pins so its hook pre-puller warms nodes
+      # before a new image goes live (k8s#220).
       - name: Create multi-arch manifest
         working-directory: /tmp/digests
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          docker buildx imagetools create -t "${IMAGE}:latest" \
+          dated="$(date -u +%Y%m%d)-r${RUN_NUMBER}"
+          docker buildx imagetools create -t "${IMAGE}:latest" -t "${IMAGE}:${dated}" \
             $(printf "${IMAGE}@sha256:%s " *)
+          echo "Published \`${IMAGE}:${dated}\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Inspect
         run: docker buildx imagetools inspect "${IMAGE}:latest"
