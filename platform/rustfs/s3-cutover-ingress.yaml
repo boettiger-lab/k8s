@@ -51,8 +51,12 @@ spec:
             backend: {service: {name: minio-alias, port: {name: api}}}
 ---
 # data.: the web console (same role as MinIO's console). Proxied, as today.
-# RustFS serves its console under /rustfs/console/ and answers 403 at /, so the bare
-# host (old MinIO-console bookmarks, the docs) is redirected there; other paths pass.
+# RustFS serves its console under /rustfs/console/ and answers 403 at /, so a browser
+# GET of the bare host (old MinIO-console bookmarks, the docs) is redirected there.
+# GET only: the console logs in with an STS AssumeRole POST to / on its own origin, and
+# redirecting that POST (307) breaks every console login. A Middleware cannot match on
+# method, so the redirect gets its own IngressRoute (Method(`GET`) && Path(`/`)), which
+# outranks the Ingress's PathPrefix(`/`) router.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -64,6 +68,22 @@ spec:
     replacement: https://data.carlboettiger.info/rustfs/console/
     permanent: false
 ---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: data-console-root
+  namespace: rustfs
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`data.carlboettiger.info`) && Method(`GET`) && Path(`/`)
+      kind: Rule
+      priority: 1000
+      middlewares: [{name: data-console-root}]
+      services: [{name: rustfs-s3, port: console}]
+  tls:
+    secretName: data-console-tls
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -72,7 +92,6 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-production
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
-    traefik.ingress.kubernetes.io/router.middlewares: rustfs-data-console-root@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
