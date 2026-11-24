@@ -19,7 +19,9 @@ metadata:
   labels:
     k8s-app: hash-archive
 spec:
-  replicas: 1
+  # Stood down (scaled to 0) 2026-11-24: working, but unused. The PVC keeps the
+  # full store; set to 1 and re-apply to bring it back.
+  replicas: 0
   # LevelDB is single-writer: two pods sharing the PVC would contend on LOCK
   # and risk corruption. Recreate guarantees the old pod is gone before the new
   # one starts (RollingUpdate would briefly run both).
