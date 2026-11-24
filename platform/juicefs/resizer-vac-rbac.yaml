@@ -1,0 +1,26 @@
+# csi-resizer v2 (set in csi-driver-values.yaml) watches VolumeAttributesClasses
+# when the cluster serves storage.k8s.io/v1 (k3s does). The JuiceFS chart's
+# controller role doesn't grant that, so add exactly the rule upstream's resizer
+# RBAC has (kubernetes-csi/external-resizer v2.3.0 deploy/kubernetes/rbac.yaml).
+# Apply BEFORE upgrading the chart, or the resizer can't sync its caches.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: juicefs-csi-resizer-vac
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattributesclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: juicefs-csi-resizer-vac
+subjects:
+  - kind: ServiceAccount
+    name: juicefs-csi-controller-sa
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: juicefs-csi-resizer-vac
+  apiGroup: rbac.authorization.k8s.io

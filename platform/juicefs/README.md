@@ -112,7 +112,7 @@ Both are defined in `storageclass.yaml`; the comments there explain the split.
    ```
    helm repo add juicefs https://juicedata.github.io/charts/ && helm repo update
    helm upgrade -i juicefs-csi-driver juicefs/juicefs-csi-driver \
-     -n kube-system --version 0.31.10
+     -n kube-system --version 0.34.0 -f csi-driver-values.yaml
    ```
    If you bump the version, re-check the parameter/mountOption names in
    `storageclass.yaml` against the new chart.
