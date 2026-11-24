@@ -100,26 +100,47 @@ singleuser:
       - name: shm-volume
         emptyDir:
           medium: Memory
+  # Notebooks reach lab services ONLY through their public hostnames (s3.,
+  # vllm-*., armada-api., the hub), never in-cluster addresses (k8s#249).
+  # privateIPs was true until 2026-11-24, which let every hub user connect to
+  # every pod and Service in the cluster on any port, including unauthenticated
+  # ones (Pulsar's admin API, Prometheus, Armada Lookout, and the JuiceFS
+  # dashboard removed in #248).
   networkPolicy:
     enabled: true
     egressAllowRules:
-      # Enable access to private IP ranges (for MinIO and other cluster services)
-      privateIPs: true
+      privateIPs: false
       # Keep DNS resolution working
       dnsPortsPrivateIPs: true
       dnsPortsKubeSystemNamespace: true
-      # Allow internet access (excluding private ranges) - enables 'hairpin' connections
+      # The internet (everything outside the private ranges).
       nonPrivateIPs: true
     egress:
-      # Specific access to your external IP (s3.carlboettiger.info at 128.32.85.8)
-      - to:
-          - ipBlock:
-              cidr: 128.32.85.8/32
-      # Allow access to MinIO namespace by label selector
+      # HAIRPIN. Public hostnames resolve to cirrus (128.32.85.8). From inside
+      # the cluster, kube-proxy rewrites that address straight to the Traefik pod
+      # (the LoadBalancer has ipMode VIP), so the NetworkPolicy sees a 10.42.x
+      # destination. Without this rule vllm-*., armada-api. and the hub time out.
+      # Traefik's web/websecure container ports only.
       - to:
           - namespaceSelector:
               matchLabels:
-                name: minio
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+        ports:
+          - {protocol: TCP, port: 8000}
+          - {protocol: TCP, port: 8443}
+      # The same address before any rewrite, for paths that keep it.
+      - to:
+          - ipBlock:
+              cidr: 128.32.85.8/32
+      # s3.carlboettiger.info is rewritten straight to the rustfs-s3 pods, the
+      # same way. Replaces the old MinIO namespace rule.
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: rustfs
   extraFiles:
     # Generator for the opencode/Kilo provider config; run by postStart above.
     lab-llm-config.py:
