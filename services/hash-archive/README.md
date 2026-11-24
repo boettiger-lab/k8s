@@ -109,66 +109,35 @@ Callers authenticate with `curl -u user:pass` or an `Authorization: Basic …`
 header. The header is **not** forwarded upstream (`removeHeader: true`) — the
 2021-vintage HTTP parser has no use for it.
 
-## ⚠️ Known fault: periodic SIGABRT — [#51](https://github.com/boettiger-lab/k8s/issues/51)
+## The store
 
-The pod aborts with **exit 134 (SIGABRT) roughly every ~49 minutes** and is
-restarted by kubelet in about a second. It serves correctly between aborts, so
-impact is a brief outage per cycle rather than an outage outright — but do not
-put anything latency- or availability-critical behind it until this is
-understood. Ruled out so far: the migrated store, the storage backend, the
-NetworkPolicy, the securityContext, and OOM. Details and next steps in the issue.
-
-**Note for anyone debugging:** the interval is ~49 minutes, so a 60-second
-smoke test will look healthy. Observe for hours.
-
-## ⚠️ The historical hash database is NOT loaded — [#52](https://github.com/boettiger-lab/k8s/issues/52)
-
-**Status 2026-09-07: the service runs on a FRESH, EMPTY store.** The original
-LevelDB — ~624 KB, data through 2025-10 — is archived to S3:
+The PVC holds the full history: the pre-migration LevelDB (2,130 responses,
+2024-03-14 → 2025-08-23) merged with the few records written since the k3s
+move. The pre-migration copy stays archived in S3 as the canonical backup:
 
 ```
-nvme/hash-archive/hash-archive-db-20260907.tar.gz
+s3.carlboettiger.info  hash-archive/hash-archive-db-20260907.tar.gz
 sha256 57dfa607bd18fa00e950524ead28ecddb24ce71a0145db40b08cd48569123cd1
 ```
 
-⚠️ It must **not** live in `backup-archive` — that bucket carries an enabled
-**90-day expiry lifecycle rule** (no prefix filter) and exists only as scratch
-for the NRP sync backup system, where sync deletions are expected. Anything
-placed there is deleted silently. This object needs a bucket with no lifecycle
-policy; `nvme/hash-archive` has none.
+It must **not** live in `backup-archive`, whose 90-day expiry rule (no prefix
+filter) deletes anything placed there. Reading it needs the root key; Carl's
+`nvme` service account is denied on this bucket.
 
-Upload was verified by round-trip checksum, so `/minio` is free to delete.
-
-Every attempt to run against the migrated copy ends in `SIGABRT` (exit 134)
-seconds after the server logs `Hash Archive running`, with no assertion text.
-Both the new image and the 2020 image fail on it (the old one with `SIGSEGV`),
-while an empty store runs cleanly for both. So the fault travels with the data,
-not the binary and not the storage backend.
-
-What was ruled out, in order: the NetworkPolicy (removed, still aborts); the
-securityContext — `cap-drop ALL`, numeric uid 10001, seccomp — (all reproduce
-fine under plain Docker); and the storage backend (an empty store runs on the
-same ZFS-backed PVC). A partial copy of the store — `*.ldb`, `CURRENT`,
-`MANIFEST-*`, `LOG` only — *did* serve correctly under Docker, which suggests
-the fault is in one of the files that copy omitted (`LOCK`, the `*.log`
-write-ahead file, or `tmp.mdb-lock`) or in copy consistency, but that was not
-run to ground.
-
-**To recover the history**, options in rough order of promise:
-1. Copy in only `000209.ldb`, `000211.ldb`, `CURRENT` and `MANIFEST-*` —
-   omitting `LOCK`, `*.log` and `tmp.mdb-lock` — which is the combination
-   observed to work under Docker.
-2. Use the repo's own import path (`cli/`, `tools/`,
-   `CONFIG_IMPORT_SOCKET_PATH`) to replay the old data into a fresh store.
-3. Open the store with a standalone LevelDB tool to check for corruption.
-
-None of this is urgent — the service works, and the store is preserved in S3.
-Retrieve it with:
+**Restoring or merging a store** — [`merge-store.py`](merge-store.py) copies
+every key of one LevelDB into another and refuses on any conflicting key:
 
 ```sh
-mc cp nvme/hash-archive/hash-archive-db-20260907.tar.gz .
-tar xzf hash-archive-db-20260907.tar.gz
+kubectl -n hash-archive scale deploy/hash-archive --replicas=0
+# copy the PVC contents out (busybox pod on the PVC + tar), then:
+uv run --no-project --with plyvel python merge-store.py OLD_DB/ LIVE_COPY/
+# tar the result back into the PVC, scale to 1
 ```
+
+A plain key union is safe for this schema: records are keyed by
+`(time, id)` with no global counter, libkvstore uses LevelDB's bytewise
+comparator, and its long-string overflow keys are content-addressed (key =
+the string), so the same key always carries the same value.
 
 ## Local patches
 
@@ -190,6 +159,13 @@ carries its rationale in the header.
   decoding, so `https:%2F%2Fexample.com` fails identically. Disabling
   `sanitizePath` was rejected because it is an **entryPoint-wide** setting that
   would remove path hardening from every service on 443.
+
+- **`0002-template-write-tolerate-econnreset.patch`** — upstream `abort()`s
+  when a response write fails with anything but `EPIPE`. Kubernetes HTTP
+  probes read 10 KiB and close; the index page is ~12–15 KB, so the probe's
+  close sometimes surfaced as `ECONNRESET` and killed the server (SIGABRT,
+  ~every 49 min, [#51](https://github.com/boettiger-lab/k8s/issues/51)). The
+  patch treats `ECONNRESET` like `EPIPE`; every other write error still aborts.
 
 ## Image
 
@@ -235,8 +211,9 @@ curl -sI https://hash-archive.carlboettiger.info/     # expect 200, not 404
 
 `down.sh` retains the PVC, so the store survives a teardown. The pre-migration
 Docker container and its 2020 image have been removed — the modern image is
-reproducible from this directory and the historical store is archived in S3
-(see above), so neither was worth keeping.
+reproducible from this directory and the pre-migration store is archived in S3
+(see above), so neither was worth keeping. To undo a store merge, restore a
+tar of the PVC taken while scaled to 0.
 
 ## DNS / TLS
 
