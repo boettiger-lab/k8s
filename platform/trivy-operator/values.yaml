@@ -1,0 +1,81 @@
+# trivy-operator (aqua/trivy-operator 0.38.1, app 0.36.1) — CVE reports for the
+# images actually RUNNING in the cluster (k8s#221). Our own images are also
+# scanned at build time by .github/workflows/image-scan.yml.
+#
+# Results: `kubectl get vulnerabilityreports -A -o wide`, and the
+# trivy_image_vulnerabilities metric in Prometheus.
+#
+# Configured as small as it goes:
+#  - vulnerability scanning ONLY. Config-audit, RBAC, infra (a node-collector
+#    job on every node, GB10s included), compliance, secret scanning and SBOMs
+#    are off: SBOMs alone would add a large CRD per image to etcd.
+#  - no cluster-wide Secret access. Nothing running needs a pull secret except
+#    jupyter, which is excluded (and its images are public anyway).
+#  - every job runs on thelio, two at a time, never on cirrus (the 2026-11-17
+#    RCU stall rule) and never on the GB10s (tainted for models).
+#  - HIGH/CRITICAL with a fix available, same filter as the CI scans.
+#  - weekly: reports expire after 7 days, which triggers the rescan.
+
+# Ephemeral pods would each trigger a scan of a 10 GB image:
+#  jupyter      user notebooks (bare pods; images scanned in CI already)
+#  arc-runners  ephemeral CI runners
+#  armada-jobs  batch jobs
+excludeNamespaces: "jupyter,arc-runners,armada-jobs"
+
+operator:
+  scanJobsConcurrentLimit: 2
+  # vLLM and CUDA images are 10-20 GB; the 5m default times out on them.
+  scanJobTimeout: 30m
+  scannerReportTTL: "168h"
+  vulnerabilityScannerScanOnlyCurrentRevisions: true
+  sbomGenerationEnabled: false
+  configAuditScannerEnabled: false
+  rbacAssessmentScannerEnabled: false
+  infraAssessmentScannerEnabled: false
+  clusterComplianceEnabled: false
+  exposedSecretScannerEnabled: false
+  accessGlobalSecretsAndServiceAccount: false
+  # One DB download, shared by every scan job.
+  builtInTrivyServer: true
+  metricsVulnIdEnabled: false
+
+image:
+  # Pinned by digest (the March 2026 trivy-action/setup-trivy tag hijack).
+  tag: "0.36.1@sha256:05191a514247ae644dd5cc71306a94f44faff0a6a3fa817235911b911ecebcb9"
+
+nodeSelector:
+  kubernetes.io/hostname: thelio
+
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+
+# Scraped by the existing kubernetes-service-endpoints job (annotation-based;
+# no ServiceMonitor CRD in this cluster). The default headless Service has no
+# ClusterIP, which is fine: Prometheus scrapes the endpoints.
+service:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+
+trivyOperator:
+  scanJobNodeSelector:
+    kubernetes.io/hostname: thelio
+
+trivy:
+  image:
+    # Same version as image-scan.yml.
+    tag: "0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
+  severity: HIGH,CRITICAL
+  ignoreUnfixed: true
+  slow: true
+  timeout: "30m0s"
+  # Built-in server's DB in an emptyDir: it re-downloads (~100 MB) on restart.
+  storageClassEnabled: false
+  resources:
+    requests: {cpu: 100m, memory: 256M}
+    limits: {cpu: "1", memory: 2G}
+  server:
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {cpu: "1", memory: 2Gi}
