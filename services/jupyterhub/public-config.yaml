@@ -100,26 +100,47 @@ singleuser:
       - name: shm-volume
         emptyDir:
           medium: Memory
+  # Notebooks reach lab services ONLY through their public hostnames (s3.,
+  # vllm-*., armada-api., the hub), never in-cluster addresses (k8s#249).
+  # privateIPs was true until 2026-11-24, which let every hub user connect to
+  # every pod and Service in the cluster on any port, including unauthenticated
+  # ones (Pulsar's admin API, Prometheus, Armada Lookout, and the JuiceFS
+  # dashboard removed in #248).
   networkPolicy:
     enabled: true
     egressAllowRules:
-      # Enable access to private IP ranges (for MinIO and other cluster services)
-      privateIPs: true
+      privateIPs: false
       # Keep DNS resolution working
       dnsPortsPrivateIPs: true
       dnsPortsKubeSystemNamespace: true
-      # Allow internet access (excluding private ranges) - enables 'hairpin' connections
+      # The internet (everything outside the private ranges).
       nonPrivateIPs: true
     egress:
-      # Specific access to your external IP (s3.carlboettiger.info at 128.32.85.8)
-      - to:
-          - ipBlock:
-              cidr: 128.32.85.8/32
-      # Allow access to MinIO namespace by label selector
+      # HAIRPIN. Public hostnames resolve to cirrus (128.32.85.8). From inside
+      # the cluster, kube-proxy rewrites that address straight to the Traefik pod
+      # (the LoadBalancer has ipMode VIP), so the NetworkPolicy sees a 10.42.x
+      # destination. Without this rule vllm-*., armada-api. and the hub time out.
+      # Traefik's web/websecure container ports only.
       - to:
           - namespaceSelector:
               matchLabels:
-                name: minio
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+        ports:
+          - {protocol: TCP, port: 8000}
+          - {protocol: TCP, port: 8443}
+      # The same address before any rewrite, for paths that keep it.
+      - to:
+          - ipBlock:
+              cidr: 128.32.85.8/32
+      # s3.carlboettiger.info is rewritten straight to the rustfs-s3 pods, the
+      # same way. Replaces the old MinIO namespace rule.
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: rustfs
   extraFiles:
     # Generator for the opencode/Kilo provider config; run by postStart above.
     lab-llm-config.py:
@@ -222,12 +243,12 @@ singleuser:
               display_name: Default CPU environment
               description: General purpose python/R environment 
               kubespawner_override:
-                image:  "ghcr.io/boettiger-lab/k8s:latest@sha256:1e24a1f44c04efd916215b84f36f5eb30fd3783c2862173e440e5a8e9f28aece"
+                image:  "ghcr.io/boettiger-lab/k8s:20261124-r295@sha256:d2e046a81a3798bb646438fb509d1bd031b3ba8509ea8f869274c121314e7ba1"
             02-gpu:
               display_name: RL GPU
               description: CUDA GPU environment, with RL
               kubespawner_override:
-                image: "ghcr.io/boettiger-lab/k8s-gpu:latest@sha256:6c306b48cc734dd77332997e85683732bbd3e55878c601014c12dd0733ef0246"
+                image: "ghcr.io/boettiger-lab/k8s-gpu:20261124-r190@sha256:e23bc90a82edb807f1fc808992049b0c5473c416deda0a0242b6ea3124060583"
                 # Request a real, memory-capped GPU slice (MPS on cirrus).
                 # Without this the pod sees all GPUs unmanaged via the nvidia
                 # runtime, with no VRAM accounting/limit.
