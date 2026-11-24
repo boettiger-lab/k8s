@@ -89,7 +89,8 @@ RUN for f in /tmp/patches/*.patch; do \
         echo "applying $(basename "$f")"; \
         patch -p1 --batch --forward < "$f" || exit 1; \
     done \
-    && grep -c 'Retry with a single slash' src/util/url.c
+    && grep -c 'Retry with a single slash' src/util/url.c \
+    && grep -c 'UV_ECONNRESET == rc' src/util/Template.c
 
 # Patch the compiled-in hostname before building, rather than at runtime.
 RUN sed -i "s/hash-archive\.org/${HOSTNAME_CONFIG}/" src/config.h \
