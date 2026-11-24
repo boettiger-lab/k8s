@@ -68,6 +68,13 @@ trivy:
     tag: "0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
   severity: HIGH,CRITICAL
   ignoreUnfixed: true
+  # Same filter as the CI scans (.github/trivy/ignore.rego): linux-libc-dev is
+  # the image's copy of the kernel headers. Containers run on the host kernel,
+  # so its kernel CVEs don't apply. Patch the nodes' kernels instead.
+  ignorePolicy: |
+    package trivy
+    default ignore = false
+    ignore { input.PkgName == "linux-libc-dev" }
   slow: true
   timeout: "30m0s"
   # Built-in server's DB in an emptyDir: it re-downloads (~100 MB) on restart.
