@@ -8,15 +8,23 @@
 # The ZFS pool `tank` is a pre-existing native pool on the host; it is not created here.
 
 set -e
+cd "$(dirname "$0")"
+
+CHART_VERSION=2.11.2
 
 # Add ZFS LocalPV repo (separate from the full OpenEBS umbrella repo)
 helm repo add openebs-zfs https://openebs.github.io/zfs-localpv
 helm repo update
 
+# csi-resizer v2 needs VolumeAttributesClass RBAC the chart lacks (see values.yaml)
+kubectl apply -f resizer-vac-rbac.yaml
+
 # Install ZFS LocalPV driver
 helm upgrade --install zfs-localpv openebs-zfs/zfs-localpv \
+  --version "$CHART_VERSION" \
   -n openebs \
   --create-namespace \
+  -f values.yaml \
   --wait
 
 echo ""

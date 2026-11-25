@@ -7,6 +7,9 @@ user between nodes, see [`../juicefs/`](../juicefs/).
 ## What is deployed
 
 - **Driver:** the lightweight `zfs-localpv` Helm chart (ZFS CSI driver only).
+  The chart version is pinned in `helm.sh`; `values.yaml` overrides the CSI sidecar
+  tags (the chart's defaults lag on CVE fixes), and `resizer-vac-rbac.yaml` adds the
+  VolumeAttributesClass access that csi-resizer v2 needs and the chart does not grant.
 - **StorageClasses:** `openebs-zfs` (ZFS dataset, 128k recordsize) and
   `openebs-zfs-ext4` (ext4 on a zvol, 16k — for workloads that need real block
   semantics). Both use pool `tank`, lz4 compression, and allow volume expansion.

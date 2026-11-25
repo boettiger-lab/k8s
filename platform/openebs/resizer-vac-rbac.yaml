@@ -1,0 +1,25 @@
+# csi-resizer v2 watches VolumeAttributesClasses (GA since k8s 1.34). The
+# zfs-localpv chart's resizer role does not grant that, and without list/watch the
+# resizer blocks on cache sync and PVC expansion stops. Mirrors upstream
+# kubernetes-csi/external-resizer deploy/kubernetes/rbac.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zfs-localpv-resizer-vac
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattributesclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zfs-localpv-resizer-vac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zfs-localpv-resizer-vac
+subjects:
+  - kind: ServiceAccount
+    name: openebs-zfs-controller-sa
+    namespace: openebs
