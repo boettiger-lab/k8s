@@ -24,8 +24,9 @@ gfd:
 #          advertised 8 slices until 2026-09-07 only because the node was unlabelled
 #          and fell through to config.default. Revisit if it ever receives one of
 #          cirrus's 48GB RTX 8000s.
-#   GB10s (nimbus, nimbus2-4) -> label "timeslice-cdi": 8 slices of the ONE GB10.
-#          Same map entry as cirrus, but read it differently: those 8 slices are
+#   GB10s (nimbus, nimbus2-4) -> label "timeslice-cdi-rdma": 8 slices of the ONE GB10
+#          (plus MOFED, so TP=2 pairs can use RDMA: see the map entry).
+#          Same slicing as cirrus, but read it differently: those 8 slices are
 #          shares of a single chip, not 8 GPUs, and the "VRAM" they share is the
 #          host's 121 GiB UNIFIED pool -- the same memory the OS, k3s and every
 #          other pod on the node are using. A slice count therefore bounds
@@ -41,7 +42,7 @@ gfd:
 # Apply labels:
 #   kubectl label node cirrus nvidia.com/device-plugin.config=timeslice-cdi --overwrite
 #   kubectl label node thelio nvidia.com/device-plugin.config=no-sharing --overwrite
-#   for n in nimbus nimbus2 nimbus3 nimbus4; do kubectl label node $n nvidia.com/device-plugin.config=timeslice-cdi --overwrite; done
+#   for n in nimbus nimbus2 nimbus3 nimbus4; do kubectl label node $n nvidia.com/device-plugin.config=timeslice-cdi-rdma --overwrite; done
 #
 # The labels are applied with kubectl rather than via k3s `--node-label`, because
 # NodeRestriction only lets a kubelet self-assign labels from a short allow-list
@@ -164,6 +165,29 @@ config:
         migStrategy: "none"
         failOnInitError: true
         nvidiaDriverRoot: "/"
+        plugin:
+          passDeviceSpecs: false
+          deviceListStrategy: "cdi-cri"
+          deviceIDStrategy: "uuid"
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 8
+    # The GB10s: `timeslice-cdi` plus MOFED. TP=2 pairs run NCCL over RDMA, so their
+    # pods need /dev/infiniband/uverbs* and rdma_cm in the device cgroup, and the
+    # plugin only grants those through its MOFED CDI spec. nvdp <= 0.19.2 turned MOFED
+    # on by itself wherever it found IB devices (the GB10s, not cirrus). 0.19.3 reverted
+    # that default (NVIDIA/k8s-device-plugin#1837), so after the 0.20.2 upgrade new pair
+    # pods failed ibv_open_device with EPERM. It is kept out of cirrus's config because
+    # cirrus has no IB devices and failOnInitError is on.
+    timeslice-cdi-rdma: |
+      version: v1
+      flags:
+        migStrategy: "none"
+        failOnInitError: true
+        nvidiaDriverRoot: "/"
+        mofedEnabled: true
         plugin:
           passDeviceSpecs: false
           deviceListStrategy: "cdi-cri"
