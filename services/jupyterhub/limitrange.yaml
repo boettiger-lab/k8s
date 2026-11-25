@@ -1,4 +1,4 @@
-# Default CPU limit/request for any container in `jupyter` that sets none --
+# Default CPU and scratch-disk (ephemeral-storage) limit/request for any container in `jupyter` that sets none --
 # today that is every notebook server, the hub, the proxy and binderhub.
 #
 # Why (2026-11-17): with no CPU limit a container sees all 128 cirrus cores, and
@@ -13,6 +13,18 @@
 # set: without it Kubernetes copies the default limit into the request, and
 # every notebook would request 64 CPUs and stop scheduling.
 #
+# ephemeral-storage: a backstop on scratch disk (/tmp plus anything else written
+# to the container's writable layer, e.g. `conda install` into the image env;
+# the JuiceFS home and /dev/shm do not count). A pod over 200Gi is EVICTED by
+# the kubelet -- the server stops, there is no ENOSPC. It matters most on the
+# GB10s, where one disk also holds the model weights.
+#
+# The request is "0" ON PURPOSE. Without an explicit request Kubernetes copies
+# the limit into it, and a notebook under its 200Gi request would then rank
+# BEHIND the llm-serving model pods (which have no request) for disk-pressure
+# eviction. With 0, notebooks stay "over request" and priority decides, so
+# notebooks are still evicted before models.
+#
 # Applies to pods created after it exists: running notebooks pick it up at their
 # next start. Applied by up.sh.
 apiVersion: v1
@@ -25,5 +37,7 @@ spec:
     - type: Container
       default:
         cpu: "64"
+        ephemeral-storage: 200Gi
       defaultRequest:
         cpu: 100m
+        ephemeral-storage: "0"
