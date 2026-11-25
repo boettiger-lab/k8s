@@ -151,7 +151,7 @@ data:
         log "== juicefs-homes"
         rclone sync "homes:$HOMES_BUCKET" "$B/juicefs/chunks" \
           --backup-dir "$B/history/$STAMP/juicefs-homes" \
-          --max-delete "$MAX_DELETE" \
+          --max-delete "${HOMES_MAX_DELETE:-$MAX_DELETE}" \
           --fast-list --transfers 8 --checkers 16 --stats 10m --stats-one-line \
           || fail="$fail juicefs-homes"
       fi
@@ -223,6 +223,13 @@ spec:
                 - {name: CATALOG_URL, value: "https://s3-west.nrp-nautilus.io/public-data/stac/catalog.json"}
                 - {name: HISTORY_DAYS, value: "90"}
                 - {name: MAX_DELETE, value: "5000"}
+                # Homes chunks churn by design: JuiceFS deletes a file's slices a day
+                # after it leaves the trash (TrashDays=1): ~80k unreferenced objects a
+                # day while homes were being migrated. 5000 tripped on that and
+                # cancelled the whole homes sync, new chunks included. The emptied-
+                # bucket check above still guards an empty store, and deletes go to
+                # history/ for HISTORY_DAYS.
+                - {name: HOMES_MAX_DELETE, value: "200000"}
                 - {name: RCLONE_CONFIG_SRC_TYPE, value: s3}
                 - {name: RCLONE_CONFIG_SRC_PROVIDER, value: Minio}
                 - {name: RCLONE_CONFIG_SRC_ENDPOINT, value: "http://minio-svc.minio.svc:9000"}
