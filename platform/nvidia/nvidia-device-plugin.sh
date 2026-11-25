@@ -30,10 +30,19 @@ helm repo update nvdp
 # check available versions
 #helm search repo nvdp --devel
 
+VERSION=0.20.2
+
+# Helm installs CRDs from a chart's crds/ dir on first install and never upgrades
+# them, so the NFD CRDs (subchart) stay at whatever version first installed them
+# (2024-03 here) unless applied explicitly. --force-conflicts takes ownership of
+# fields Helm set at that first install.
+helm show crds nvdp/nvidia-device-plugin --version "$VERSION" \
+  | kubectl apply --server-side --force-conflicts -f -
+
 helm upgrade -i nvdp nvdp/nvidia-device-plugin \
   --namespace nvidia-device-plugin \
   --create-namespace \
-  --version 0.19.2 \
+  --version "$VERSION" \
   --wait \
   --values nvidia-device-plugin-config.yaml
 
