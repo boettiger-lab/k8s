@@ -118,3 +118,37 @@ sidecars:
 # Existing mount pods keep their image until their volume is remounted.
 defaultMountImage:
   ce: "juicedata/mount:ce-v1.4.2"
+
+# Mount pods: let the metadata client reuse TIME_WAIT ports. Each mount talks to juicefs-pg directly and opens a fresh TCP
+# connection for much of its metadata traffic; each closed one holds a local
+# port for 60s. On 2026-11-25 a home doing ~470 file open/close per second
+# (kubectl's ~/.kube/cache under a polling loop) reached ~375 new conns/s, i.e.
+# ~24k of the default 28k ports, and bursts failed with
+#   dial tcp ...:5432: connect: cannot assign requested address
+# which surfaced to the user as `write ... input/output error`. Postgres itself
+# was fine.
+#
+#   tcp_tw_reuse=1      outbound connects may reuse a TIME_WAIT port (needs TCP
+#                       timestamps, on by default). The kernel default 2 is
+#                       loopback-only.
+#   ip_local_port_range 10000-65000, ~2x the default. The mount pod listens only
+#                       on 6060/6061/9567, all below it.
+# Both are per-network-namespace, so this touches only the mount pod, never the
+# node. Mount pods are privileged, so /proc/sys is writable there.
+#
+# postStart, NOT an initContainer, on purpose: the command always exits 0, so a
+# failed sysctl can never stop a home from mounting. (A failing postStart kills
+# the container; an initContainer would fail closed.) The driver sets no
+# lifecycle of its own on mount pods, so this replaces nothing.
+#
+# Applies to mount pods created after the change: an existing home picks it up
+# the next time its volume is mounted (server restart).
+globalConfig:
+  mountPodPatch:
+    - lifecycle:
+        postStart:
+          exec:
+            command:
+              - sh
+              - -c
+              - sysctl -w net.ipv4.tcp_tw_reuse=1 'net.ipv4.ip_local_port_range=10000 65000' >/dev/null 2>&1; exit 0
