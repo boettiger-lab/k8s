@@ -2,7 +2,8 @@
 #
 # Endpoint: https://vllm-nimbus.carlboettiger.info  (model id `nemotron-3.5-lightning`)
 #
-# Served for investigation (2026-11-17), not as a recommended model. Measured on this
+# Served for investigation (2026-11-17), not as a recommended model. At replicas 0 since
+# 2026-11-20 to free nimbus for new-model trials. Measured on this
 # recipe, vLLM v0.33.0, one GB10 (2026-11-16): ~121 tok/s single-stream decode, ~100 after
 # a 115K-token prompt (prefill ~5,200 tok/s); glen `numeric` 25/46 (54%) at 54 s/cell,
 # the same at temperature 1.0. Its misses trace partly to our metadata (cwhr13 vs cwhr,
@@ -19,7 +20,7 @@ metadata:
   labels:
     k8s-app: vllm-nimbus-lightning
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
