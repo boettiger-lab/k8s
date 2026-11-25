@@ -15,7 +15,8 @@ name: Image CVE scan
 #
 # Scope: images built in this repo that are running on the cluster (checked
 # 2026-11-22). vllm-qwen38-flash-dgx is built here but not deployed, so it is
-# not scanned. Images built elsewhere (nimbus-carbon-api, hexplanner-bench-gpu)
+# not scanned. nimbus-carbon-api is built in its own repo but scanned here
+# (weekly only). Other images built elsewhere (hexplanner-bench-gpu)
 # and third-party images (vLLM, rustfs, ...) are the run-time half of #221.
 #
 # Filter: CRITICAL/HIGH with a fix available. The rocker and CUDA bases carry
@@ -73,6 +74,8 @@ jobs:
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/amd64, workflow: hash-archive Image CI }
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/arm64, workflow: hash-archive Image CI }
           - { image: 'ghcr.io/boettiger-lab/armada-scheduler:0.22.16-nonarmada.2',  platform: linux/amd64, workflow: Armada Scheduler Image }
+          # Built in boettiger-lab/nimbus-carbon-api, so no workflow_run trigger here: weekly/dispatch only.
+          - { image: 'ghcr.io/boettiger-lab/nimbus-carbon-api:latest',              platform: linux/amd64, workflow: none (external repo) }
     env:
       # On workflow_run, only the matrix legs for the image that was just built
       # do any work; the rest skip their steps and finish in seconds.
