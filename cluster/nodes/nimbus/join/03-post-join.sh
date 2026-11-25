@@ -43,7 +43,7 @@ echo "    arch: $(kubectl get node nimbus -o jsonpath='{.metadata.labels.kuberne
 say "labelling nimbus for the NVIDIA device plugin"
 # Not set via k3s --node-label: NodeRestriction only lets a kubelet self-assign
 # labels from a short allow-list, and nvidia.com/* is not on it.
-kubectl label node nimbus nvidia.com/device-plugin.config=timeslice --overwrite
+kubectl label node nimbus nvidia.com/device-plugin.config=timeslice-cdi-rdma --overwrite
 
 # --- 2. roll the DaemonSets that are allowed on nimbus -----------------------
 say "re-applying charts whose DaemonSets must tolerate the nimbus taint"
