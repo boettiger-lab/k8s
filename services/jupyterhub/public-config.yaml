@@ -265,13 +265,46 @@ singleuser:
         # GPU images set. Slices are a co-tenancy counter, not a compute or VRAM
         # share (see ../../platform/nvidia/README.md), so users pick hardware, not a
         # slice number.
+        #
+        # Shown as "Hardware" because it also holds the /scratch choice, which is a
+        # placement too (cirrus only). The key stays `gpu` so saved user_options
+        # of existing servers still resolve.
         gpu:
-          display_name: GPU
+          display_name: Hardware
           choices:
             default:
               display_name: Environment default (GPU images get 1 shared cirrus GPU)
               default: true
               kubespawner_override: {}
+            cirrus-scratch:
+              display_name: cirrus with /scratch (big local scratch disk)
+              description: "Adds /scratch: fast local disk for large temporary files, on cirrus. Empty at every start and deleted when the server stops, and the disk is old and may fail, so keep anything you need in your home or S3. GPU as in the environment default."
+              kubespawner_override:
+                # Merged into the spawner's volumes/volume_mounts, which the
+                # `volumes-as-dicts` extraConfig turns into dicts: a list here
+                # would REPLACE them and drop the home volume.
+                #
+                # A generic ephemeral volume: its PVC is created with the pod and
+                # deleted with it. The cirrus-scratch StorageClass only exists on
+                # cirrus, so this also schedules the server there
+                # (platform/cirrus-scratch/).
+                volumes:
+                  scratch:
+                    name: scratch
+                    ephemeral:
+                      volumeClaimTemplate:
+                        spec:
+                          accessModes: [ReadWriteOnce]
+                          storageClassName: cirrus-scratch
+                          # Nominal: local-path enforces no size. The bound is
+                          # the disk; filling it cannot touch cirrus's root.
+                          resources:
+                            requests:
+                              storage: 1Ti
+                volume_mounts:
+                  scratch:
+                    name: scratch
+                    mountPath: /scratch
             cirrus-2x:
               display_name: Both cirrus GPUs (2x Quadro RTX 8000, shared)
               kubespawner_override:
@@ -463,6 +496,18 @@ hub:
     # server ..." in the hub log). This widens the check to all per-server
     # template fields and otherwise defers to upstream. A template with no
     # per-server field (truly shared home) is still never deleted.
+    # Turn the spawner's volume lists into dicts keyed by volume name.
+    #
+    # KubeSpawner merges a profile option's dict override into a dict trait but
+    # REPLACES a list one, and z2jh builds volumes/volume_mounts as lists. As
+    # dicts, an option (the `cirrus-scratch` Hardware choice) can ADD a volume
+    # without restating the home volume. KubeSpawner accepts either form. Runs
+    # after z2jh has built the lists: extraConfig executes last.
+    volumes-as-dicts: |
+      c.KubeSpawner.volumes = {v["name"]: v for v in c.KubeSpawner.volumes}
+      c.KubeSpawner.volume_mounts = {
+          f'{m["name"]}:{m["mountPath"]}': m for m in c.KubeSpawner.volume_mounts
+      }
     delete-named-server-pvc: |
       from functools import partial
       from jupyterhub.utils import exponential_backoff
