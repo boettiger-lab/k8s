@@ -80,7 +80,7 @@ spec:
       # hostPath cache populated this is a few seconds of hash checks.
       initContainers:
       - name: fetch-models
-        image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda-12.6.3
+        image: ghcr.io/boettiger-lab/speaches:0.9.0-rc.3-cuda-12.6.3-patch.1@sha256:8d9552d5a1e34e4770a67cb0a0fa9555056a0c90aeff5968893f750894ca72dd
         command:
         - python
         - -c
@@ -108,7 +108,7 @@ spec:
       # onnx-asr executor and so cannot serve parakeet at all. The 0.9.0 line is only
       # published as release candidates -- rc.3 is the newest image that exists.
       - name: speaches
-        image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda-12.6.3
+        image: ghcr.io/boettiger-lab/speaches:0.9.0-rc.3-cuda-12.6.3-patch.1@sha256:8d9552d5a1e34e4770a67cb0a0fa9555056a0c90aeff5968893f750894ca72dd
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
