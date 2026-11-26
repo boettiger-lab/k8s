@@ -270,7 +270,10 @@ scrapeConfigs:
         source_labels: [__meta_kubernetes_pod_node_name]
         target_label: node
 
-  # TensorFold (services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml) serves
+  # TensorFold is RETIRED (manifest removed; see `git show 9a4eaa8:services/vllm/
+  # deepseek-v41-tensorfold-nimbuspair.yaml`). With no labelled pods this job scrapes
+  # nothing; drop it once PR #266, which edits just below, has landed.
+  # TensorFold serves
   # vLLM-shaped metrics as tensorfold:* with no model_name, so the carbon
   # dashboard (which reads vllm:* by model_name) would not see it. Pods that opt
   # in with the label metrics-engine=tensorfold get model_name from their own

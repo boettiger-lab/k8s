@@ -6,7 +6,7 @@ Each GPU node serves one model at a time, at a fixed URL:
 |---|---|---|---|
 | <https://vllm-nimbus.carlboettiger.info> | nimbus | `nemotron-3.5-lightning` — Nemotron-3.5-Lightning NVFP4, DSpark k=3, 1M ctx (investigation) | DGX Spark GB10 |
 | <https://vllm-nimbus2.carlboettiger.info> | nimbus2 + nimbus4 | `deepseek-v4-flash` — DeepSeek-V4-Flash-0731, DSpark k=5, TP2 | 2× Dell Pro Max GB10 |
-| <https://vllm-nimbus3.carlboettiger.info> | nimbus3 | *nothing* — `laguna` and `qwen38-27b` are at 0 | Dell Pro Max GB10 |
+| <https://vllm-nimbus3.carlboettiger.info> | nimbus3 | *nothing* — `qwen38-27b` is at 0 | Dell Pro Max GB10 |
 | <https://whisper-cirrus.carlboettiger.info> | cirrus | **speech-to-text**, several models | 2× Quadro RTX 8000 (48 GB each) |
 | <https://vllm-cirrus.carlboettiger.info> | cirrus | *nothing* — see below | — |
 
@@ -52,9 +52,6 @@ If the hub is down, tokens seen in the last minute keep working and others get a
 | `qwen38-nimbus.yaml` | Previous nimbus model: Qwen3.8-27B NVFP4 (scaled to 0; kept as the rollback) |
 | `nemotron35-super-nimbus2.yaml` | nimbus2 single-GB10 model, **scaled to 0** 2026-10-28 for the DeepSeek pair: Nemotron 3.5 Super NVFP4 on one GB10, NVIDIA's Spark recipe with draft length 3 and 1M context. Measurements in the manifest header |
 | `deepseek-v4-flash-gb10pair.yaml` | **Current** nimbus2+nimbus4 TP2 pair, owns the `vllm-nimbus2` Service/Ingress: DeepSeek-V4-Flash-0731 (was -DSpark until 2026-10-28), TP2 head + worker. Start order matters — see the manifest header |
-| `deepseek-v41-tensorfold-nimbuspair.yaml` | DeepSeek-V4.1-Flash-1017 (EXL3 2.9 bpw) on the TensorFold engine, nimbus+nimbus3 TP2 over CX-7 — **retired 2026-11-02, does not fit safely**: even with its load patch, warm-up leaves 2–3 GiB free, below the GB10 low watermark; it also lost to 0731 on the geo-agent benchmark. Kept at 0 for reference (VERDICT in the header). Takes the `vllm-nimbus` endpoint; rank 0 starts FIRST. See the manifest header |
-| `build-tensorfold-dsv41.yaml`, `import-tensorfold-dsv41.yaml`, `fetch-tensorfold-dsv41.yaml` | One-time setup for the TensorFold pair: image tarball built on nimbus, imported on both nodes, weights fetched to both |
-| `laguna-nimbus3.yaml` | Laguna S 2.1 NVFP4 on nimbus3 — **scaled to 0** 2026-09-24 (upstream reasoning loops, issue #95) |
 | `build-flashnext-nimbus.yaml` | Builds the patched Flash-Next image **on nimbus** (hosted arm64 runners lack the disk), then push it to ghcr |
 | `drop-caches-nimbus.yaml` | Drops nimbus's page cache before a very large model load |
 | `bench-flashnext-nimbus.py` | Prefill/decode + concurrency benchmark, cold vs warm prefix (run inside the pod) |

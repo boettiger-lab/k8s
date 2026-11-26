@@ -8,7 +8,6 @@
 #   ./up.sh qwen38-flashnext-nimbus.yaml # nimbus: Qwen3.8-Flash-Next (NVFP4)
 #   ./up.sh qwen38-nimbus.yaml           # nimbus: Qwen3.8-27B (NVFP4), the rollback
 #   ./up.sh deepseek-v4-flash-gb10pair.yaml # nimbus2+4: DeepSeek-V4-Flash TP2 (mind start order)
-#   ./up.sh laguna-nimbus3.yaml          # nimbus3: Laguna (manifest is replicas: 0)
 #   ./up.sh qwen3-8-cirrus.yaml          # cirrus: Qwen3.8-27B -- see the note below
 #   ./up.sh gemma4-cirrus.yaml           # cirrus: Gemma 4
 #

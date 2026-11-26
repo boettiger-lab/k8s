@@ -11,7 +11,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--all" ]]; then
-  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 qwen38-flashnext laguna \
+  kubectl delete deployment -n vllm qwen3-8 gemma4 qwen38 qwen38-flashnext \
     deepseek-v4-flash-head deepseek-v4-flash-worker stt --ignore-not-found
   kubectl delete -f deepseek-v4-flash-gb10pair.yaml --ignore-not-found
   kubectl delete -f endpoints.yaml --ignore-not-found

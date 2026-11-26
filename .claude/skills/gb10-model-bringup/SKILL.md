@@ -34,8 +34,9 @@ context >= 200K, glen `numeric` decides quality. Look up, with URLs:
   context, the chat template, the recommended vLLM/SGLang version and the parser flags.
 - Quants: `nvidia/*-NVFP4` first (has a Spark recipe on the card more often than not),
   then RedHatAI / community NVFP4, FP8. EXL3 means TensorFold or exllamav3, not vLLM. Read
-  the TensorFold verdict in `services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml`
-  before choosing that path.
+  the TensorFold verdict before choosing that path: cluster-ops `tp2-benchmark.md`
+  (scoreboard) and `gb10-fleet-onboarding.md` (memory fit), and the full write-up in the
+  retired manifest's header, `git show 9a4eaa8:services/vllm/deepseek-v41-tensorfold-nimbuspair.yaml`.
 - GB10/Spark recipes (record which one you replicate in the manifest header):
   - NVIDIA model cards ("DGX Spark" sections) and the NVIDIA DGX Spark dev forum
   - `github.com/NVIDIA/local-ai-inference-recipes`: NVIDIA's own Spark recipes
