@@ -49,7 +49,7 @@ spec:
             kubernetes.io/hostname: cirrus
           containers:
             - name: pg-dump
-              image: postgres:16          # match the server major version
+              image: postgres:16.16       # same tag as the server, postgres.yaml
               env:
                 - name: PGPASSWORD
                   valueFrom:

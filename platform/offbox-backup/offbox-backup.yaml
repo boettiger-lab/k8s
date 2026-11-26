@@ -189,7 +189,7 @@ spec:
             # Never fails the pod: a failed dump must not stop the copy. It
             # records its outcome, and `sync` turns a failure into a failed Job.
             - name: juicefs-meta
-              image: postgres:16.14          # match the server (16.14)
+              image: postgres:16.16          # same tag as the server, platform/juicefs/postgres.yaml
               env:
                 - {name: PGHOST, value: juicefs-pg.juicefs.svc}   # direct, not pgbouncer
                 - {name: PGUSER, value: offbox_dump}

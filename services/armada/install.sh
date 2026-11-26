@@ -50,7 +50,7 @@ SCHEDPASS=$(kubectl get secret armada-scheduler-api-secret -n "$NAMESPACE" \
 # 3. PostgreSQL (Bitnami)
 # ---------------------------------------------------------------------------
 echo "==> Installing PostgreSQL..."
-helm upgrade -i armada-postgresql bitnami/postgresql \
+helm upgrade -i armada-postgresql bitnami/postgresql --version 18.12.18 \
   --namespace "$NAMESPACE" \
   --values postgres-values.yaml \
   --wait --timeout 5m

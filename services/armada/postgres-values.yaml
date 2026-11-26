@@ -19,3 +19,8 @@ primary:
     limits:
       cpu: "2"
       memory: 2Gi
+
+# Bitnami's free catalog publishes only `latest`, so pin by digest (multi-arch
+# index). Bump deliberately: same major (18), and read the minor's release notes.
+image:
+  digest: sha256:17db3b66b9701262c495a5463605e75e8de1909c9c7e6c2b3cfe6b4c6958542a  # 18.7.0

@@ -49,7 +49,7 @@ spec:
         kubernetes.io/hostname: cirrus
       containers:
         - name: postgres
-          image: postgres:16
+          image: postgres:16.16     # exact pin: bump deliberately, with pg-backup.yaml and offbox-backup.yaml
           # max_connections: 200, up from the postgres default of 100.
           #
           # On 2026-08-26 the JuiceFS CSI provisioner deadlocked against the
