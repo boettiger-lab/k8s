@@ -1,0 +1,115 @@
+# Drop the page cache behind vLLM's safetensors reads, one shard at a time.
+#
+# WHY: vLLM's default (lazy, mmap) loader leaves every shard it read in the page cache and
+# only fadvises it away after the WHOLE load. In TP2 each rank touches every shard, so on a
+# GB10 (page cache and CUDA share one LPDDR pool) a 166 GiB checkpoint asks for ~83 GiB of
+# parameters PLUS up to 166 GiB of cache on each node. MiMo-V2.6-Flash's first watched
+# start (2026-11-20) hit 519,570 pages/min of direct reclaim at 9 GiB free, ~10% into the
+# weights, and the watcher aborted it. Same failure class as TensorFold's (#139).
+#
+# ALSO: an opt-in backport of vllm#61928 (env VLLM_DIFFKV_SPEC_TILE32=1), see the end.
+#
+# HOW: sitecustomize.py (on PYTHONPATH) replaces safetensors.safe_open with a wrapper,
+# before vllm imports it. DONTNEED cannot evict pages that are still mmap'd, and the Rust
+# handle (or tensors it handed out) keeps a shard mapped past __exit__. So the wrapper
+# releases its handle on exit and drops then, and on every later open it re-drops all
+# earlier shards (their mappings are gone by then). Logs "[pagecache-drop v2] active" once
+# per process. Covers the default and "eager"/"torchao" paths; NOT fastsafetensors, runai
+# or custom load formats (--load-format b12x reads with O_DIRECT and needs nothing).
+#
+# MEASURED (CPU-only loader run over 8 MiMo shards in the v0.34.0 image, mincore per
+# shard, 2026-11-21): v1 (drop on __exit__ only) kept 100% of every shard resident, same
+# as no patch; v2 keeps ~1 shard (1.2 GiB), ~2 if the previous shard's tensors are held.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-pagecache-drop
+  namespace: vllm
+data:
+  sitecustomize.py: |
+    # Drop each safetensors shard's page cache once the loader is done with it.
+    # DONTNEED cannot evict pages still mmap'd, and the Rust handle (or tensors it
+    # handed out) keeps the shard mapped past __exit__. So: release our handle on
+    # exit, drop then, and on every later open re-drop all earlier shards (by then
+    # their mappings are gone). Cheap: one fadvise per earlier shard per open.
+    import gc
+    import os
+    import sys
+    try:
+        import safetensors
+        _orig = safetensors.safe_open
+        _seen = []
+        def _drop(path):
+            try:
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                finally:
+                    os.close(fd)
+            except (OSError, TypeError):
+                pass
+        class safe_open:
+            def __init__(self, filename, *args, **kwargs):
+                self._path = os.fspath(filename)
+                for p in _seen:
+                    if p != self._path:
+                        _drop(p)
+                if self._path not in _seen:
+                    _seen.append(self._path)
+                self._f = _orig(filename, *args, **kwargs)
+            def __enter__(self):
+                self._f.__enter__()
+                return self
+            def __exit__(self, *exc):
+                r = self._f.__exit__(*exc)
+                self._f = None
+                gc.collect(0)
+                _drop(self._path)
+                return r
+            def __getattr__(self, name):
+                f = self.__dict__.get("_f")
+                if f is None:
+                    raise AttributeError(name)
+                return getattr(f, name)
+        safetensors.safe_open = safe_open
+        print(f"[pagecache-drop v2] active pid={os.getpid()}", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[pagecache-drop v2] NOT active: {e!r}", file=sys.stderr, flush=True)
+
+    # Opt-in (env VLLM_DIFFKV_SPEC_TILE32=1): backport of vllm#61928 for vllm#61927.
+    # vLLM 0.32-0.34 launch the Triton DiffKV attention kernel (MiMo-V2) with a 16-wide KV
+    # tile on the speculative-decoding 3D path; with an fp8 KV cache the fp8 tl.dot needs
+    # K >= 32 and warm-up dies ("Input shapes should have ... K >= 32"). Setting the
+    # module's _SPEC_3D_TILE to 32 is what the upstream fix amounts to for fp8 (it drops the
+    # override; the default tile is 32 for fp8). Applied by an import hook when the module
+    # loads, so nothing is imported early. Remove once the pinned vLLM has #61928.
+    if os.environ.get("VLLM_DIFFKV_SPEC_TILE32") == "1":
+        try:
+            import importlib.abc
+            import importlib.machinery
+            _TARGET = "vllm.v1.attention.ops.triton_unified_attention_diffkv"
+
+            class _Loader(importlib.abc.Loader):
+                def __init__(self, inner):
+                    self._inner = inner
+                def create_module(self, spec):
+                    return self._inner.create_module(spec)
+                def exec_module(self, module):
+                    self._inner.exec_module(module)
+                    old = getattr(module, "_SPEC_3D_TILE", None)
+                    module._SPEC_3D_TILE = 32
+                    print(f"[diffkv-tile32] _SPEC_3D_TILE {old} -> 32 pid={os.getpid()}",
+                          file=sys.stderr, flush=True)
+
+            class _Finder(importlib.abc.MetaPathFinder):
+                def find_spec(self, name, path, target=None):
+                    if name != _TARGET:
+                        return None
+                    spec = importlib.machinery.PathFinder.find_spec(name, path)
+                    if spec is not None and spec.loader is not None:
+                        spec.loader = _Loader(spec.loader)
+                    return spec
+
+            sys.meta_path.insert(0, _Finder())
+        except Exception as e:
+            print(f"[diffkv-tile32] NOT active: {e!r}", file=sys.stderr, flush=True)
