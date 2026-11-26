@@ -46,6 +46,7 @@ on:
       - GPU Image
       - hash-archive Image CI
       - Armada Scheduler Image
+      - Armada Component Images
       - speaches Image
       - dspark Image (arm64)
     types: [completed]
@@ -77,6 +78,13 @@ jobs:
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/amd64, workflow: hash-archive Image CI }
           - { image: 'ghcr.io/boettiger-lab/hash-archive:latest',                   platform: linux/arm64, workflow: hash-archive Image CI }
           - { image: 'ghcr.io/boettiger-lab/armada-scheduler:0.22.16-nonarmada.2',  platform: linux/amd64, workflow: Armada Scheduler Image }
+          # Upstream Armada components with Alpine packages upgraded (#246). Keep the tag in step with REVISION in armada-component-images.yml.
+          - { image: 'ghcr.io/boettiger-lab/armada-server:0.22.16-apk.1',           platform: linux/amd64, workflow: Armada Component Images }
+          - { image: 'ghcr.io/boettiger-lab/armada-executor:0.22.16-apk.1',         platform: linux/amd64, workflow: Armada Component Images }
+          - { image: 'ghcr.io/boettiger-lab/armada-event-ingester:0.22.16-apk.1',   platform: linux/amd64, workflow: Armada Component Images }
+          - { image: 'ghcr.io/boettiger-lab/armada-scheduler-ingester:0.22.16-apk.1', platform: linux/amd64, workflow: Armada Component Images }
+          - { image: 'ghcr.io/boettiger-lab/armada-lookout:0.22.16-apk.1',          platform: linux/amd64, workflow: Armada Component Images }
+          - { image: 'ghcr.io/boettiger-lab/armada-lookout-ingester:0.22.16-apk.1', platform: linux/amd64, workflow: Armada Component Images }
           # Patched third-party model-serving images (#242). Keep the tags in step with REVISION in their workflows.
           - { image: 'ghcr.io/boettiger-lab/speaches:0.9.0-rc.3-cuda-12.6.3-patch.1', platform: linux/amd64, workflow: speaches Image }
           - { image: 'ghcr.io/boettiger-lab/dspark-vllm-gx10:0.1.1-patch.1',        platform: linux/arm64, workflow: dspark Image (arm64) }
