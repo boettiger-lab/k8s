@@ -169,19 +169,48 @@ allowedTopologies:
       - key: kubernetes.io/hostname
         values: [cirrus]
 ---
+# ARC runner _work volumes (services/github-actions/). Same provisioner, own node
+# map (see config.json below): /scratch on cirrus, local-path's usual directory on
+# thelio. Runners are amd64-only, so these are the only nodes they reach.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ci-work
+provisioner: cirrus-scratch.local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowedTopologies:
+  - matchLabelExpressions:
+      - key: kubernetes.io/hostname
+        values: [cirrus, thelio]
+---
 kind: ConfigMap
 apiVersion: v1
 metadata:
   name: cirrus-scratch-config
   namespace: cirrus-scratch
 data:
-  # cirrus only, with no DEFAULT_PATH_FOR_NON_LISTED_NODES entry: a claim on any
-  # other node fails rather than landing on that node's root disk.
+  # One node map per StorageClass. Neither has a DEFAULT_PATH_FOR_NON_LISTED_NODES
+  # entry: a claim on an unlisted node fails rather than landing on its root disk.
+  #   cirrus-scratch: cirrus only.
+  #   ci-work: ARC runner _work volumes. Runners prefer thelio and spill to
+  #     cirrus; on cirrus the volume goes to /scratch instead of the control
+  #     plane's root disk, on thelio to the same directory K3s's local-path uses.
   config.json: |-
     {
-      "nodePathMap": [
-        {"node": "cirrus", "paths": ["/scratch"]}
-      ]
+      "storageClassConfigs": {
+        "cirrus-scratch": {
+          "nodePathMap": [
+            {"node": "cirrus", "paths": ["/scratch"]}
+          ]
+        },
+        "ci-work": {
+          "nodePathMap": [
+            {"node": "cirrus", "paths": ["/scratch"]},
+            {"node": "thelio", "paths": ["/var/lib/rancher/k3s/storage"]}
+          ]
+        }
+      }
     }
   setup: |-
     #!/bin/sh

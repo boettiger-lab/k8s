@@ -46,7 +46,10 @@ containerMode:
     # mount it", and the job pod follows the runner's PV to its node. local-path is a hostPath
     # bind mount, so it satisfies that without a metadata service.
     accessModes: ["ReadWriteOnce"]
-    storageClassName: "local-path"
+    # ci-work: a local-path class (platform/cirrus-scratch/) that puts _work on
+    # cirrus's scratch disk, not the control plane's root disk, when a runner
+    # spills to cirrus; on thelio it is the usual local-path directory.
+    storageClassName: "ci-work"
     resources:
       requests:
         # NOMINAL. The local-path provisioner does NOT enforce this -- a job
