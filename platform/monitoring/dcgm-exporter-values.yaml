@@ -42,7 +42,9 @@ podAnnotations:
 #
 # Note on GB10: DCGM_FI_DEV_FB_FREE / _FB_USED and the memory-clock fields
 # report N/A on unified memory. Expected, not a broken exporter.
-# DCGM_FI_DEV_POWER_USAGE does work, which is what the carbon dashboard needs.
+# Power works (DCGM_FI_DEV_BOARD_POWER_WATTS since 4.9; the old
+# DCGM_FI_DEV_POWER_USAGE name the carbon dashboard reads is a recording rule in
+# prometheus-values.yaml).
 tolerations:
   - key: node-role.kubernetes.io/control-plane
     operator: Exists

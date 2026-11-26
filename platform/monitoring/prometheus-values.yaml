@@ -314,6 +314,28 @@ scrapeConfigs:
 # exporters they require.
 # ---------------------------------------------------------------------------
 serverFiles:
+  # dcgm-exporter 4.9 (chart 4.9.0, #252) renamed every metric to unit-suffixed
+  # names, switched utilisation from % to a 0-1 ratio, framebuffer from MiB to
+  # bytes, and lowercased the Hostname label; it has no legacy-name option (the
+  # only output schema is dcgm/v1). These rules re-create the pre-4.9 series
+  # under their old names, labels and units, so the carbon dashboard (power,
+  # util, joined by Hostname) and the Grafana GPU dashboard keep working and
+  # their history stays one continuous series across the rename. Remove only
+  # after every consumer reads the new names AND 15d retention has aged out the
+  # old ones.
+  recording_rules.yml:
+    groups:
+      - name: dcgm-legacy-names
+        interval: 30s
+        rules:
+          - record: DCGM_FI_DEV_POWER_USAGE
+            expr: label_replace(label_replace(DCGM_FI_DEV_BOARD_POWER_WATTS, "Hostname", "$1", "hostname", "(.+)"), "hostname", "", "", "")
+          - record: DCGM_FI_DEV_GPU_UTIL
+            expr: label_replace(label_replace(DCGM_FI_DEV_GPU_UTIL_RATIO * 100, "Hostname", "$1", "hostname", "(.+)"), "hostname", "", "", "")
+          - record: DCGM_FI_DEV_GPU_TEMP
+            expr: label_replace(label_replace(DCGM_FI_DEV_GPU_TEMP_CELSIUS, "Hostname", "$1", "hostname", "(.+)"), "hostname", "", "", "")
+          - record: DCGM_FI_DEV_FB_USED
+            expr: label_replace(label_replace(DCGM_FI_DEV_FB_USED_BYTES / 1048576, "Hostname", "$1", "hostname", "(.+)"), "hostname", "", "", "")
   alerting_rules.yml:
     groups:
       - name: nodes
