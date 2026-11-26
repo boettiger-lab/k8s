@@ -1,0 +1,305 @@
+# MiMo-V2.6-Flash-MOPD (Xiaomi, 309B-A15B, official mxfp4/FP8 release, 165.6 GiB) served
+# TP2 across nimbus (rank 0, API) + nimbus3 (rank 1, headless), on STOCK vllm-openai:v0.34.0.
+#
+# Endpoint: https://vllm-nimbus.carlboettiger.info   (model id `mimo-v2.6-flash`)
+#
+# CONFIG (2026-11-22): DFlash k=7 (drafter in the checkpoint's dflash/ folder), fp8 KV, 6 GiB KV.
+# glen ca-30x30 numeric q1-q6, 1 trial: both 6/6; DFlash k=7 287 s total, 24.5 ms per output
+# token; MTP k=1 518 s, 29.2 ms. Real glen turns are reasoning + SQL and draft well; the
+# synthetic "agent" prompt in bench-decode under-predicted that.
+# bench-decode (single stream; tok/s mean of 5 workloads / after 126K tokens / accepted per step):
+#   MTP k=1 40.3 / 31.9 / 1.81   k=2 39.3 / 27.6 / 2.24   k=3 36.6 / 25.8 / 2.44
+#       k=4 32.4 / 24.8 / 2.48   k=5 28.4 / 21.8 / 2.47
+#   DFlash (fp8, 6G) k=3 44.2 / 30.9 / 2.65   k=5 45.8 / 27.2 / 3.11   k=7 47.9 / 27.8 / 3.41
+#   (k=7: code 51, math 65, json 71, prose 25, agent 28)
+# DFlash needs the 6 GiB KV cap: at 8 GiB, FlashInfer autotune (8192 tokens) during warm-up
+# pushed nimbus into swap-out and the watcher aborted. 6 GiB fp8 still holds ~780K tokens.
+# fp8 KV (MTP k=1): TTFT at 126K 78 s (bf16: 107 s). fp8 KV + any speculative decoding
+# crashes the Triton DiffKV kernel at warm-up ("K >= 32", vllm#61927); VLLM_DIFFKV_SPEC_TILE32=1
+# turns on our backport of the fix (#61928) in vllm-pagecache-drop.yaml. Drop it once vLLM
+# has #61928.
+# b12x MoE (--moe-backend b12x, W4A8): 37.6 / 31.9 at MTP k=1, slower than marlin.
+# CUDA graphs: FULL_DECODE_ONLY (Plaaasma's dual-Spark recipe), captured only up to 16 tokens.
+# With --max-num-seqs 1 and k=7 a decode step is at most 8 tokens, so sizes above 16 are
+# never used; the recipe's 128 only cost memory at load (see LOAD MARGIN below).
+# Reported configs compared:
+# tonyd2wild/MiMo-V2.6-Flash-2x-DGX-Spark (RL ckpt, DFlash 7, ~53 tok/s, needed 4 patches
+# that are ALL upstream by v0.34.0: #57508/#59053, #57784, #58128), myllmbox (MOPD, MTP 3,
+# 49 tok/s, 40 after 256K), sparkring forum (MOPD, 27 tok/s at 131K).
+#
+# Kept from the reports: VLLM_USE_DEEP_GEMM=0 (DeepGEMM silently corrupts fp8 GEMMs on SM12x,
+# DeepGEMM#417), --moe-backend marlin, --no-async-scheduling (garbled output, vllm#46669),
+# fp8 KV. NOT kept: tonyd's repetition_penalty 1.05 -- per-model sampling lives in
+# open-llm-proxy, not here.
+#
+# MEMORY: ~83 GiB of weights per rank (DeepSeek-0731 is ~79 on nimbus2+4). KV is capped
+# absolutely with --kv-cache-memory-bytes (bypasses the profiler; see dgx-spark-memory.md)
+# at 6 GiB (8 GiB is fine for MTP; DFlash autotune needs the difference). Min free after
+# warm-up under DFlash k=7: 9.1 GiB nimbus, 8.8 GiB nimbus3 (gb10-load-watcher.py). Raise it
+# only after measuring free memory after warm-up on BOTH nodes.
+#
+# LOAD (2026-11-20): the first watched start was aborted ~10% into the weights: params for
+# the whole rank are allocated up front (free 86 -> 9 GiB in 4 s), then every shard read
+# stays in page cache and the kernel fell into direct reclaim (519,570 pages/min on
+# nimbus). Both ranks now run with vllm-pagecache-drop.yaml (drops each shard's cache when
+# it is closed). Startup baseline after a cache drop: ~86 GiB MemFree on nimbus, ~92 on
+# nimbus3, ~25 GiB below the dropped-cache figure before any weight is read.
+# 2026-11-21 retry with that patch (v1) aborted on nimbus3 swap-out at 20% of the shards:
+# free 101 -> 18 GiB when params were allocated, then -> 5 GiB as shards stayed cached.
+# v1 did nothing (the shards were still mmap'd when it dropped them); v2 of the patch,
+# measured to hold ~1 shard, is what runs now. Published dual-Spark configs spend the same
+# ~96 GiB/rank on weights + runtime (myllmbox: ~5 GB free after warm-up with 16G KV).
+#
+# LOAD MARGIN (2026-11-24): with --max-num-batched-tokens 8192 and CUDA-graph capture up to
+# 128, the load floor sat at 5.0-7 GiB free, just above the 4.4 GiB low watermark. 3 of 6
+# watched starts aborted (swap-out or direct reclaim during the profile run and graph
+# capture), with zero compaction stalls, so it was margin and not fragmentation.
+# 4096 / 16 raised the floor about 2 GiB: min free 7.3 / 7.1 GiB (nimbus / nimbus3), and
+# 7.7 / 7.2 after a reboot on 2026-11-25. Every start since has loaded. Same speed:
+# bench-decode 49.8 tok/s mean, 3.44 accepted/step, 110K prompt TTFT 81 s then 26.9 tok/s.
+# KV holds 874,814 tokens. glen judge-free suite (3 trials, on bench):
+# accuracy 0.967, completion 1.0 (glen-benchmark-runs, jf1124-mimo-v2.6-flash).
+# A load after ~2 days of model rotation still aborted on fragmentation (compaction stalls
+# >1,600). Run cluster-ops scripts/gb10-preload.sh before a start and reboot on its gate.
+#
+# START ORDER: worker first, then head (see deepseek-v4-flash-gb10pair.yaml):
+#   kubectl -n vllm scale deploy/mimo-v26-worker --replicas=1   # wait for Running
+#   kubectl -n vllm scale deploy/mimo-v26-head   --replicas=1
+#
+# Only the head carries `vllm-endpoint: nimbus`; every other nimbus model must be at 0.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimo-v26-worker
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-mimo
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mimo-v26-worker
+  template:
+    metadata:
+      labels:
+        app: mimo-v26-worker
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.34.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: PYTORCH_CUDA_ALLOC_CONF, value: "expandable_segments:True"}
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: PYTHONPATH, value: /opt/pagecache-drop}   # vllm-pagecache-drop.yaml
+        - {name: VLLM_DIFFKV_SPEC_TILE32, value: "1"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.13"}
+        - {name: NODE_RANK, value: "1"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name mimo-v2.6-flash
+            --trust-remote-code
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --distributed-executor-backend mp
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 4096
+            --kv-cache-memory-bytes 6G
+            # vLLM still checks CUDA free >= util x 121.69 GiB at startup (default 0.92 = 112 GiB
+            # failed; 0.78 failed with 94.85 "free" -- CUDA reports less than MemFree after a
+            # cache drop). With an absolute KV cap this flag is only that check.
+            --gpu-memory-utilization 0.70
+            --kv-cache-dtype fp8
+            --moe-backend marlin
+            --no-async-scheduling
+            --enable-prefix-caching --enable-chunked-prefill
+            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","max_cudagraph_capture_size":16}'
+            --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+            --headless
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+        - {name: pagecache-drop, mountPath: /opt/pagecache-drop}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
+      - {name: pagecache-drop, configMap: {name: vllm-pagecache-drop}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimo-v26-head
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-mimo
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mimo-v26-head
+  template:
+    metadata:
+      labels:
+        app: mimo-v26-head
+        vllm-endpoint: nimbus
+    spec:
+      priorityClassName: llm-serving
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      runtimeClassName: nvidia
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostAliases:
+      - {ip: 192.168.200.12, hostnames: ["nimbus"]}
+      - {ip: 192.168.200.13, hostnames: ["nimbus3"]}
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.34.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: vllm-api-key, key: api-key}}
+        - {name: HF_HOME, value: "/hf"}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: VLLM_CACHE_ROOT, value: "/hf/vllm-cache"}
+        - {name: TRITON_CACHE_DIR, value: "/hf/triton-cache"}
+        - {name: VLLM_ENGINE_READY_TIMEOUT_S, value: "3600"}
+        - {name: TORCH_CUDA_ARCH_LIST, value: "12.1a"}
+        - {name: PYTORCH_CUDA_ALLOC_CONF, value: "expandable_segments:True"}
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: PYTHONPATH, value: /opt/pagecache-drop}   # vllm-pagecache-drop.yaml
+        - {name: VLLM_DIFFKV_SPEC_TILE32, value: "1"}
+        - {name: VLLM_HOST_IP, value: "192.168.200.12"}
+        - {name: NODE_RANK, value: "0"}
+        - {name: NCCL_NET, value: "IB"}
+        - {name: NCCL_IB_DISABLE, value: "0"}
+        - {name: NCCL_IB_HCA, value: "rocep1s0f1,roceP2p1s0f1"}
+        - {name: NCCL_IB_GID_INDEX, value: "3"}
+        - {name: NCCL_IB_ROCE_VERSION_NUM, value: "2"}
+        - {name: NCCL_IB_ADDR_FAMILY, value: "AF_INET"}
+        - {name: NCCL_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: GLOO_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: TP_SOCKET_IFNAME, value: "enp1s0f1np1"}
+        - {name: NCCL_CROSS_NIC, value: "1"}
+        - {name: NCCL_NVLS_ENABLE, value: "0"}
+        - {name: NCCL_CUMEM_ENABLE, value: "0"}
+        - {name: NCCL_IGNORE_CPU_AFFINITY, value: "1"}
+        - {name: NCCL_DEBUG, value: "WARN"}
+        - {name: TORCH_NCCL_ASYNC_ERROR_HANDLING, value: "1"}
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD
+          SNAP="$R/snapshots/$(cat $R/refs/main)"
+          # Array, not backslash continuations (a lost `\` once dropped --headless).
+          ARGS=(
+            --served-model-name mimo-v2.6-flash
+            --trust-remote-code
+            --host 0.0.0.0 --port 8000
+            --tensor-parallel-size 2 --distributed-executor-backend mp
+            --nnodes 2 --node-rank ${NODE_RANK}
+            --master-addr 192.168.200.12 --master-port 25001
+            --max-model-len 262144
+            --max-num-seqs 1
+            --max-num-batched-tokens 4096
+            --kv-cache-memory-bytes 6G
+            # vLLM still checks CUDA free >= util x 121.69 GiB at startup (default 0.92 = 112 GiB
+            # failed; 0.78 failed with 94.85 "free" -- CUDA reports less than MemFree after a
+            # cache drop). With an absolute KV cap this flag is only that check.
+            --gpu-memory-utilization 0.70
+            --kv-cache-dtype fp8
+            --moe-backend marlin
+            --no-async-scheduling
+            --enable-prefix-caching --enable-chunked-prefill
+            --speculative-config "{\"method\":\"dflash\",\"model\":\"$SNAP/dflash\",\"num_speculative_tokens\":7}"
+            --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","max_cudagraph_capture_size":16}'
+            --reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve "$SNAP" "${ARGS[@]}"
+        resources:
+          requests: {cpu: 8, memory: 108Gi, nvidia.com/gpu: 8}
+          limits: {cpu: 16, memory: 108Gi, nvidia.com/gpu: 8}
+        securityContext:
+          capabilities: {add: ["IPC_LOCK"]}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: dshm, mountPath: /dev/shm}
+        - {name: infiniband, mountPath: /dev/infiniband}
+        - {name: pagecache-drop, mountPath: /opt/pagecache-drop}
+        readinessProbe:
+          httpGet: {path: /health, port: 8000}
+          initialDelaySeconds: 300
+          periodSeconds: 15
+          failureThreshold: 400
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+      - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 32Gi}}
+      - {name: infiniband, hostPath: {path: /dev/infiniband}}
+      - {name: pagecache-drop, configMap: {name: vllm-pagecache-drop}}
