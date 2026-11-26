@@ -215,7 +215,7 @@ spec:
         # Anemll's GB10 port: vLLM 0.25.2.dev0+g752a3a504 with FlashInfer and b12x
         # pinned to specific commits. The pins are the point -- stock vllm-openai
         # v0.25.1 gives 24 tok/s with the same weights and flags.
-        image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1
+        image: ghcr.io/boettiger-lab/dspark-vllm-gx10:0.1.1-patch.1@sha256:2fa6ee15d0b97fa447b367d90f6d7776bcb4ee512c14a38dcd2f28a494afd643
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
@@ -467,7 +467,7 @@ spec:
         # Anemll's GB10 port: vLLM 0.25.2.dev0+g752a3a504 with FlashInfer and b12x
         # pinned to specific commits. The pins are the point -- stock vllm-openai
         # v0.25.1 gives 24 tok/s with the same weights and flags.
-        image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1
+        image: ghcr.io/boettiger-lab/dspark-vllm-gx10:0.1.1-patch.1@sha256:2fa6ee15d0b97fa447b367d90f6d7776bcb4ee512c14a38dcd2f28a494afd643
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
