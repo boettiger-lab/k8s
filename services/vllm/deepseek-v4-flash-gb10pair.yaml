@@ -221,6 +221,10 @@ spec:
         - containerPort: 8000
           name: http
         env:
+        # Page-cache drop while loading (vllm-pagecache-drop.yaml). A plain watched start on
+        # 2026-11-21 swapped on nimbus4 (16K pages/min) as the checkpoint streamed through
+        # page cache on top of the model's own allocation.
+        - {name: PYTHONPATH, value: /opt/pagecache-drop}
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -404,7 +408,13 @@ spec:
           mountPath: /dev/shm
         - name: infiniband
           mountPath: /dev/infiniband
+        - name: pagecache-drop
+          mountPath: /opt/pagecache-drop
+          readOnly: true
       volumes:
+      - name: pagecache-drop
+        configMap:
+          name: vllm-pagecache-drop
       - name: hf-cache
         hostPath:
           path: /home/cboettig/.cache/huggingface
@@ -473,6 +483,10 @@ spec:
         - containerPort: 8000
           name: http
         env:
+        # Page-cache drop while loading (vllm-pagecache-drop.yaml). A plain watched start on
+        # 2026-11-21 swapped on nimbus4 (16K pages/min) as the checkpoint streamed through
+        # page cache on top of the model's own allocation.
+        - {name: PYTHONPATH, value: /opt/pagecache-drop}
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -664,7 +678,13 @@ spec:
           mountPath: /dev/shm
         - name: infiniband
           mountPath: /dev/infiniband
+        - name: pagecache-drop
+          mountPath: /opt/pagecache-drop
+          readOnly: true
       volumes:
+      - name: pagecache-drop
+        configMap:
+          name: vllm-pagecache-drop
       - name: hf-cache
         hostPath:
           path: /home/cboettig/.cache/huggingface
