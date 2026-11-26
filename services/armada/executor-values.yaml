@@ -3,9 +3,11 @@
 # (ports[2].containerPort empty) and keeps reconciling over a hand-made one.
 # The chart defaults to :latest, which tracks Armada master, and nodes cache
 # whatever build they pulled first (thelio held one too old for errorCategories
-# onPodEvents/action). Pin to the chart's release.
+# onPodEvents/action). Pin to the chart's release, rebuilt with upgraded Alpine
+# packages (component-images/, #246).
 image:
-  tag: "0.22.16"
+  repository: ghcr.io/boettiger-lab/armada-executor
+  tag: "0.22.16-apk.1"
 applicationConfig:
   application:
     # Unique ID for this k8s cluster, used in Armada job submissions

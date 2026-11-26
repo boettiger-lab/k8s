@@ -152,6 +152,17 @@ cached `:latest`, which once crashlooped the executor. Upgrade all of them
 together. The operator and the Bitnami postgres/redis images are still on
 `:latest`.
 
+None of the components runs upstream's image as published. Upstream's Alpine
+base (3.21.3, still the base of 0.22.19) carries an OpenSSL with a critical CVE.
+The scheduler is built from source with a patch (`scheduler-image/`, tag
+`0.22.16-nonarmada.N`). The other six (server, executor, the three ingesters,
+lookout) are upstream's image plus `apk upgrade` (`component-images/`, tag
+`0.22.16-apk.N`, built by `.github/workflows/armada-component-images.yml`). To
+upgrade Armada, bump the version in both workflows, both Dockerfiles, every CR,
+`executor-values.yaml` and the executor chart in `install.sh`, and reset both
+revisions to 1. Drop `component-images/` once an upstream release ships a fixed
+base.
+
 ## Known Workarounds
 
 ### Executor: installed from its own chart, not the operator
