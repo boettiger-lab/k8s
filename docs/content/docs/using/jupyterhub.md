@@ -22,9 +22,12 @@ The launcher asks four questions.
 | Custom image | any public `image:tag` | none |
 | Build from a repository | built on the fly by BinderHub | none |
 
-**GPU.** For the GPU environments, choose where the GPU comes from:
+**Hardware.** Choose where your server runs and, for the GPU environments,
+where the GPU comes from:
 - **Environment default:** a shared slice of one of the large workstation GPUs
   (Quadro RTX 8000, 48 GB). Other users can be on the same card.
+- **cirrus with /scratch:** as the default, plus a large, fast local disk at
+  `/scratch` for big temporary files (see [Temporary files](#temporary-files)).
 - **Both workstation GPUs:** two RTX 8000s, for multi-GPU work.
 - **GB10:** an NVIDIA Grace Blackwell machine. It is **arm64**, so a custom
   image must be multi-arch. GPU memory is the machine's unified memory, shared
@@ -48,6 +51,15 @@ named server gets its own home.
 
 Servers are not shut down for being idle. Stop yours from the Hub Control Panel
 when you are done, especially GPU servers.
+
+## Temporary files
+
+`/tmp` and anything else written outside your home and `/scratch` count
+against a **200 GB** limit per server; a server that goes over it is stopped.
+For more, start the server with **Hardware → cirrus with /scratch**: `/scratch`
+is several terabytes of local disk. It is empty at every start and deleted
+when the server stops, and the disk has no redundancy, so keep anything you
+need in your home directory or in S3.
 
 ## Images
 
