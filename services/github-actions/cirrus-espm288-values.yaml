@@ -38,7 +38,10 @@ containerMode:
     #
     # This also removes CI as JuiceFS's only significant workload.
     accessModes: ["ReadWriteOnce"]
-    storageClassName: "local-path"
+    # ci-work: a local-path class (platform/cirrus-scratch/) that puts _work on
+    # cirrus's scratch disk, not the control plane's root disk, when a runner
+    # spills to cirrus; on thelio it is the usual local-path directory.
+    storageClassName: "ci-work"
     resources:
       requests:
         storage: 20Gi
