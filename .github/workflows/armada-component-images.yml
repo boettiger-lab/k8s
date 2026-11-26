@@ -1,0 +1,78 @@
+name: Armada Component Images
+
+# Upstream Armada component images with their Alpine packages upgraded
+# (services/armada/component-images, #246). One leg per component; amd64 only,
+# like upstream. The scheduler is built separately (armada-scheduler-image.yml)
+# because it also carries a source patch.
+#
+# Bump REVISION on every rebuild and set the same tag in services/armada/*.yaml
+# and executor-values.yaml. The operator-managed deployments pull IfNotPresent
+# and the CRDs cannot pin by digest, so pushing over an existing tag never
+# reaches the node. Keep ARMADA_VERSION in step with the scheduler build.
+on:
+  workflow_dispatch: null
+  push:
+    branches: [main]
+    paths:
+      - 'services/armada/component-images/**'
+      - '.github/workflows/armada-component-images.yml'
+
+env:
+  ARMADA_VERSION: 0.22.16
+  REVISION: '1'
+
+concurrency:
+  group: armada-component-images
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'boettiger-lab/k8s' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - server
+          - executor
+          - event-ingester
+          - scheduler-ingester
+          - lookout
+          - lookout-ingester
+    env:
+      IMAGE: ghcr.io/boettiger-lab/armada-${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services/armada/component-images
+          platforms: linux/amd64
+          build-args: |
+            COMPONENT=${{ matrix.component }}
+            ARMADA_VERSION=${{ env.ARMADA_VERSION }}
+          # Links the new ghcr package to this repo.
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.ARMADA_VERSION }}-apk.${{ env.REVISION }}
+          provenance: false
+          sbom: false
+
+      - name: Digest
+        run: |
+          echo "Pushed \`${IMAGE}:${ARMADA_VERSION}-apk.${REVISION}@${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

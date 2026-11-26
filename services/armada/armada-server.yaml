@@ -12,8 +12,9 @@ spec:
   pulsarInit: false
 
   image:
-    repository: gresearch/armada-server
-    tag: "0.22.16"
+    # Upstream server with Alpine packages upgraded (component-images/, #246).
+    repository: ghcr.io/boettiger-lab/armada-server
+    tag: "0.22.16-apk.1"
 
   # gRPC API ingress — Traefik requires h2c (HTTP/2 cleartext) backend scheme
   ingress:

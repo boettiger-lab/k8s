@@ -11,8 +11,9 @@ spec:
     kubernetes.io/hostname: cirrus
 
   image:
-    repository: gresearch/armada-lookout
-    tag: "0.22.16"
+    # Upstream lookout with Alpine packages upgraded (component-images/, #246).
+    repository: ghcr.io/boettiger-lab/armada-lookout
+    tag: "0.22.16-apk.1"
 
   # No ingress, hostNames or clusterIssuer: Lookout is private. It has no
   # per-user view, so anyone who can open it sees every job's full pod spec,

@@ -13,8 +13,9 @@ spec:
     kubernetes.io/hostname: cirrus
 
   image:
-    repository: gresearch/armada-lookout-ingester
-    tag: "0.22.16"
+    # Upstream lookout-ingester with Alpine packages upgraded (component-images/, #246).
+    repository: ghcr.io/boettiger-lab/armada-lookout-ingester
+    tag: "0.22.16-apk.1"
 
   applicationConfig:
     pulsar:
