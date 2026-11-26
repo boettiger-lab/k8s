@@ -102,6 +102,9 @@ alertmanager:
 #
 # `persistentvolumes` added 2026-11-22 for JuiceFsVolumeStuckReleased: two
 # metrics, six series per PV (five phases + info), ~30 PVs today.
+#
+# `kube_pod_status_unschedulable` added 2026-11-26 for PodUnschedulable (#73):
+# a series exists only while a pod is unschedulable, so usually zero.
 kube-state-metrics:
   enabled: true
   collectors: [deployments, statefulsets, pods, nodes, cronjobs, persistentvolumes]
@@ -116,6 +119,7 @@ kube-state-metrics:
     - kube_statefulset_replicas
     - kube_statefulset_status_replicas_ready
     - kube_pod_container_status_waiting_reason
+    - kube_pod_status_unschedulable
     - kube_persistentvolume_status_phase
     - kube_persistentvolume_info
   resources:
@@ -476,6 +480,19 @@ serverFiles:
               summary: "{{ $labels.namespace }}/{{ $labels.pod }} stuck in {{ $labels.reason }}"
               description: "Container {{ $labels.container }} has been waiting with reason {{ $labels.reason }} for 15m."
 
+          # A pod the scheduler cannot place (#73): a taint change, or a Job
+          # pinned to a full or down node. On 2026-11-26 a JuiceFS delvol Job sat
+          # Pending on a memory-full GB10 (#279), found 1h later via the PV alert.
+          # Unschedulable rather than phase=Pending: Pending also covers a slow
+          # pull of a 20 GB vLLM image, and pull errors are ContainerStuckWaiting.
+          - alert: PodUnschedulable
+            expr: kube_pod_status_unschedulable == 1
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.namespace }}/{{ $labels.pod }} unschedulable for 15m"
+              description: "`kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}` shows why under Events (Insufficient memory, untolerated taint, node affinity)."
+
       - name: storage
         rules:
           # Every pool node-exporter sees: cirrus `tank`, thelio's off-box pool,
@@ -724,6 +741,52 @@ serverFiles:
             annotations:
               summary: "{{ $labels.node }} {{ $labels.device }}: pending sectors rising"
               description: "Current_Pending_Sector increased in the last 24h. A flat count is normal wear; a rising one means the drive is failing."
+
+      # Temperature (#73). Thresholds come from each part's own limits, set
+      # against 15 days of history (2026-11-26) so normal load does not fire.
+      - name: temperature
+        rules:
+          # Every sensor that publishes its own critical limit: the NVMe drives
+          # (crit 80-94 C) and the GB10 ConnectX NICs (crit 105 C). Closest
+          # approach in 15d was 17 C under crit (nimbus3 nvme).
+          - alert: HardwareNearCriticalTemp
+            expr: node_hwmon_temp_celsius > node_hwmon_temp_crit_celsius - 10
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }} {{ $labels.chip }}: within 10 C of its critical temperature"
+              description: "{{ $value }} C. Check airflow and fans; NVMe drives throttle near crit."
+
+          # GB10 SoC (ACPI thermal zones). The kernel's only trip point is
+          # `critical` at 104.8 C, which powers the box off, and hwmon does not
+          # export it, so the rule above cannot see it. Load spikes reach ~97 C,
+          # but the hottest 10-minute hold in 15d was 87.7 C (nimbus).
+          - alert: Gb10SocHot
+            expr: max by (node) (node_hwmon_temp_celsius{chip=~"thermal_thermal_zone.*", node=~"nimbus.*"}) > 95
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.node }}: GB10 SoC above 95 C for 5m"
+              description: "{{ $value }} C. The kernel powers off at 104.8 C. Usually sustained model load with poor airflow."
+
+          - alert: Gb10SocCritical
+            expr: max by (node) (node_hwmon_temp_celsius{chip=~"thermal_thermal_zone.*", node=~"nimbus.*"}) > 100
+            for: 1m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $labels.node }}: GB10 SoC above 100 C, near the 104.8 C power-off"
+              description: "{{ $value }} C. Scale the model on this node down now if it keeps climbing."
+
+          # Discrete GPUs (GB10 GPUs report no limits; the SoC rules cover them).
+          # Slowdown is 91 C on cirrus's Quadro RTX 8000 and 97 C on thelio's
+          # RTX 2080 (nvidia-smi). Hottest 10-minute hold in 15d: 84 C (thelio).
+          - alert: GpuHot
+            expr: DCGM_FI_DEV_GPU_TEMP{modelName!="NVIDIA GB10"} >= 88
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.Hostname }} GPU {{ $labels.gpu }} ({{ $labels.modelName }}) at {{ $value }} C"
+              description: "Approaching thermal slowdown (91 C on the Quadro RTX 8000, 97 C on the RTX 2080)."
 
       - name: os-updates
         rules:
