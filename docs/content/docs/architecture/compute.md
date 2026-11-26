@@ -49,7 +49,8 @@ picks a sharing mode with the label `nvidia.com/device-plugin.config`:
 
 | Mode | Used on | Effect |
 |---|---|---|
-| `timeslice-cdi` | the RTX 8000s and the GB10s | each GPU is advertised as 8 `nvidia.com/gpu` slices, so pods can share a card. Slices are scheduling slots, not memory partitions: every pod sees the whole card. |
+| `timeslice-cdi` | the RTX 8000s | each GPU is advertised as 8 `nvidia.com/gpu` slices, so pods can share a card. Slices are scheduling slots, not memory partitions: every pod sees the whole card. |
+| `timeslice-cdi-rdma` | the GB10s | as `timeslice-cdi`, plus the InfiniBand devices, so a model split across two GB10s can use RDMA between them |
 | `no-sharing` | the small consumer GPU | one pod per GPU |
 
 The cards don't support MIG. The cluster doesn't use MPS: it can't be limited
