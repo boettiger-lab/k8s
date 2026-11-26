@@ -10,6 +10,7 @@ cluster *provides*, that is [`../services/`](../services/); the machines themsel
 | [`cert-manager/`](cert-manager/) | Let's Encrypt certificates, issued automatically per Ingress |
 | [`external-dns/`](external-dns/) | Cloudflare DNS records created from Ingress objects |
 | [`openebs/`](openebs/) | ZFS-LocalPV — node-local volumes with enforced per-PVC quotas |
+| [`cirrus-scratch/`](cirrus-scratch/) | Per-pod scratch volumes on cirrus's dedicated scratch disk; deleted with the pod |
 | [`juicefs/`](juicefs/) | ReadWriteMany home directories over S3, so a session can start on any node |
 | [`rustfs/`](rustfs/) | RustFS object store — the S3 backend JuiceFS writes to |
 | [`offbox-backup/`](offbox-backup/) | Daily copy of the object store's primary data to thelio's HDD pool |
