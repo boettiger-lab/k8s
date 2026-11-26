@@ -1,0 +1,79 @@
+name: dspark Image (arm64)
+
+# Builds services/vllm/dspark-image: anemll's dspark-vllm-gx10 0.1.1 with its vulnerable
+# Python deps upgraded (#242), and pushes it to ghcr. arm64 only, on a native arm runner:
+# it runs only on the GB10s.
+#
+# Disk: the base is ~10 GB compressed. ubuntu-24.04-arm measured 109 GB free on
+# 2026-09-09 (see vllm-flashnext-image.yml), so no free-disk-space step.
+#
+# Pull requests build the image (running the Dockerfile's pip check gate) without
+# pushing; only main publishes. Bump REVISION on every rebuild, then pin the new digest
+# in services/vllm/deepseek-v4-flash-gb10pair.yaml (head and worker).
+on:
+  workflow_dispatch: null
+  push:
+    branches: [main]
+    paths:
+      - 'services/vllm/dspark-image/**'
+      - '.github/workflows/dspark-image.yml'
+  pull_request:
+    paths:
+      - 'services/vllm/dspark-image/**'
+      - '.github/workflows/dspark-image.yml'
+
+env:
+  IMAGE: ghcr.io/boettiger-lab/dspark-vllm-gx10
+  UPSTREAM: 0.1.1
+  REVISION: '1'
+
+concurrency:
+  group: dspark-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'boettiger-lab/k8s'
+    runs-on: ubuntu-24.04-arm   # native arm64, no QEMU
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Disk before build
+        run: df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push from main)
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services/vllm/dspark-image
+          platforms: linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ env.IMAGE }}:${{ env.UPSTREAM }}-patch.${{ env.REVISION }}
+          provenance: false
+          sbom: false
+
+      - name: Disk after build
+        if: always()
+        run: df -h /
+
+      - name: Digest to pin
+        if: env.PUBLISH == 'true'
+        run: |
+          echo "digest: ${{ steps.build.outputs.digest }}"
+          echo "Pin in \`services/vllm/deepseek-v4-flash-gb10pair.yaml\`: \`${IMAGE}:${UPSTREAM}-patch.${REVISION}@${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
