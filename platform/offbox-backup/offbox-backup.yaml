@@ -4,8 +4,8 @@
 #   1. init container `juicefs-meta`: `pg_dump` of the JuiceFS metadata DB (the
 #      homes' directory tree). It runs BEFORE the chunk copy, so every chunk a dump
 #      references gets copied; chunks deleted in between are kept in history/.
-#   2. `sync`: `rclone sync` of (a) the S3 store on cirrus (MinIO now; RustFS after
-#      the migration: change the SRC endpoint, keep the key), every bucket EXCEPT
+#   2. `sync`: `rclone sync` of (a) the S3 store on cirrus (rustfs-s3; MinIO until
+#      2026-11-18, same `offbox-read` key via the IAM import), every bucket EXCEPT
 #      the `public-*` buckets NRP's STAC catalog mirrors, and (b) the JuiceFS homes'
 #      chunk bucket `juicefs-homes` on the pilot RustFS.
 # They share one pod because zfs-localpv refuses a second mount of the volume
@@ -15,14 +15,15 @@
 #   - Overwritten or deleted objects move to /backup/history/<run>/<bucket>/ and are
 #     kept HISTORY_DAYS, so a bad sync is recoverable.
 #   - Aborts before copying if the source lists far fewer buckets than the last
-#     good run (MinIO's hostPaths are `DirectoryOrCreate`; on a failed mount it
-#     serves an EMPTY store, which a plain sync would mirror).
+#     good run (an object store whose volume failed to mount can serve an EMPTY
+#     store, as MinIO's `DirectoryOrCreate` hostPaths did; a plain sync would
+#     mirror it).
 #   - Per-bucket --max-delete.
 #   - Source credentials are read-only (mint-minio-key.sh; mint-juicefs-access.sh for
 #     the homes: a RustFS key on `juicefs-homes` and a `pg_read_all_data` role).
 #
 # Layout on the volume:
-#   buckets/<bucket>/          MinIO buckets
+#   buckets/<bucket>/          rustfs-s3 buckets
 #   juicefs/chunks/            the `juicefs-homes` bucket (its `<volume>/chunks/...`)
 #   juicefs/meta/*.dump        pg_dump -Fc, 30 days
 #   history/<run>/...          overwritten/deleted objects, 90 days
@@ -231,8 +232,9 @@ spec:
                 # history/ for HISTORY_DAYS.
                 - {name: HOMES_MAX_DELETE, value: "200000"}
                 - {name: RCLONE_CONFIG_SRC_TYPE, value: s3}
-                - {name: RCLONE_CONFIG_SRC_PROVIDER, value: Minio}
-                - {name: RCLONE_CONFIG_SRC_ENDPOINT, value: "http://minio-svc.minio.svc:9000"}
+                - {name: RCLONE_CONFIG_SRC_PROVIDER, value: Other}
+                - {name: RCLONE_CONFIG_SRC_FORCE_PATH_STYLE, value: "true"}
+                - {name: RCLONE_CONFIG_SRC_ENDPOINT, value: "http://rustfs-s3.rustfs.svc:9000"}
                 - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
                   valueFrom: {secretKeyRef: {name: offbox-source, key: access-key-id}}
                 - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY

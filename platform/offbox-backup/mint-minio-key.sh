@@ -6,6 +6,9 @@
 # The key can list every bucket and read every object, and nothing else. At the
 # RustFS cutover it is carried over by the IAM import, so the Secret stays valid.
 #
+# RETIRED WITH MINIO: this execs into the MinIO pod, which no longer exists. The
+# key is on rustfs-s3 now; a rotation needs a RustFS (rc) version of this script.
+#
 # Usage: bash platform/offbox-backup/mint-minio-key.sh   (safe to re-run: rotates the secret)
 # The MinIO image has no grep/sed; keep the in-pod part to mc and sh builtins.
 set -euo pipefail

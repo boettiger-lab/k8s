@@ -37,7 +37,6 @@ themselves.
 | Directory | Provides | URL |
 |-----------|----------|-----|
 | [`jupyterhub/`](services/jupyterhub/) | Multi-user notebooks (CPU + GPU profiles), BinderHub | [jupyterhub.cirrus](https://jupyterhub.cirrus.carlboettiger.info) |
-| [`minio/`](services/minio/) | S3-compatible object storage for research data (now served by RustFS, see `platform/rustfs/`) | [s3](https://s3.carlboettiger.info), [data](https://data.carlboettiger.info) |
 | [`vllm/`](services/vllm/) | OpenAI-compatible LLM inference (one model per GPU node) plus speech-to-text on cirrus | [vllm-nimbus](https://vllm-nimbus.carlboettiger.info), [vllm-nimbus2](https://vllm-nimbus2.carlboettiger.info), [vllm-nimbus3](https://vllm-nimbus3.carlboettiger.info), [whisper-cirrus](https://whisper-cirrus.carlboettiger.info) |
 | [`laya/`](services/laya/) | Laya decision-model server for ESPM 157, on cirrus's shared GPUs | [laya](https://laya.carlboettiger.info) |
 | [`kev/`](services/kev/) | Kev decision-model server, an open-weight alternative to laya on the same protocol | [kev](https://kev.carlboettiger.info) |
@@ -62,7 +61,7 @@ They run from manifests that live elsewhere; folding them in is outstanding work
 | [`external-dns/`](platform/external-dns/) | DNS records created from Ingress objects (Cloudflare) |
 | [`openebs/`](platform/openebs/) | ZFS-LocalPV — node-local volumes with real per-PVC quotas |
 | [`juicefs/`](platform/juicefs/) | S3-backed ReadWriteMany home directories, so a session can start on any node |
-| [`rustfs/`](platform/rustfs/) | RustFS object store — the JuiceFS data backend |
+| [`rustfs/`](platform/rustfs/) | RustFS object stores: `rustfs-s3`, the lab's S3 store ([s3](https://s3.carlboettiger.info), [data](https://data.carlboettiger.info)), and the JuiceFS data backend |
 | [`nvidia/`](platform/nvidia/) | GPU device plugin; per-node sharing (time-slicing vs exclusive) |
 | [`monitoring/`](platform/monitoring/) | Prometheus, Grafana, DCGM/SMART/node exporters, carbon API |
 | [`users/`](platform/users/) | Namespace-scoped user access (ServiceAccount + RBAC + kubeconfig) |
@@ -124,7 +123,7 @@ Secrets are **never committed**. `.gitignore` excludes kubeconfigs, `*.key`,
 script creates the Kubernetes `Secret` objects (e.g.
 `services/jupyterhub/setup-secrets.sh`, `platform/rustfs/setup-rustfs.sh`); otherwise
 the manifest's header names the Secret and its keys, to be created by hand with
-`kubectl create secret generic` (e.g. `services/minio/minio.yaml`).
+`kubectl create secret generic`.
 
 ## Documentation site
 
