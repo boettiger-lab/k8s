@@ -1,0 +1,87 @@
+# Fetch MiMo-V2.6-Flash-MOPD (official mxfp4/FP8 release, 165.6 GiB) into the HF cache on
+# BOTH nodes of the nimbus+nimbus3 TP2 pair; each rank needs its own full copy. Includes the
+# dflash/ drafter subfolder. Re-running resumes.
+#
+#   kubectl apply -f fetch-mimo-v26-nimbuspair.yaml
+#   kubectl -n vllm logs -f job/fetch-mimo-nimbus
+#
+# The download fills page cache: don't run it next to a tight-memory model, and drop caches
+# (drop-caches-nimbus.yaml) before the model load.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-mimo-nimbus
+  namespace: vllm
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: nimbus
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      containers:
+      - name: fetch
+        image: python:3.12-bookworm
+        env:
+        - {name: HF_HOME, value: /hf}
+        - name: HF_TOKEN
+          valueFrom: {secretKeyRef: {name: huggingface-token, key: token}}
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          pip install -q 'huggingface_hub[cli]==0.36.0'
+          hf download XiaomiMiMo/MiMo-V2.6-Flash-MOPD
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD; S="$R/snapshots/$(cat $R/refs/main)"
+          echo "shards: $(find -L "$S" -name '*.safetensors' | wc -l)"
+          echo "broken links:"; find "$S" -type l ! -exec test -e {} \; -print
+          du -shL "$S"
+        resources:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {memory: 8Gi}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-mimo-nimbus3
+  namespace: vllm
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      containers:
+      - name: fetch
+        image: python:3.12-bookworm
+        env:
+        - {name: HF_HOME, value: /hf}
+        - name: HF_TOKEN
+          valueFrom: {secretKeyRef: {name: huggingface-token, key: token}}
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          pip install -q 'huggingface_hub[cli]==0.36.0'
+          hf download XiaomiMiMo/MiMo-V2.6-Flash-MOPD
+          R=/hf/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-MOPD; S="$R/snapshots/$(cat $R/refs/main)"
+          echo "shards: $(find -L "$S" -name '*.safetensors' | wc -l)"
+          echo "broken links:"; find "$S" -type l ! -exec test -e {} \; -print
+          du -shL "$S"
+        resources:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {memory: 8Gi}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
