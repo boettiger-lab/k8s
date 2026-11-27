@@ -1,0 +1,147 @@
+# Inkling-2-Mini (Thinking Machines, 2026-11-20; 26.4B total / 3.4B active, looped MoE:
+# layers 6-17 run 3x per token; text+image in; NVFP4 experts + MXFP8 tail, ~19 GiB) on ONE
+# GB10 (nimbus3) with its bundled DSpark drafter (mtp.safetensors), k=7.
+#
+# Endpoint: https://vllm-nimbus3.carlboettiger.info   (model id `inkling-2-mini`)
+# (First trialled on nimbus, 2026-11-22; the numbers below up to the glen judge-free line
+# are from that box, same config.)
+#
+# TRIAL (2026-11-22). Needs vLLM >= 0.35 (unreleased): vLLM's dedicated `inkling-2-mini`
+# image, pinned to the digest both public single-Spark recipes measured
+# (vLLM 0.1.dev25855+g7cb5dae22, cu130). Reported (tedngai/inkling-2-mini-dgx-spark, fp8
+# KV): ~94 tok/s at 512 tokens, 66 at 128K, 48 at 400K; DSpark accepts ~5 tokens/step on
+# code, 1.1-1.4 on prose. Model card warns of long reasoning loops (esp. code debugging).
+#
+# MEASURED here (2026-11-22, this config): decode screen code 54.4, math 65.7, json 47.7,
+# prose 34.6, agent 41.8 (mean 48.8 tok/s, 2.84 accepted/step); after a 132K prompt 28.1
+# tok/s (acceptance ~2.0 on that prose filler), TTFT 70.5 s. KV pool 496K tokens in 16 GiB.
+# Min free on nimbus 15.4 GiB, no reclaim/swap; ready 7 min incl. the 11 GB image pull.
+# glen ca-30x30 numeric q1-q6 (1 trial, NRP MCP): 6/6, 534 s total, 398 s LLM for 18.2K
+# output tokens (21.9 ms/token; MiMo DFlash k=7 24.5 ms but wrote half the tokens).
+# glen numeric (46 cells, 2 trials, apps' public NRP MCP): 43/46 -- car-30 asked a clarifying
+# question both trials (incomplete), one bio-hexmap trial hit the 32K output cap while
+# reasoning (fail). 104 s mean / 94 s median per cell, 53.6 tok/s median, 184.5K output tokens.
+# Nightly A/B (vllm nightly-647a76866, has #69021 + #69168): decode screen 48.6 / 28.1 --
+# no change on GB10. Launch image kept; cluster-ops#105 tracks the SM12x perf work.
+#
+# Kept from that recipe: fp8 KV, --max-num-batched-tokens 2048 (DSpark's floor; 8192 caused
+# heavy hybrid-cache padding), probabilistic draft sampling. Changed: absolute KV cap
+# instead of --gpu-memory-utilization 0.9, 262K context (their 400K), single stream.
+#
+# glen judge-free suite (54 questions, 3 trials, on bench, 2026-11-24/27, this config):
+#   default effort (template default 0.9): accuracy 0.962, completion 0.809, 131 s median per
+#     question, 8 tool calls, 55 tok/s. Most unfinished cells hit the 32K output cap mid-reasoning.
+#   effort medium: accuracy 0.948, completion 0.944, 71 s, 7 tool calls, 46 tok/s. Run as a
+#     server default by adding to the args:
+#       --default-chat-template-kwargs '{"reasoning_effort": "medium"}'
+#
+# Other nimbus3 models must be at 0 (only one may carry `vllm-endpoint: nimbus3`); the
+# MiMo/GLM TP2 pairs use nimbus3 as rank 1.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inkling2-mini
+  namespace: vllm
+  labels:
+    k8s-app: vllm-nimbus-inkling2-mini
+spec:
+  replicas: 0   # trial; start after MiMo/GLM are at 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      k8s-app: vllm-nimbus-inkling2-mini
+  template:
+    metadata:
+      labels:
+        k8s-app: vllm-nimbus-inkling2-mini
+        vllm-endpoint: nimbus3
+    spec:
+      priorityClassName: llm-serving   # evicts GB10 notebooks (priorityclass.yaml)
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gb10
+        effect: NoSchedule
+      runtimeClassName: nvidia
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:inkling-2-mini@sha256:c2dc759f5984f69c1e2418c6af7c26eb756f5ed2a8934c768ae1253645d1449e
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-api-key
+              key: api-key
+        - name: HF_HOME
+          value: /hf
+        - name: MAX_JOBS
+          value: "4"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # Array, not backslash continuations: a `#` comment inside a `\`-continued
+          # command silently truncates the rest of it.
+          ARGS=(
+            --served-model-name inkling-2-mini
+            --host 0.0.0.0 --port 8000
+            --max-model-len 262144
+            --max-num-seqs 1
+            # DSpark's verify window sets the floor; 2048 also minimizes hybrid-cache padding.
+            --max-num-batched-tokens 2048
+            # Absolute KV cap (bypasses the profiler). fp8 is ~35K tokens/GiB here, so 16 GiB
+            # holds ~560K tokens, 2x one 262K request. With the cap, the utilization flag
+            # is only vLLM's startup free-memory check.
+            --kv-cache-memory-bytes 16G
+            --gpu-memory-utilization 0.60
+            --kv-cache-dtype fp8
+            --enable-prefix-caching
+            --speculative-config '{"method":"dspark","num_speculative_tokens":7,"draft_sample_method":"probabilistic"}'
+            --enable-auto-tool-choice
+            --tool-call-parser inkling
+            --reasoning-parser inkling
+            --override-generation-config '{"max_new_tokens": 32768}'
+            --enable-log-requests --max-log-len 2000
+          )
+          exec vllm serve /hf/hub/models--thinkingmachines--Inkling-2-Mini/snapshots/b85c3cfa615fc413cc9af3379f491b963f3b586a "${ARGS[@]}"
+        resources:
+          requests:
+            cpu: 4
+            # Scheduler accounting only.
+            # Whole node: 112256Mi allocatable - 736Mi DaemonSets leaves ~0.9Gi, too
+            # small for any notebook or job. Whatever fits beside a model takes memory
+            # the model needs, because cgroups never see its CUDA allocations.
+            memory: 108Gi
+            nvidia.com/gpu: 8
+          limits:
+            cpu: 12
+            memory: 108Gi
+            nvidia.com/gpu: 8
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 15
+          failureThreshold: 160
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      - name: hf-cache
+        hostPath:
+          path: /home/cboettig/.cache/huggingface
+          type: Directory

@@ -1,0 +1,40 @@
+# Fetch thinkingmachines/Inkling-2-Mini (~19 GiB: one model shard + mtp.safetensors, the
+# DSpark drafter) into nimbus3's HF cache. Re-running resumes.
+#
+#   kubectl apply -f fetch-inkling2-mini-nimbus3.yaml
+#   kubectl -n vllm logs -f job/fetch-inkling2-mini-nimbus3
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-inkling2-mini-nimbus3
+  namespace: vllm
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: nimbus3
+      tolerations:
+      - {key: dedicated, operator: Equal, value: gb10, effect: NoSchedule}
+      containers:
+      - name: fetch
+        image: python:3.12-bookworm
+        env:
+        - {name: HF_HOME, value: /hf}
+        - name: HF_TOKEN
+          valueFrom: {secretKeyRef: {name: huggingface-token, key: token}}
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          pip install -q 'huggingface_hub[cli]==0.36.0'
+          hf download thinkingmachines/Inkling-2-Mini --revision b85c3cfa615fc413cc9af3379f491b963f3b586a
+          du -shL /hf/hub/models--thinkingmachines--Inkling-2-Mini/snapshots/*
+        resources:
+          requests: {cpu: "1", memory: 2Gi}
+          limits: {memory: 8Gi}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+      volumes:
+      - {name: hf, hostPath: {path: /home/cboettig/.cache/huggingface, type: Directory}}
