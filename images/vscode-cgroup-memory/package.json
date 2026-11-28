@@ -1,0 +1,17 @@
+{
+  "name": "cgroup-memory",
+  "displayName": "Pod memory",
+  "description": "Status bar memory use and limit for this container, read from its cgroup (what the OOM killer acts on).",
+  "version": "1.0.0",
+  "publisher": "boettiger-lab",
+  "license": "Apache-2.0",
+  "repository": {"type": "git", "url": "https://github.com/boettiger-lab/k8s"},
+  "engines": {"vscode": "^1.80.0"},
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {"command": "cgroupMemory.showTop", "title": "Pod memory: show top processes"}
+    ]
+  }
+}

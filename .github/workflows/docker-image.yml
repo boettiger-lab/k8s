@@ -22,6 +22,8 @@ on:
       - 'images/install-themes.sh'
       - 'images/install-cgroup-memory.sh'
       - 'images/cgroup_memory_usage.py'
+      - 'images/install-vscode-cgroup-memory.sh'
+      - 'images/vscode-cgroup-memory/**'
       - 'images/install-armada.sh'
       - 'images/armada-dex-token'
       - 'images/armada-config-merge'
