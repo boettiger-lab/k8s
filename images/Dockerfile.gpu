@@ -22,6 +22,12 @@ RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 COPY install-cgroup-memory.sh cgroup_memory_usage.py /tmp/cgmem/
 RUN bash /tmp/cgmem/install-cgroup-memory.sh /tmp/cgmem/cgroup_memory_usage.py && rm -rf /tmp/cgmem
 
+# VS Code status bar indicator of the same cgroup memory figure.
+COPY install-vscode-cgroup-memory.sh /tmp/install-vscode-cgroup-memory.sh
+COPY vscode-cgroup-memory /tmp/vscode-cgroup-memory
+RUN bash /tmp/install-vscode-cgroup-memory.sh /tmp/vscode-cgroup-memory && \
+    rm -rf /tmp/install-vscode-cgroup-memory.sh /tmp/vscode-cgroup-memory
+
 COPY install-themes.sh /tmp/install-themes.sh
 RUN bash /tmp/install-themes.sh && rm /tmp/install-themes.sh
 
