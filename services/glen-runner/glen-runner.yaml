@@ -1,0 +1,30 @@
+# glen-runner: where the DSE agent runs GLEN benchmark flights against the GB10s' vLLM servers
+# and collects them (glen-benchmark scripts/dse/, run-benchmark skill "On the lab cluster").
+# Node and DuckDB work runs here, never on the cirrus host. See README.md for the /work layout.
+#
+# A bare Pod on purpose: flights run for hours under `kubectl exec`, and a controller that
+# replaced the pod would end them. Never delete it while a flight runs (pgrep -f run.js).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: glen-runner
+  namespace: default
+  labels:
+    app: glen-runner
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: thelio
+  restartPolicy: Always
+  containers:
+    - name: glen
+      image: node:22-bookworm       # the runner wants Node >= 22; Python 3.11 and git come with it
+      command: ["sleep", "infinity"]
+      workingDir: /work
+      resources:
+        requests: {cpu: "2", memory: 4Gi}
+        limits: {memory: 16Gi}
+      volumeMounts:
+        - {name: work, mountPath: /work}
+  volumes:
+    - name: work
+      hostPath: {path: /var/lib/glen-work, type: Directory}
