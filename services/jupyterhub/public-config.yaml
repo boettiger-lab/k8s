@@ -243,12 +243,12 @@ singleuser:
               display_name: Default CPU environment
               description: General purpose python/R environment 
               kubespawner_override:
-                image:  "ghcr.io/boettiger-lab/k8s:20261124-r295@sha256:d2e046a81a3798bb646438fb509d1bd031b3ba8509ea8f869274c121314e7ba1"
+                image:  "ghcr.io/boettiger-lab/k8s:20261128-r297@sha256:f47cc13d8066738dee917161d121689374848414a91064d5fb944287b585f7e6"
             02-gpu:
               display_name: RL GPU
               description: CUDA GPU environment, with RL
               kubespawner_override:
-                image: "ghcr.io/boettiger-lab/k8s-gpu:20261124-r190@sha256:e23bc90a82edb807f1fc808992049b0c5473c416deda0a0242b6ea3124060583"
+                image: "ghcr.io/boettiger-lab/k8s-gpu:20261128-r192@sha256:9b568a125b13131df86234810ca26d0615c825c55ac8a7dd941314c2ad0a27e5"
                 # Request a real, memory-capped GPU slice (MPS on cirrus).
                 # Without this the pod sees all GPUs unmanaged via the nvidia
                 # runtime, with no VRAM accounting/limit.
