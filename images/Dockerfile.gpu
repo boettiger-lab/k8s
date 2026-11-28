@@ -18,6 +18,10 @@ ENV PATH="${PATH}:${HOME}/.local/bin"
 COPY install-jupyter-ai.sh /tmp/install-jupyter-ai.sh
 RUN bash /tmp/install-jupyter-ai.sh && rm /tmp/install-jupyter-ai.sh
 
+# Memory indicator reads the pod's cgroup, not just the server's process tree.
+COPY install-cgroup-memory.sh cgroup_memory_usage.py /tmp/cgmem/
+RUN bash /tmp/cgmem/install-cgroup-memory.sh /tmp/cgmem/cgroup_memory_usage.py && rm -rf /tmp/cgmem
+
 COPY install-themes.sh /tmp/install-themes.sh
 RUN bash /tmp/install-themes.sh && rm /tmp/install-themes.sh
 
