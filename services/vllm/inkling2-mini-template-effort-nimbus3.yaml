@@ -1,5 +1,6 @@
-# MEDIUM-EFFORT VARIANT of inkling2-mini-nimbus3.yaml (same Deployment name: apply one or the
-# other); the only change is the default reasoning_effort arg below.
+# TEMPLATE-EFFORT VARIANT of inkling2-mini-nimbus3.yaml (same Deployment name: apply one or the
+# other). It sets no default reasoning_effort, so the chat template's 0.9 applies. It was the
+# base config before medium became the default; the published default-effort runs used it.
 #
 # Inkling-2-Mini (Thinking Machines, 2026-11-20; 26.4B total / 3.4B active, looped MoE:
 # layers 6-17 run 3x per token; text+image in; NVFP4 experts + MXFP8 tail, ~19 GiB) on ONE
@@ -110,8 +111,6 @@ spec:
             --enable-auto-tool-choice
             --tool-call-parser inkling
             --reasoning-parser inkling
-            # Thinking effort 0.7 (template default 0.9): fewer runaway reasoning loops.
-            --default-chat-template-kwargs '{"reasoning_effort": "medium"}'
             --override-generation-config '{"max_new_tokens": 32768}'
             --enable-log-requests --max-log-len 2000
           )

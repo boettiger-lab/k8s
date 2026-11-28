@@ -31,9 +31,11 @@
 # glen judge-free suite (54 questions, 3 trials, on bench, 2026-11-24/27, this config):
 #   default effort (template default 0.9): accuracy 0.962, completion 0.809, 131 s median per
 #     question, 8 tool calls, 55 tok/s. Most unfinished cells hit the 32K output cap mid-reasoning.
-#   effort medium: accuracy 0.948, completion 0.944, 71 s, 7 tool calls, 46 tok/s. Run as a
-#     server default by adding to the args:
-#       --default-chat-template-kwargs '{"reasoning_effort": "medium"}'
+#   effort medium: accuracy 0.948, completion 0.944, 71 s, 7 tool calls, 46 tok/s.
+# Medium is the server default here (args below): 5% unfinished instead of 21%, the same accuracy
+# on answered questions, half the time. The template-default config is
+# inkling2-mini-template-effort-nimbus3.yaml. glen flights against this config send
+# REASONING_EFFORT=medium, so the run is recorded under its effort.
 #
 # Other nimbus3 models must be at 0 (only one may carry `vllm-endpoint: nimbus3`); the
 # MiMo/GLM TP2 pairs use nimbus3 as rank 1.
@@ -107,6 +109,8 @@ spec:
             --enable-auto-tool-choice
             --tool-call-parser inkling
             --reasoning-parser inkling
+            # Thinking effort 0.7 (template default 0.9): fewer runaway reasoning loops.
+            --default-chat-template-kwargs '{"reasoning_effort": "medium"}'
             --override-generation-config '{"max_new_tokens": 32768}'
             --enable-log-requests --max-log-len 2000
           )
